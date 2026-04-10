@@ -31,7 +31,7 @@ jobs:
       - name: Build
         run: dotnet build src/ContainerExtension/ContainerExtension.csproj -c Release -o publish
       - name: Compress
-        uses: thedoctor0/zip-release@0.7.1
+        uses: thedoctor0/zip-release@0.7.6
         with:
           type: "zip"
           filename: ../ContainerExtension_${{steps.get-version.outputs.version}}_all.zip
