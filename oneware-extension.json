@@ -1,0 +1,37 @@
+{
+  "category": "Tools",
+  "type": "Plugin",
+  "name": "OneWare Container Extension",
+  "id": "ContainerExtension",
+  "version": "1.0.0",
+  "description": "Transparent containerized execution of FPGA toolchains (GHDL, Yosys, nextpnr) with auto-runtime detection, live Docker dashboard, and execution telemetry",
+  "license": "MIT",
+  "iconUrl": "https://raw.githubusercontent.com/FEntwumS/FEntwumS.ContainerExtension/main/Icon.svg",
+  "tabs": [
+    {
+      "title": "Readme",
+      "contentUrl": "https://raw.githubusercontent.com/FEntwumS/FEntwumS.ContainerExtension/main/Extension.md"
+    },
+    {
+      "title": "License",
+      "contentUrl": "https://raw.githubusercontent.com/FEntwumS/FEntwumS.ContainerExtension/main/License.md"
+    }
+  ],
+  "links": [
+    {
+      "name": "Github",
+      "url": "https://github.com/FEntwumS/FEntwumS.ContainerExtension"
+    }
+  ],
+  "sourceUrl": "https://github.com/FEntwumS/FEntwumS.ContainerExtension/releases/download",
+  "versions": [
+    {
+      "version": "1.0.0",
+      "targets": [
+        {
+          "target": "all"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <Version>1.0.0</Version>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <EnableDynamicLoading>true</EnableDynamicLoading>
+        <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+        <SelfContained>false</SelfContained>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <NoWarn>$(NoWarn);CS1591</NoWarn>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="ContainerExtension.UnitTests" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <AvaloniaResource Include="Assets\**\*.*"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="OneWare.Essentials" Private="false" ExcludeAssets="runtime;Native" />
+        <PackageReference Include="Docker.DotNet" Private="true" />
+    </ItemGroup>
+
+    <Target Name="GenerateCompatibilityFile" AfterTargets="Build">
+        <ItemGroup>
+            <FilteredDependencies Include="@(PackageReference)" Condition="'%(Private)' == 'false'"/>
+        </ItemGroup>
+
+        <WriteLinesToFile
+                File="$(OutDir)compatibility.txt"
+                Lines="@(FilteredDependencies->'%(Identity) : %(Version)')"
+                Overwrite="true"/>
+    </Target>
+
+    <Target Name="CopyCompatibilityFile" AfterTargets="Publish">
+        <Copy SourceFiles="$(OutDir)compatibility.txt" DestinationFolder="$(PublishDir)" />
+    </Target>
+
+</Project>

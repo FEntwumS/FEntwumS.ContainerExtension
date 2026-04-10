@@ -1,0 +1,8 @@
+- name: Getting Started
+  href: getting-started.md
+- name: Configuration Guide
+  href: configuration.md
+- name: Telemetry & Troubleshooting
+  href: telemetry.md
+- name: Architecture Overview
+  href: architecture.md
