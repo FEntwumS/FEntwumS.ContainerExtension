@@ -1,0 +1,102 @@
+# =============================================================================
+# FEntwumS.ContainerExtension — .gitignore
+# =============================================================================
+
+# ── OS Artifacts ──────────────────────────────────────────────────────────────
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ── IDEs & Editors ───────────────────────────────────────────────────────────
+
+.idea/
+.vscode/
+.vs/
+*.user
+*.suo
+*.swp
+*.swo
+*.bak
+*.DotSettings.user
+riderModule.iml
+/_ReSharper.Caches/
+
+# AI Assistant Metadata
+.gemini/
+
+# ── .NET Build & Tooling ─────────────────────────────────────────────────────
+
+bin/
+obj/
+publish/
+/packages/
+native_tools/
+*.nupkg
+
+# NuGet restore lock files
+project.assets.json
+*.nuget.props
+*.nuget.targets
+*.nuget.g.props
+*.nuget.g.targets
+
+# .NET Local Tooling (sandbox-safe isolation directories)
+.dotnet_cli_home/
+.dotnet_home/
+.nuget_packages/
+.nuget_scratch/
+.tmp/
+
+# .NET runtime/SDK caches that may appear inside the repo tree
+Library/
+
+# ── DocFX (Generated Documentation) ─────────────────────────────────────────
+
+_site/
+api/*.yml
+api/.manifest
+
+# ── Python (Benchmarking Suite) ──────────────────────────────────────────────
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# ── Benchmarking ─────────────────────────────────────────────────────────────
+
+# Compiled C# benchmark harness binary
+harness_bin/
+
+# Temporary simulation data from evaluation runs
+*_verification*.txt
+final_*.txt
+
+# ── Docker / Container ───────────────────────────────────────────────────────
+
+# Local Docker override files (may contain custom socket paths or env vars)
+.env
+
+# ── Scratch / Generated ──────────────────────────────────────────────────────
+
+full_source_bundle.md
+generate_bundle.py

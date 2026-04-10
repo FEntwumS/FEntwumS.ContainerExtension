@@ -1,0 +1,58 @@
+# =============================================================================
+# Git Attributes — FEntwumS.ContainerExtension
+# Enforces consistent line endings and diff/merge strategies across platforms.
+# =============================================================================
+
+# ── Default ──────────────────────────────────────────────────────────────────
+* text=auto eol=lf
+
+# ── Source Code ──────────────────────────────────────────────────────────────
+*.cs        text diff=csharp
+*.py        text diff=python
+*.xml       text
+*.json      text
+*.jsonl     text
+*.yml       text
+*.yaml      text
+*.md        text diff=markdown
+*.txt       text
+*.css       text
+*.html      text diff=html
+
+# ── .NET Project Files ───────────────────────────────────────────────────────
+*.csproj    text
+*.slnx      text
+*.props     text
+*.targets   text
+*.sln       text
+
+# ── Shell / Config ───────────────────────────────────────────────────────────
+*.sh        text eol=lf
+Dockerfile  text
+.editorconfig text
+.gitignore  text
+.gitmodules text
+.env        text
+
+# ── Binary / Media (never touch line endings) ────────────────────────────────
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.svg       binary
+*.dll       binary
+*.exe       binary
+*.pdb       binary
+*.nupkg     binary
+*.zip       binary
+*.gz        binary
+*.tar       binary
+
+# ── GitHub Linguist Overrides ────────────────────────────────────────────────
+# Exclude submodules and generated docs from language statistics
+benchmarking_suite/neorv32/**  linguist-vendored
+benchmarking_suite/picorv32/** linguist-vendored
+docker/oss-cad-suite-build/**  linguist-vendored
+**/api/**                      linguist-generated
+**/_site/**                    linguist-generated

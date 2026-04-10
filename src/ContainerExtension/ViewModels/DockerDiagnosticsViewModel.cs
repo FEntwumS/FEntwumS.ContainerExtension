@@ -1,0 +1,56 @@
+using System;
+using Avalonia;
+using Avalonia.Media;
+using OneWare.Essentials.ViewModels;
+
+namespace ContainerExtension.ViewModels;
+
+/// <summary>
+/// ViewModel for the Docker Diagnostics Dashboard, extending <see cref="ExtendedTool"/>
+/// to integrate with OneWare Studio's dockable panel infrastructure.
+/// <para>
+/// This ViewModel acts as the docking adapter. The actual dashboard UI is built by
+/// <see cref="Views.DockerDiagnosticsView"/> (a <c>UserControl</c>), which is set as
+/// this tool's content via the DataTemplate registered in
+/// <see cref="ContainerExtensionModule.Initialize"/>.
+/// </para>
+/// </summary>
+public class DockerDiagnosticsViewModel : ExtendedTool
+{
+    /// <summary>The DI service provider for resolving OneWare services.</summary>
+    public IServiceProvider ServiceProvider { get; }
+
+    /// <summary>The Docker execution strategy instance for live API queries.</summary>
+    public DockerExecutionStrategy Strategy { get; }
+
+    /// <summary>
+    /// Constructs the dockable Docker Dashboard ViewModel.
+    /// </summary>
+    /// <param name="serviceProvider">The OneWare Studio DI service provider.</param>
+    /// <param name="strategy">The Docker execution strategy for API access.</param>
+    public DockerDiagnosticsViewModel(IServiceProvider serviceProvider, DockerExecutionStrategy strategy)
+        : base(CreateDockerIcon())
+    {
+        Id = "Container_Dashboard";
+        ServiceProvider = serviceProvider;
+        Strategy = strategy;
+        Title = ContainerExtensionModule.DashboardTitle;
+        CanFloat = true;
+        CanPin = true;
+    }
+
+    /// <summary>
+    /// Creates the Docker whale icon as an <see cref="IImage"/> for the dockable tab.
+    /// Uses the same SVG path data as <see cref="Views.DockerButtonView"/>.
+    /// </summary>
+    private static DrawingImage CreateDockerIcon()
+    {
+        var geometry = Geometry.Parse(ContainerExtensionModule.WhaleIconPath);
+        var drawing = new GeometryDrawing
+        {
+            Geometry = geometry,
+            Brush = new SolidColorBrush(Color.Parse(ContainerExtensionModule.DockerBlueHex))
+        };
+        return new DrawingImage(drawing);
+    }
+}

@@ -1,0 +1,43 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+  release:
+    types:
+      - published
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Get Version
+        uses: kzrnm/get-net-sdk-project-versions-action@v1.3.0
+        id: get-version
+        with:
+          proj-path: src/ContainerExtension/ContainerExtension.csproj
+      - name: Build
+        run: dotnet build src/ContainerExtension/ContainerExtension.csproj -c Release -o publish
+      - name: Compress
+        uses: thedoctor0/zip-release@0.7.1
+        with:
+          type: "zip"
+          filename: ../ContainerExtension_${{steps.get-version.outputs.version}}_all.zip
+          directory: ./publish
+      - uses: ncipollo/release-action@v1.14.0
+        with:
+          artifacts: "ContainerExtension_${{steps.get-version.outputs.version}}_all.zip,./publish/compatibility.txt"
+          tag: ${{steps.get-version.outputs.version}}
+          allowUpdates: true
