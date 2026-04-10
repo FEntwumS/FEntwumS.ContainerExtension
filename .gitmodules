@@ -1,0 +1,13 @@
+[submodule "benchmarking_suite/neorv32"]
+	path = benchmarking_suite/neorv32
+	url = https://github.com/stnolting/neorv32.git
+	shallow = true
+
+[submodule "benchmarking_suite/picorv32"]
+	path = benchmarking_suite/picorv32
+	url = https://github.com/YosysHQ/picorv32.git
+	shallow = true
+[submodule "docker/oss-cad-suite-build"]
+	path = docker/oss-cad-suite-build
+	url = https://github.com/YosysHQ/oss-cad-suite-build.git
+	shallow = true

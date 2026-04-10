@@ -1,0 +1,40 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "OneWare Container Extension"
+abstract: >-
+  A modular plugin for OneWare Studio that enables transparent,
+  containerized execution of FPGA toolchains via the Hybrid Strategy
+  Pattern. Supports Docker, Podman, Colima, and OrbStack.
+authors:
+  - family-names: Torun
+    given-names: Mert
+    affiliation: TH Köln – University of Applied Sciences
+date-released: "2026-04-10"
+version: "1.0.0"
+license: MIT
+repository-code: "https://github.com/FEntwumS/FEntwumS.ContainerExtension"
+keywords:
+  - oneware-studio
+  - docker
+  - fpga
+  - containerization
+  - hybrid-strategy-pattern
+  - ghdl
+  - yosys
+  - nextpnr
+  - eda
+  - thesis
+references:
+  - type: thesis
+    title: >-
+      Design and Implementation of a Modular Architecture for the
+      Transparent Integration of Containerized Execution Environments
+      for Heterogeneous Open-Source Binaries in OneWare Studio
+    authors:
+      - family-names: Torun
+        given-names: Mert
+    institution:
+      name: TH Köln – University of Applied Sciences
+    year: 2026
+    thesis-type: "Master's Thesis"

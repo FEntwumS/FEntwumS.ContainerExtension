@@ -1,0 +1,77 @@
+# =============================================================================
+# EditorConfig — FEntwumS.ContainerExtension
+# https://editorconfig.org
+# =============================================================================
+
+root = true
+
+# ── All files ────────────────────────────────────────────────────────────────
+
+[*]
+indent_style = space
+indent_size = 4
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# ── C# ───────────────────────────────────────────────────────────────────────
+
+[*.cs]
+indent_size = 4
+
+# Namespace declarations
+csharp_style_namespace_declarations = file_scoped:suggestion
+
+# Using directives
+csharp_using_directive_placement = outside_namespace:suggestion
+
+# Null checking
+dotnet_style_null_propagation = true:suggestion
+csharp_style_throw_expression = true:suggestion
+
+# Expression-bodied members
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_style_expression_bodied_properties = true:suggestion
+csharp_style_expression_bodied_accessors = true:suggestion
+
+# Pattern matching
+csharp_style_pattern_matching_over_is_with_cast_check = true:suggestion
+csharp_style_pattern_matching_over_as_with_null_check = true:suggestion
+
+# ── XML / XAML / .NET Project ────────────────────────────────────────────────
+
+[*.{xml,axaml,xaml,csproj,slnx,props,targets}]
+indent_size = 4
+
+# ── JSON / YAML / CFF ───────────────────────────────────────────────────────
+
+[*.{json,yml,yaml,cff}]
+indent_size = 2
+
+# ── Markdown ─────────────────────────────────────────────────────────────────
+
+[*.md]
+trim_trailing_whitespace = false
+
+# ── Python ───────────────────────────────────────────────────────────────────
+
+[*.py]
+indent_size = 4
+max_line_length = 120
+
+# ── Dockerfile ───────────────────────────────────────────────────────────────
+
+[Dockerfile*]
+indent_size = 4
+
+# ── Shell ────────────────────────────────────────────────────────────────────
+
+[*.sh]
+indent_size = 2
+end_of_line = lf
+
+# ── Git Config ───────────────────────────────────────────────────────────────
+
+[.git*]
+indent_style = tab

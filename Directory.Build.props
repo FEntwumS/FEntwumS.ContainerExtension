@@ -1,0 +1,24 @@
+<!--
+  Directory.Build.props — Shared MSBuild properties for all projects.
+  Centralizes common settings to avoid duplication across .csproj files.
+  https://learn.microsoft.com/en-us/visualstudio/msbuild/customize-by-directory
+-->
+<Project>
+    <PropertyGroup>
+        <!-- Language & Framework -->
+        <LangVersion>latest</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+
+        <!-- Build Quality -->
+        <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+        <AnalysisLevel>latest-recommended</AnalysisLevel>
+
+        <!-- Assembly Metadata -->
+        <Authors>Mert Torun</Authors>
+        <Company>TH Köln</Company>
+        <Copyright>© 2026 Mert Torun</Copyright>
+        <RepositoryUrl>https://github.com/FEntwumS/FEntwumS.ContainerExtension</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+    </PropertyGroup>
+</Project>
