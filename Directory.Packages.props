@@ -4,7 +4,7 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- Framework & Runtime -->
-    <PackageVersion Include="OneWare.Essentials" Version="1.0.0" />
+    <PackageVersion Include="OneWare.Essentials" Version="1.0.10" />
     <PackageVersion Include="Docker.DotNet" Version="3.125.15" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
     <!-- Testing -->
