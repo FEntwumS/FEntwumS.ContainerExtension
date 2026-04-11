@@ -13,6 +13,9 @@
         <!-- Build Quality -->
         <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
         <AnalysisLevel>latest-recommended</AnalysisLevel>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+        <!-- Upstream OneWare.AvaloniaEdit ships zh-hans locale with wrong casing -->
+        <NoWarn>NETSDK1187</NoWarn>
 
         <!-- Assembly Metadata -->
         <Authors>Mert Torun</Authors>
