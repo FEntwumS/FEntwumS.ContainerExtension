@@ -17,7 +17,7 @@
 
 FROM ubuntu:22.04
 
-LABEL maintainer="Mert Torun <mert.torun@smail.th-koeln.de>"
+LABEL maintainer="Mert Torun <mert.torun@smail.th-koeln.de>, <mtorun0x7cd@icloud.com>"
 LABEL org.opencontainers.image.title="OSS CAD Suite"
 LABEL org.opencontainers.image.description="All-in-one container with 40+ open-source FPGA/EDA tools from YosysHQ"
 LABEL org.opencontainers.image.source="https://github.com/YosysHQ/oss-cad-suite-build"
