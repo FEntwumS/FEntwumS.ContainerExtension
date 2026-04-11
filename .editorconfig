@@ -20,8 +20,14 @@ insert_final_newline = true
 [*.cs]
 indent_size = 4
 
+# Braces
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+
 # Namespace declarations
-csharp_style_namespace_declarations = file_scoped:suggestion
+csharp_style_namespace_declarations = file_scoped:warning
 
 # Using directives
 csharp_using_directive_placement = outside_namespace:suggestion
