@@ -69,6 +69,7 @@ public partial class DockerDiagnosticsView : UserControl
     private readonly StackPanel _containersContent;
     private readonly StackPanel _imagesContent;
     private readonly StackPanel _telemetryContent;
+    private readonly StackPanel _toolchainContent;
     private readonly TextBlock _headerTitle;
     private readonly string _pluginVersion;
     private readonly WrapPanel _quickActionsRow;
@@ -241,8 +242,13 @@ public partial class DockerDiagnosticsView : UserControl
         _telemetryContent = new StackPanel { Spacing = 2 };
         var telemetrySection = CreateCard("Execution History", _telemetryContent);
 
+        // ── Section 6: Toolchain Environment ────────────────────────────
+        _toolchainContent = new StackPanel { Spacing = 4 };
+        _toolchainContent.Children.Add(CreateLoadingText("Loading available versions..."));
+        var toolchainSection = CreateCard("Toolchain Environment", _toolchainContent);
+
         // ── Layout ──────────────────────────────────────────────────────
-        // Live data first → config → history
+        // Live data first → toolchain → config → history
         var mainPanel = new StackPanel
         {
             Margin = new Thickness(20),
@@ -253,6 +259,7 @@ public partial class DockerDiagnosticsView : UserControl
                 searchBox,
                 _quickActionsRow,
                 statusSection,
+                toolchainSection,
                 containersSection,
                 imagesSection,
                 configSection,
@@ -273,7 +280,9 @@ public partial class DockerDiagnosticsView : UserControl
             if (_hasAttached) return; // Prevent duplicate handlers on dock/undock cycles (F15)
             _hasAttached = true;
             try { await RefreshAllAsync(); }
-            catch { /* Best effort — dashboard is informational */ }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[DockerDiagnosticsView] RefreshAllAsync failed on attach: {ex.Message}"); }
+            try { await PopulateToolchainEnvironmentAsync(); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[DockerDiagnosticsView] PopulateToolchainEnvironmentAsync failed on attach: {ex.Message}"); }
             StartAutoRefreshTimer();
         };
 #pragma warning restore VSTHRD101
@@ -347,7 +356,8 @@ public partial class DockerDiagnosticsView : UserControl
                         Dispatcher.UIThread.Post(() => _countdownText.Text = "Refreshing...");
                         await Dispatcher.UIThread.InvokeAsync(async () =>
                         {
-                            try { await RefreshAllAsync(); } catch { }
+                            try { await RefreshAllAsync(); } 
+                            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[DockerDiagnosticsView] Auto-refresh failed: {ex.Message}"); }
                         });
                     }
 
@@ -490,11 +500,34 @@ public partial class DockerDiagnosticsView : UserControl
             var containersTask = _strategy.ListContainersAsync(ct);
             var imagesTask = _strategy.ListImagesAsync(ct);
 
-            await Task.WhenAll(infoTask, containersTask, imagesTask);
+            Docker.DotNet.Models.SystemInfoResponse? info = null;
+            IList<Docker.DotNet.Models.ContainerListResponse> containers = Array.Empty<Docker.DotNet.Models.ContainerListResponse>();
+            IList<Docker.DotNet.Models.ImagesListResponse> images = Array.Empty<Docker.DotNet.Models.ImagesListResponse>();
 
-            var info = await infoTask;
-            var containers = await containersTask;
-            var images = await imagesTask;
+            try
+            {
+                await Task.WhenAll(infoTask, containersTask, imagesTask);
+                info = await infoTask;
+                containers = await containersTask;
+                images = await imagesTask;
+            }
+            catch (Exception ex)
+            {
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (ct.IsCancellationRequested) return;
+                    _headerTitle.Text = $"{ContainerExtensionModule.DashboardTitle} ⚠️ API Error";
+                    ToolTip.SetTip(_headerTitle, ex.Message);
+                    _quickActionsRow.IsEnabled = true;
+                    _quickActionsRow.Opacity = 1.0;
+                    PopulateStatus(false, null);
+                    PopulateConfig(settings);
+                    PopulateTelemetry();
+                    UpdateHeaderBadge(0);
+                    UpdateLastRefreshedTimestamp();
+                });
+                return;
+            }
 
             // Compute disk usage from the already-fetched image list (avoids duplicate API call)
             var diskUsage = DockerExecutionStrategy.ComputeDiskUsage(images);
@@ -540,6 +573,129 @@ public partial class DockerDiagnosticsView : UserControl
     // ═══════════════════════════════════════════════════════════════════════
     //  Section Population
     // ═══════════════════════════════════════════════════════════════════════
+
+    /// <summary>Populates the Toolchain Environment section by checking the remote registry for default image updates.</summary>
+    private async Task PopulateToolchainEnvironmentAsync()
+    {
+        var settings = _strategy.GetActiveSettingsSummary();
+        var currentImage = settings.GetValueOrDefault("Image", ContainerExtensionModule.FallbackImage);
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            _toolchainContent.Children.Clear();
+            _toolchainContent.Children.Add(new TextBlock
+            {
+                Text = $"Checking versions for: {currentImage}...",
+                Foreground = MutedColor,
+                FontSize = 11,
+                FontStyle = FontStyle.Italic
+            });
+        });
+
+        List<string> tags = new();
+        try
+        {
+            tags = await FEntwumS.ContainerExtension.Registry.RegistryClient.FetchTagsAsync(currentImage);
+        }
+        catch (Exception ex) 
+        {
+            System.Diagnostics.Debug.WriteLine($"[DockerDiagnosticsView] Tag fetch failed: {ex.Message}");
+        }
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (_toolchainContent == null) return;
+            _toolchainContent.Children.Clear();
+
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+
+            row.Children.Add(new TextBlock
+            {
+                Text = "Active Image:",
+                Foreground = FontColor,
+                FontWeight = FontWeight.SemiBold,
+                FontSize = 13,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+
+            if (tags.Count > 0)
+            {
+                var comboBox = new ComboBox
+                {
+                    Width = 250,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    FontSize = 12
+                };
+                comboBox.ItemsSource = tags.Select(t => $"{currentImage.Split(':')[0]}:{t}").ToList();
+                comboBox.SelectedItem = tags.Any(t => currentImage.EndsWith($":{t}", StringComparison.OrdinalIgnoreCase)) ? currentImage : currentImage;
+                
+                // Only allow switching to tags for the current image
+                comboBox.SelectionChanged += (s, e) =>
+                {
+                    if (comboBox.SelectedItem is string newImage && newImage != currentImage)
+                    {
+                        try
+                        {
+                            _settingsService.SetSettingValue(ContainerExtensionModule.DefaultImageSetting, newImage);
+                            _ = RefreshAllAsync(); // refresh configuration display
+                        }
+                        catch { }
+                    }
+                };
+
+                row.Children.Add(comboBox);
+            }
+            else
+            {
+                row.Children.Add(new TextBlock
+                {
+                    Text = currentImage,
+                    Foreground = AccentColor,
+                    FontFamily = MonoFont,
+                    FontSize = 12,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+                
+                row.Children.Add(new TextBlock
+                {
+                    Text = "(Tags unavailable)",
+                    Foreground = MutedColor,
+                    FontSize = 11,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+            }
+
+            var btn = new Button
+            {
+                Content = "Check for Updates & Pull",
+                Padding = new Thickness(8, 4),
+                VerticalAlignment = VerticalAlignment.Center,
+                Command = new RelayCommand(() =>
+                {
+                    var activeImg = tags.Count > 0 && row.Children[1] is ComboBox cb && cb.SelectedItem is string sel ? sel : currentImage;
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var runtimePath = _strategy.GetRuntimePath();
+                            await _terminalService.ExecuteInTerminalAsync($"{runtimePath} pull \"{activeImg}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5));
+                            
+                            // Prune dangling images to free disk space
+                            _ = _strategy.PruneDanglingImagesAsync(); 
+                        }
+                        catch (Exception ex)
+                        {
+                            Dispatcher.UIThread.Post(() => _headerTitle.Text = $"⚠️ Update failed: {ex.Message}");
+                        }
+                    });
+                })
+            };
+            ToolTip.SetTip(btn, "Pulls the selected version of the toolchain and safely cleans up old dangling layers.");
+            
+            row.Children.Add(btn);
+            _toolchainContent.Children.Add(row);
+        });
+    }
 
     /// <summary>Populates the Connection Status section with daemon health and system info.</summary>
     private void PopulateStatus(bool isReachable, Docker.DotNet.Models.SystemInfoResponse? info)
