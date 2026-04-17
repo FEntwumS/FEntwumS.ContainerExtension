@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <Version>1.0.0</Version>
@@ -26,14 +26,28 @@
     </ItemGroup>
 
     <Target Name="GenerateCompatibilityFile" AfterTargets="Build">
-        <ItemGroup>
-            <FilteredDependencies Include="@(PackageReference)" Condition="'%(Private)' == 'false'"/>
-        </ItemGroup>
+        <Delete Files="$(OutDir)compatibility.txt" />
+        <!-- Call the batching target -->
+        <CallTarget Targets="_AppendCompatLine" />
+    </Target>
 
+    <Target Name="_AppendCompatLine" Outputs="%(PackageReference.Identity)">
+        <PropertyGroup>
+            <_PkgId>%(PackageReference.Identity)</_PkgId>
+            <_PkgVer>%(PackageReference.Version)</_PkgVer>
+            <_PkgVer Condition="'$(_PkgVer)' == ''">%(PackageReference.VersionOverride)</_PkgVer>
+        </PropertyGroup>
+        <ItemGroup>
+            <_MatchedPackageVersion Include="@(PackageVersion)" Condition="'%(Identity)' == '$(_PkgId)'" />
+        </ItemGroup>
+        <PropertyGroup>
+            <_PkgVer Condition="'$(_PkgVer)' == ''">%(_MatchedPackageVersion.Version)</_PkgVer>
+        </PropertyGroup>
         <WriteLinesToFile
-                File="$(OutDir)compatibility.txt"
-                Lines="@(FilteredDependencies->'%(Identity) : %(Version)')"
-                Overwrite="true"/>
+            File="$(OutDir)compatibility.txt"
+            Lines="$(_PkgId) : $(_PkgVer)"
+            Overwrite="false"
+            Condition="'$(_PkgId)' != '' and '%(PackageReference.Private)' != 'true' and '%(PackageReference.PrivateAssets)' != 'all'" />
     </Target>
 
     <Target Name="CopyCompatibilityFile" AfterTargets="Publish">
