@@ -43,16 +43,22 @@ public class DockerButtonView : UserControl
             Content = pathIcon,
             CornerRadius = new CornerRadius(4),
             Margin = new Thickness(1),
-            Padding = new Thickness(6)
+            Padding = new Thickness(6),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0)
         };
 
         ToolTip.SetTip(button, "Container Dashboard");
 
         button.Command = new RelayCommand(() =>
         {
-            // Close any stale/ghost panels left from layout restore
-            foreach (var stale in dockService.SearchView<DockerDiagnosticsViewModel>().ToList())
-                dockService.CloseDockable(stale);
+            // If it's already in the dock layout, just focus/show it
+            var existing = dockService.SearchView<DockerDiagnosticsViewModel>().FirstOrDefault();
+            if (existing != null)
+            {
+                dockService.Show(existing);
+                return;
+            }
 
             // Show our singleton VM as a right-docked panel (matches AI Chat placement)
             dockService.Show(dashboardVm, DockShowLocation.RightPinned);

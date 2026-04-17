@@ -154,10 +154,14 @@ public class ContainerExtensionModule : OneWareModuleBase
     // ═══════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Called during plugin discovery. No custom DI services are needed — the strategy
-    /// is instantiated directly in <see cref="Initialize"/> to control its lifetime.
+    /// Called during plugin discovery. Registers the execution strategy and 
+    /// dashboard viewmodel as singletons so the Dock Layout framework can resolve them.
     /// </summary>
-    public override void RegisterServices(IServiceCollection services) { }
+    public override void RegisterServices(IServiceCollection services)
+    {
+        services.AddSingleton<DockerExecutionStrategy>();
+        services.AddSingleton<DockerDiagnosticsViewModel>();
+    }
 
     /// <summary>
     /// Executes when the module is loaded by the IDE.
@@ -332,7 +336,7 @@ public class ContainerExtensionModule : OneWareModuleBase
 
         // ── Inject Strategy into All Tools ──────────────────────────────
         var toolService = serviceProvider.Resolve<IToolService>();
-        var dockerStrategy = new DockerExecutionStrategy(serviceProvider);
+        var dockerStrategy = serviceProvider.Resolve<DockerExecutionStrategy>();
 
         foreach (var globalTool in toolService.GetAllTools())
         {
@@ -366,9 +370,10 @@ public class ContainerExtensionModule : OneWareModuleBase
 
         // ── Create Dashboard VM (singleton) ──────────────────────────────
         var dockService = serviceProvider.Resolve<IMainDockService>();
-        var dashboardVm = new DockerDiagnosticsViewModel(serviceProvider, dockerStrategy);
+        var dashboardVm = serviceProvider.Resolve<DockerDiagnosticsViewModel>();
 
         // Register with the dock framework for persistent right-side layout (matches AI Chat pattern)
+        dockService.RegisterLayoutExtension<DockerDiagnosticsViewModel>(DockShowLocation.RightPinned);
         dockService.RegisterLayoutExtension<DockerDiagnosticsViewModel>(DockShowLocation.Right);
 
         // ── Register Docker Toolbar Button ──────────────────────────────
@@ -380,7 +385,7 @@ public class ContainerExtensionModule : OneWareModuleBase
         // Register a DataTemplate so OneWare can resolve the view for our VM
         Avalonia.Application.Current!.DataTemplates.Insert(0,
             new FuncDataTemplate<DockerDiagnosticsViewModel>((_, _) =>
-                new DockerDiagnosticsView(serviceProvider, dockerStrategy)));
+                new DockerDiagnosticsView(serviceProvider, dockerStrategy), true));
 
         // ── Fire-and-Forget Health Check + Pre-Pull ────────────────────
         // Use a CTS that cancels on process exit to prevent ObjectDisposedException
