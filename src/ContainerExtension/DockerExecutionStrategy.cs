@@ -585,7 +585,8 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                     var pullParams = new ImagesCreateParameters { FromImage = tag };
                     if (!string.IsNullOrWhiteSpace(platform) && !platform.Equals("auto", StringComparison.OrdinalIgnoreCase))
                         pullParams.Platform = platform;
-                    await _client.Images.CreateImageAsync(pullParams, null, new Progress<JSONMessage>(_ => { }), ct).ConfigureAwait(false);
+                    await _client.Images.CreateImageAsync(
+                        pullParams, null, new Progress<JSONMessage>(_ => { }), ct).ConfigureAwait(false);
                     pulled++;
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -596,6 +597,31 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
             }
         }
         return (pulled, failed);
+    }
+
+    /// <summary>
+    /// Prunes dangling (untagged) images from the local Docker daemon.
+    /// Crucial for preventing disk space leaks after an image is updated or re-pulled.
+    /// </summary>
+    public async Task<int> PruneDanglingImagesAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var filters = new Dictionary<string, IDictionary<string, bool>>
+            {
+                { "dangling", new Dictionary<string, bool> { { "true", true } } }
+            };
+
+            var response = await _client.Images.PruneImagesAsync(
+                new ImagesPruneParameters { Filters = filters }, ct).ConfigureAwait(false);
+
+            return response.ImagesDeleted?.Count ?? 0;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Debug.WriteLine($"[ContainerExtension] Dangling image prune failed: {ex.Message}");
+            return 0;
+        }
     }
 
     /// <summary>
@@ -837,6 +863,8 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
     //  Container Configuration
     // ═══════════════════════════════════════════════════════════════════════
 
+    private static readonly char[] ArgSplitChars = new[] { '=', ' ' };
+
     /// <summary>
     /// Builds the <see cref="CreateContainerParameters"/> with bind mount, UID mapping,
     /// .env injection, and optional resource limits.
@@ -850,10 +878,64 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         var workingDirFull = Path.GetFullPath(command.WorkingDirectory);
         var rawPrefix = SafeGetSetting<string>(ContainerExtensionModule.ContainerNamePrefixSetting, "containerextension-");
 
+        // ── Pre-emptively Create Output Directories ─────────────────────────────
+        // Docker does not auto-create missing subdirectories inside volume mounts.
+        // If an EDA tool (like Yosys) is instructed to write to 'build/output.v', 
+        // it will crash if 'build/' does not exist. We scan the arguments to gracefully
+        // guarantee the folder structure exists on the host before launching the container.
+        
+        // Compute strict bounds suffix to prevent prefix bleed (e.g. matching /project2 against /project)
+        var workingDirBound = workingDirFull;
+        if (!workingDirBound.EndsWith(Path.DirectorySeparatorChar) && !workingDirBound.EndsWith(Path.AltDirectorySeparatorChar))
+            workingDirBound += Path.DirectorySeparatorChar;
+
+        if (command.Arguments != null)
+        {
+            foreach (var arg in command.Arguments)
+            {
+                try
+                {
+                    var parts = arg.Split(ArgSplitChars, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length == 0) continue;
+
+                    var potentialPath = parts[parts.Length - 1].Trim('"', '\'', '\r', '\n', ' ');
+
+                    // Fast reject: must contain a path struct separator
+                    if (potentialPath.Contains('/') || potentialPath.Contains('\\'))
+                    {
+                        var dir = (potentialPath.EndsWith('/') || potentialPath.EndsWith('\\'))
+                            ? potentialPath
+                            : Path.GetDirectoryName(potentialPath);
+
+                        if (!string.IsNullOrWhiteSpace(dir))
+                        {
+                            var absoluteDir = Path.GetFullPath(Path.Combine(workingDirFull, dir));
+                            
+                            // Bounds string normalization for check
+                            var absBound = absoluteDir;
+                            if (!absBound.EndsWith(Path.DirectorySeparatorChar) && !absBound.EndsWith(Path.AltDirectorySeparatorChar))
+                                absBound += Path.DirectorySeparatorChar;
+
+                            // Security check: rigorously verify that the determined path physically lives within the workspace
+                            if (absBound.StartsWith(workingDirBound, StringComparison.OrdinalIgnoreCase) &&
+                                !Directory.Exists(absoluteDir))
+                            {
+                                Directory.CreateDirectory(absoluteDir);
+                            }
+                        }
+                    }
+                }
+                catch { /* Ignore strings that are structurally invalid as paths */ }
+            }
+        }
+
         // Assemble the full command line
         var fullCmd = new List<string> { executable };
-        foreach (var arg in command.Arguments)
-            fullCmd.Add(arg.Replace("\r", ""));
+        if (command.Arguments != null)
+        {
+            foreach (var arg in command.Arguments)
+                fullCmd.Add(arg.Replace("\r", ""));
+        }
 
         var autoRemove = SafeGetSetting<bool>(ContainerExtensionModule.AutoRemoveSetting, true);
 
