@@ -20,7 +20,7 @@ jobs:
         with:
           submodules: recursive
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
       - name: Get Version
@@ -36,7 +36,7 @@ jobs:
           type: "zip"
           filename: ../ContainerExtension_${{steps.get-version.outputs.version}}_all.zip
           directory: ./publish
-      - uses: ncipollo/release-action@v1.14.0
+      - uses: ncipollo/release-action@v1.21.0
         with:
           artifacts: "ContainerExtension_${{steps.get-version.outputs.version}}_all.zip,./publish/compatibility.txt"
           tag: ${{steps.get-version.outputs.version}}
