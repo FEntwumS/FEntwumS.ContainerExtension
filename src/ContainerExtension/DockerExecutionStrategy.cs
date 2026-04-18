@@ -214,7 +214,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            Debug.WriteLine($"[ContainerExtension] Setting '{key}' read failed: {ex.Message}");
+            ContainerTelemetry.TrackError("DockerExecutionStrategy", $"Setting '{key}' read failed", ex);
             return fallback;
         }
     }
@@ -443,7 +443,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            Debug.WriteLine($"[ContainerExtension] UID/GID probe failed for '{arg}': {ex.Message}");
+            ContainerTelemetry.TrackError("DockerExecutionStrategy", $"UID/GID probe failed for '{arg}'", ex);
         }
         return fallback;
     }
@@ -465,7 +465,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            Debug.WriteLine($"[ContainerExtension] Daemon ping failed: {ex.Message}");
+            ContainerTelemetry.TrackError("DockerExecutionStrategy", "Daemon ping failed", ex);
             return false;
         }
     }
@@ -483,7 +483,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         try { return await _client.System.GetSystemInfoAsync(ct).ConfigureAwait(false); }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            Debug.WriteLine($"[ContainerExtension] GetSystemInfoAsync failed: {ex.Message}");
+            ContainerTelemetry.TrackError("DockerExecutionStrategy", "GetSystemInfoAsync failed", ex);
             return null;
         }
     }
@@ -501,7 +501,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            Debug.WriteLine($"[ContainerExtension] ListContainersAsync failed: {ex.Message}");
+            ContainerTelemetry.TrackError("DockerExecutionStrategy", "ListContainersAsync failed", ex);
             return Array.Empty<ContainerListResponse>();
         }
     }
@@ -519,7 +519,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            Debug.WriteLine($"[ContainerExtension] ListImagesAsync failed: {ex.Message}");
+            ContainerTelemetry.TrackError("DockerExecutionStrategy", "ListImagesAsync failed", ex);
             return Array.Empty<ImagesListResponse>();
         }
     }
@@ -591,7 +591,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
-                    Debug.WriteLine($"[ContainerExtension] Re-pull failed for '{tag}': {ex.Message}");
+                    ContainerTelemetry.TrackError("DockerExecutionStrategy", $"Re-pull failed for '{tag}'", ex);
                     failed++;
                 }
             }
@@ -619,7 +619,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            Debug.WriteLine($"[ContainerExtension] Dangling image prune failed: {ex.Message}");
+            ContainerTelemetry.TrackError("DockerExecutionStrategy", "Dangling image prune failed", ex);
             return 0;
         }
     }
@@ -692,7 +692,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            Debug.WriteLine($"[ContainerExtension] GetDiskUsageSummaryAsync failed: {ex.Message}");
+            ContainerTelemetry.TrackError("DockerExecutionStrategy", "GetDiskUsageSummaryAsync failed", ex);
             return (0, 0, 0);
         }
     }
@@ -736,7 +736,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                Debug.WriteLine($"[ContainerExtension] Orphan cleanup error: {ex.Message}");
+                ContainerTelemetry.TrackError("DockerExecutionStrategy", "Orphan cleanup error", ex);
             }
         }
     }
@@ -925,7 +925,10 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                         }
                     }
                 }
-                catch { /* Ignore strings that are structurally invalid as paths */ }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    ContainerTelemetry.TrackError("DockerExecutionStrategy", "Path validation failed", ex);
+                }
             }
         }
 
@@ -1100,7 +1103,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                Debug.WriteLine($"[ContainerExtension] Post-pull digest inspect failed for '{image}': {ex.Message}");
+                ContainerTelemetry.TrackError("DockerExecutionStrategy", $"Post-pull digest inspect failed for '{image}'", ex);
             }
         }
 
@@ -1255,7 +1258,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
-                    Debug.WriteLine($"[ContainerExtension] Cancel-time container stop failed for '{containerId[..12]}': {ex.Message}");
+                    ContainerTelemetry.TrackError("DockerExecutionStrategy", $"Cancel-time container stop failed for '{containerId[..12]}'", ex);
                 }
             })
             : (CancellationTokenRegistration?)null;
@@ -1343,7 +1346,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
             try { profile = await statsTask.ConfigureAwait(false); }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                Debug.WriteLine($"[ContainerExtension] Resource stats collection failed: {ex.Message}");
+                ContainerTelemetry.TrackError("DockerExecutionStrategy", "Resource stats collection failed", ex);
             }
 
             // Detect OOM kill: exit code 137 = SIGKILL (9) + 128 = kernel OOM killer

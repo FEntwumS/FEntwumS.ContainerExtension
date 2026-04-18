@@ -119,8 +119,11 @@ public partial class DockerDiagnosticsView
                     ToolTip.SetTip(saveBtn, "Save the full log output as a .txt file");
                     saveBtn.Command = new AsyncRelayCommand(async () =>
                     {
+                        var prevTip = ToolTip.GetTip(saveBtn);
                         try
                         {
+                            saveBtn.Content = "Saving...";
+                            saveBtn.IsEnabled = false;
                             var topLevel = TopLevel.GetTopLevel(this);
                             if (topLevel?.StorageProvider != null)
                             {
@@ -135,11 +138,24 @@ public partial class DockerDiagnosticsView
                                     using var writer = new StreamWriter(stream);
                                     await writer.WriteAsync(logText);
                                     saveBtn.Content = $"Saved ✓";
-                                    saveBtn.IsEnabled = false;
+                                    return;
                                 }
                             }
+                            
+                            // Restore if cancelled
+                            saveBtn.Content = "Save Logs";
+                            saveBtn.IsEnabled = true;
                         }
-                        catch { saveBtn.Content = "Save failed ✗"; }
+                        catch (Exception ex) 
+                        { 
+                            ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "LogsSaveToFile", ex); 
+                            saveBtn.Content = "Save failed ✗";
+                            ToolTip.SetTip(saveBtn, $"Export failed: {ex.Message}");
+                            await Task.Delay(3000);
+                            saveBtn.Content = "Save Logs";
+                            ToolTip.SetTip(saveBtn, prevTip);
+                            saveBtn.IsEnabled = true;
+                        }
                     });
 
                     var logTextBox = new TextBox
@@ -179,7 +195,8 @@ public partial class DockerDiagnosticsView
             if (isRunning)
             {
                 var containerId = c.ID;
-                var stopBtn = new Button
+                Button stopBtn = null!;
+                stopBtn = new Button
                 {
                     Content = "Stop",
                     FontSize = 10,
@@ -187,12 +204,24 @@ public partial class DockerDiagnosticsView
                     VerticalAlignment = VerticalAlignment.Center,
                     Command = new AsyncRelayCommand(async () =>
                     {
+                        var prevTip = ToolTip.GetTip(stopBtn);
                         try
                         {
+                            stopBtn.IsEnabled = false;
+                            stopBtn.Content = "Stopping...";
                             await _strategy.StopContainerAsync(containerId);
                             await RefreshAllAsync();
                         }
-                        catch { /* Best effort */ }
+                        catch (Exception ex) 
+                        { 
+                            ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Action_StopContainer", ex);
+                            stopBtn.Content = "Error ✗";
+                            ToolTip.SetTip(stopBtn, $"Failed to stop: {ex.Message}");
+                            await Task.Delay(3000);
+                            stopBtn.Content = "Stop";
+                            ToolTip.SetTip(stopBtn, prevTip);
+                            stopBtn.IsEnabled = true;
+                        }
                     })
                 };
                 ToolTip.SetTip(stopBtn, "Send a graceful stop signal to this running container");
@@ -214,7 +243,7 @@ public partial class DockerDiagnosticsView
                             await _strategy.StartContainerAsync(startContainerId);
                             await RefreshAllAsync();
                         }
-                        catch { /* Best effort */ }
+                        catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Action_StartContainer", ex); }
                     })
                 };
                 ToolTip.SetTip(startBtn, "Restart this stopped container");
@@ -234,7 +263,7 @@ public partial class DockerDiagnosticsView
                             await _strategy.RemoveContainerAsync(rmContainerId);
                             await RefreshAllAsync();
                         }
-                        catch { /* Best effort */ }
+                        catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Action_RemoveContainer", ex); }
                     })
                 };
                 ToolTip.SetTip(removeBtn, "Delete this stopped container and free its resources");

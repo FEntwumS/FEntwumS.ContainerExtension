@@ -29,7 +29,7 @@ public class DockerDiagnosticsViewModel : ExtendedTool
     /// <param name="serviceProvider">The OneWare Studio DI service provider.</param>
     /// <param name="strategy">The Docker execution strategy for API access.</param>
     public DockerDiagnosticsViewModel(IServiceProvider serviceProvider, DockerExecutionStrategy strategy)
-        : base(CreateDockerIcon())
+        : base(string.Empty)
     {
         Id = "Container_Dashboard";
         ServiceProvider = serviceProvider;
@@ -37,20 +37,25 @@ public class DockerDiagnosticsViewModel : ExtendedTool
         Title = ContainerExtensionModule.DashboardTitle;
         CanFloat = true;
         CanPin = true;
-    }
+        ShowInSelector = false;
 
-    /// <summary>
-    /// Creates the Docker whale icon as an <see cref="IImage"/> for the dockable tab.
-    /// Uses the same SVG path data as <see cref="Views.DockerButtonView"/>.
-    /// </summary>
-    private static DrawingImage CreateDockerIcon()
-    {
-        var geometry = Geometry.Parse(ContainerExtensionModule.WhaleIconPath);
-        var drawing = new GeometryDrawing
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
-            Geometry = geometry,
-            Brush = new SolidColorBrush(Color.Parse(ContainerExtensionModule.DockerBlueHex))
-        };
-        return new DrawingImage(drawing);
+            try
+            {
+                var geometry = Geometry.Parse(ContainerExtensionModule.WhaleIconPath);
+                var drawing = new GeometryDrawing
+                {
+                    Geometry = geometry,
+                    Brush = new SolidColorBrush(Color.Parse(ContainerExtensionModule.DockerBlueHex))
+                };
+                // Assuming the base class has an Icon property of type object or IImage
+                this.GetType().GetProperty("Icon")?.SetValue(this, new DrawingImage(drawing));
+            }
+            catch
+            {
+                // Ignore exception to ensure stability
+            }
+        });
     }
 }

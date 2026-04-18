@@ -374,12 +374,8 @@ public class ContainerExtensionModule : OneWareModuleBase
 
         // Register with the dock framework for persistent right-side layout (matches AI Chat pattern)
         dockService.RegisterLayoutExtension<DockerDiagnosticsViewModel>(DockShowLocation.RightPinned);
-        dockService.RegisterLayoutExtension<DockerDiagnosticsViewModel>(DockShowLocation.Right);
 
-        // ── Register Docker Toolbar Button ──────────────────────────────
-        var windowService = serviceProvider.Resolve<IWindowService>();
-        windowService.RegisterUiExtension("MainWindow_RightToolBarExtension",
-            new OneWareUiExtension(_ => new DockerButtonView(dockService, dashboardVm)));
+        // (Removed previous MainWindow_RightToolBarExtension DockerButtonView to prevent layout crashes, as RegisterLayoutExtension handles the dock button perfectly)
 
         // ── Register Dockable Dashboard View ────────────────────────────
         // Register a DataTemplate so OneWare can resolve the view for our VM
@@ -411,7 +407,10 @@ public class ContainerExtensionModule : OneWareModuleBase
                     isReachable = await dockerStrategy.PingAsync(cts.Token);
                     if (isReachable) break;
                 }
-                catch { /* Ignore transient errors */ }
+                catch (Exception ex)
+                {
+                    ContainerTelemetry.TrackError("ContainerExtensionModule", "Daemon ping transient error", ex);
+                }
 
                 if (attempt < maxRetries)
                 {
@@ -454,12 +453,16 @@ public class ContainerExtensionModule : OneWareModuleBase
                                     new Docker.DotNet.Models.ContainerRemoveParameters { Force = true }, ct);
                                 await Console.Out.WriteLineAsync($"[ContainerExtension] 🧹 Reaped dangling container: {string.Join(", ", container.Names)}");
                             }
-                            catch { /* Best effort per container */ }
+                            catch (Exception ex)
+                            {
+                                ContainerTelemetry.TrackError("ContainerExtensionModule", $"Failed to reap container {string.Join(", ", container.Names)}", ex);
+                            }
                         }
                     }
                 }
                 catch (Exception ex)
                 {
+                    ContainerTelemetry.TrackError("ContainerExtensionModule", "Failed to clean dangling containers", ex);
                     await Console.Error.WriteLineAsync($"[ContainerExtension] ⚠️ Failed to clean dangling containers: {ex.Message}");
                 }
 
@@ -476,6 +479,7 @@ public class ContainerExtensionModule : OneWareModuleBase
                 catch (OperationCanceledException) { /* Shutdown requested — abort gracefully */ }
                 catch (Exception ex)
                 {
+                    ContainerTelemetry.TrackError("ContainerExtensionModule", "Background pre-pull failed", ex);
                     await Console.Error.WriteLineAsync(
                         $"[ContainerExtension] ⚠️ Background pre-pull failed (non-critical): {ex.Message}");
                 }
