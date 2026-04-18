@@ -230,7 +230,7 @@ public partial class DockerDiagnosticsView
             else
                 Process.Start("xdg-open", $"\"{path}\"");
         }
-        catch { /* Best effort — file/app may not exist */ }
+        catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView.Helpers", "OpenWithSystemDefault", ex); }
     }
 
     /// <summary>
@@ -277,6 +277,6 @@ public partial class DockerDiagnosticsView
                     Process.Start(cmd);
             }
         }
-        catch { /* Best effort — app may not be installed */ }
+        catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView.Helpers", "LaunchDesktopApp", ex); }
     }
 }
