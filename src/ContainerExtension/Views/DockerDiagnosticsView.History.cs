@@ -26,7 +26,7 @@ public partial class DockerDiagnosticsView
         // Check if telemetry is disabled via the Retention = None setting
         string? retentionStr;
         try { retentionStr = _settingsService.GetSettingValue<string>(ContainerExtensionModule.TelemetryRetentionSetting); }
-        catch { retentionStr = "100"; }
+        catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView.History", "ParseRetentionSetting", ex); retentionStr = "100"; }
         if (retentionStr == "None")
         {
             _telemetryContent.Children.Add(new TextBlock
@@ -188,7 +188,7 @@ public partial class DockerDiagnosticsView
                                     _ = ResetButtonTextAsync(pinBtn!, "Pin", 2000);
                                 }
                             }
-                            catch { /* Best effort */ }
+                            catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView.History", "ClipboardPin", ex); }
                         })
                     };
                     var shortDigest = entry.ImageDigest.Length > 19
@@ -221,7 +221,7 @@ public partial class DockerDiagnosticsView
                                     _ = ResetButtonTextAsync(copyBtn!, "Copy", 2000);
                                 }
                             }
-                            catch { /* Best effort */ }
+                            catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView.History", "ClipboardCopyRunCmd", ex); }
                         })
                     };
                     ToolTip.SetTip(copyBtn, "Copy the exact docker run command");

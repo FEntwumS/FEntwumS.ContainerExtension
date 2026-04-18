@@ -280,9 +280,9 @@ public partial class DockerDiagnosticsView : UserControl
             if (_hasAttached) return; // Prevent duplicate handlers on dock/undock cycles (F15)
             _hasAttached = true;
             try { await RefreshAllAsync(); }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[DockerDiagnosticsView] RefreshAllAsync failed on attach: {ex.Message}"); }
+            catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView", "RefreshAllAsync_Attach", ex); }
             try { await PopulateToolchainEnvironmentAsync(); }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[DockerDiagnosticsView] PopulateToolchainEnvironmentAsync failed on attach: {ex.Message}"); }
+            catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView", "PopulateToolchainEnvironment_Attach", ex); }
             StartAutoRefreshTimer();
         };
 #pragma warning restore VSTHRD101
@@ -298,7 +298,7 @@ public partial class DockerDiagnosticsView : UserControl
             _openLogWindows.Clear();
             foreach (var w in windowsToClose)
             {
-                try { w.Close(); } catch { /* best effort */ }
+                try { w.Close(); } catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView", "CloseOrphanLogWindow", ex); }
             }
         };
     }
@@ -357,7 +357,7 @@ public partial class DockerDiagnosticsView : UserControl
                         await Dispatcher.UIThread.InvokeAsync(async () =>
                         {
                             try { await RefreshAllAsync(); } 
-                            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[DockerDiagnosticsView] Auto-refresh failed: {ex.Message}"); }
+                            catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView", "AutoRefresh", ex); }
                         });
                     }
 
@@ -513,6 +513,7 @@ public partial class DockerDiagnosticsView : UserControl
             }
             catch (Exception ex)
             {
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "RefreshAllAsync_ParallelQuery", ex);
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     if (ct.IsCancellationRequested) return;
@@ -599,7 +600,7 @@ public partial class DockerDiagnosticsView : UserControl
         }
         catch (Exception ex) 
         {
-            System.Diagnostics.Debug.WriteLine($"[DockerDiagnosticsView] Tag fetch failed: {ex.Message}");
+            ContainerTelemetry.TrackError("DockerDiagnosticsView", "FetchTagsAsync", ex);
         }
 
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -639,7 +640,7 @@ public partial class DockerDiagnosticsView : UserControl
                             _settingsService.SetSettingValue(ContainerExtensionModule.DefaultImageSetting, newImage);
                             _ = RefreshAllAsync(); // refresh configuration display
                         }
-                        catch { }
+                        catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView", "ChangeActiveImageSettings", ex); }
                     }
                 };
 
@@ -685,6 +686,7 @@ public partial class DockerDiagnosticsView : UserControl
                         }
                         catch (Exception ex)
                         {
+                            ContainerTelemetry.TrackError("DockerDiagnosticsView", "UpdateAndPullImage", ex);
                             Dispatcher.UIThread.Post(() => _headerTitle.Text = $"⚠️ Update failed: {ex.Message}");
                         }
                     });
@@ -905,7 +907,17 @@ public partial class DockerDiagnosticsView : UserControl
                 var img = settings.GetValueOrDefault("Image", ContainerExtensionModule.FallbackImage);
                 await _terminalService.ExecuteInTerminalAsync($"{runtimePath} pull \"{img}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5));
             }
-            catch (Exception ex) { Dispatcher.UIThread.Post(() => _headerTitle.Text = $"⚠️ Action failed: {ex.Message}"); }
+            catch (Exception ex) 
+            { 
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_PullImage", ex);
+                _ = Dispatcher.UIThread.InvokeAsync(async () => 
+                {
+                    _headerTitle.Text = $"⚠️ Action failed: {ex.Message}";
+                    await Task.Delay(5000);
+                    if (_headerTitle.Text != null && _headerTitle.Text.StartsWith("⚠️ Action failed", System.StringComparison.Ordinal))
+                        UpdateHeaderBadge(_cachedContainers.Count);
+                });
+            }
         }, "Download or update the configured default toolchain image"));
 
         actionsRow.Children.Add(CreateActionButton("Update All Images", async () =>
@@ -924,7 +936,17 @@ public partial class DockerDiagnosticsView : UserControl
                     _ = RefreshAllAsync(); // Fire-and-forget; RefreshAllAsync has its own error handling
                 });
             }
-            catch (Exception ex) { Dispatcher.UIThread.Post(() => _headerTitle.Text = $"⚠️ Action failed: {ex.Message}"); }
+            catch (Exception ex) 
+            { 
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_UpdateAllImages", ex);
+                _ = Dispatcher.UIThread.InvokeAsync(async () => 
+                {
+                    _headerTitle.Text = $"⚠️ Action failed: {ex.Message}";
+                    await Task.Delay(5000);
+                    if (_headerTitle.Text != null && _headerTitle.Text.StartsWith("⚠️ Action failed", System.StringComparison.Ordinal))
+                        UpdateHeaderBadge(_cachedContainers.Count);
+                });
+            }
         }, "Re-pull all local images to their latest tags (cross-platform, no shell required)"));
 
         actionsRow.Children.Add(CreateActionButton("⚠️ Prune All Images", async () =>
@@ -934,7 +956,17 @@ public partial class DockerDiagnosticsView : UserControl
                 var runtimePath = _strategy.GetRuntimePath();
                 await _terminalService.ExecuteInTerminalAsync($"{runtimePath} image prune -a -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2));
             }
-            catch (Exception ex) { Dispatcher.UIThread.Post(() => _headerTitle.Text = $"⚠️ Action failed: {ex.Message}"); }
+            catch (Exception ex) 
+            { 
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_PruneAllImages", ex);
+                _ = Dispatcher.UIThread.InvokeAsync(async () => 
+                {
+                    _headerTitle.Text = $"⚠️ Action failed: {ex.Message}";
+                    await Task.Delay(5000);
+                    if (_headerTitle.Text != null && _headerTitle.Text.StartsWith("⚠️ Action failed", System.StringComparison.Ordinal))
+                        UpdateHeaderBadge(_cachedContainers.Count);
+                });
+            }
         }, "⚠️ Remove ALL unused images (not just dangling). This frees disk space but deleted images must be re-pulled."));
 
         actionsRow.Children.Add(CreateActionButton("⚠️ Prune System", async () =>
@@ -944,7 +976,17 @@ public partial class DockerDiagnosticsView : UserControl
                 var runtimePath = _strategy.GetRuntimePath();
                 await _terminalService.ExecuteInTerminalAsync($"{runtimePath} system prune -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2));
             }
-            catch (Exception ex) { Dispatcher.UIThread.Post(() => _headerTitle.Text = $"⚠️ Action failed: {ex.Message}"); }
+            catch (Exception ex) 
+            { 
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_PruneSystem", ex);
+                _ = Dispatcher.UIThread.InvokeAsync(async () => 
+                {
+                    _headerTitle.Text = $"⚠️ Action failed: {ex.Message}";
+                    await Task.Delay(5000);
+                    if (_headerTitle.Text != null && _headerTitle.Text.StartsWith("⚠️ Action failed", System.StringComparison.Ordinal))
+                        UpdateHeaderBadge(_cachedContainers.Count);
+                });
+            }
         }, "⚠️ Remove ALL stopped containers, dangling images, and unused networks. This cannot be undone."));
 
         actionsRow.Children.Add(CreateActionButton("Hello-World Test", async () =>
@@ -954,7 +996,17 @@ public partial class DockerDiagnosticsView : UserControl
                 var runtimePath = _strategy.GetRuntimePath();
                 await _terminalService.ExecuteInTerminalAsync($"{runtimePath} run --rm hello-world", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2));
             }
-            catch (Exception ex) { Dispatcher.UIThread.Post(() => _headerTitle.Text = $"⚠️ Action failed: {ex.Message}"); }
+            catch (Exception ex) 
+            { 
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_HelloWorldTest", ex);
+                _ = Dispatcher.UIThread.InvokeAsync(async () => 
+                {
+                    _headerTitle.Text = $"⚠️ Action failed: {ex.Message}";
+                    await Task.Delay(5000);
+                    if (_headerTitle.Text != null && _headerTitle.Text.StartsWith("⚠️ Action failed", System.StringComparison.Ordinal))
+                        UpdateHeaderBadge(_cachedContainers.Count);
+                });
+            }
         }, "Run a disposable hello-world container to verify Docker is working correctly"));
 
         actionsRow.Children.Add(CreateActionButton("Engine Info", async () =>
@@ -964,7 +1016,17 @@ public partial class DockerDiagnosticsView : UserControl
                 var runtimePath = _strategy.GetRuntimePath();
                 await _terminalService.ExecuteInTerminalAsync($"{runtimePath} info", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(1));
             }
-            catch (Exception ex) { Dispatcher.UIThread.Post(() => _headerTitle.Text = $"⚠️ Action failed: {ex.Message}"); }
+            catch (Exception ex) 
+            { 
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_EngineInfo", ex);
+                _ = Dispatcher.UIThread.InvokeAsync(async () => 
+                {
+                    _headerTitle.Text = $"⚠️ Action failed: {ex.Message}";
+                    await Task.Delay(5000);
+                    if (_headerTitle.Text != null && _headerTitle.Text.StartsWith("⚠️ Action failed", System.StringComparison.Ordinal))
+                        UpdateHeaderBadge(_cachedContainers.Count);
+                });
+            }
         }, "Show detailed Docker engine configuration, storage driver, and runtime info"));
 
         actionsRow.Children.Add(CreateActionButton("Copy Docker Run", async () =>
@@ -979,7 +1041,17 @@ public partial class DockerDiagnosticsView : UserControl
                     await Console.Out.WriteLineAsync($"[ContainerExtension] 📋 Copied to clipboard: {cmd}");
                 }
             }
-            catch (Exception ex) { Dispatcher.UIThread.Post(() => _headerTitle.Text = $"⚠️ Copy failed: {ex.Message}"); }
+            catch (Exception ex) 
+            { 
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_CopyDockerRun", ex);
+                _ = Dispatcher.UIThread.InvokeAsync(async () => 
+                {
+                    _headerTitle.Text = $"⚠️ Copy failed: {ex.Message}";
+                    await Task.Delay(5000);
+                    if (_headerTitle.Text != null && _headerTitle.Text.StartsWith("⚠️ Copy failed", System.StringComparison.Ordinal))
+                        UpdateHeaderBadge(_cachedContainers.Count);
+                });
+            }
         }, "Copy an equivalent 'docker run' command to the clipboard for manual debugging"));
 
         return actionsRow;

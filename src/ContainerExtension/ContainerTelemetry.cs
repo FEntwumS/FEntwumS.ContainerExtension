@@ -26,6 +26,9 @@ public static class ContainerTelemetry
     private static readonly string TelemetryPath =
         Path.Combine(TelemetryDir, "container_telemetry.jsonl");
 
+    private static readonly string ErrorTelemetryPath =
+        Path.Combine(TelemetryDir, "container_errors.jsonl");
+
     /// <summary>Absolute path to the telemetry .jsonl file, exposed for dashboard display.</summary>
     public static string TelemetryFilePath => TelemetryPath;
 
@@ -58,7 +61,7 @@ public static class ContainerTelemetry
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         WriteIndented = false,
-        TypeInfoResolverChain = { TelemetryJsonContext.Default }
+        TypeInfoResolverChain = { TelemetryJsonContext.Default, ErrorJsonContext.Default }
     };
 
     /// <summary>
@@ -185,6 +188,55 @@ public static class ContainerTelemetry
         catch
         {
             // Telemetry must never crash the host application
+        }
+    }
+
+    /// <summary>
+    /// Appends a single error record to the telemetry error log.
+    /// Used to persist transient faults and background exceptions without crashing the IDE.
+    /// </summary>
+    public static void TrackError(string component, string action, Exception? ex = null, string? context = null)
+    {
+        try
+        {
+            Directory.CreateDirectory(TelemetryDir);
+
+            var entry = new TelemetryErrorEntry
+            {
+                Timestamp = DateTime.UtcNow.ToString("o"),
+                Component = component,
+                Action = action,
+                ExceptionMessage = ex?.Message,
+                StackTrace = ex?.StackTrace,
+                Context = context
+            };
+
+            var json = JsonSerializer.Serialize(entry, ErrorJsonContext.Default.TelemetryErrorEntry);
+            
+            RwLock.EnterWriteLock();
+            try
+            {
+                bool acquired = false;
+                try
+                {
+                    acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
+                    if (!acquired) return;
+                    
+                    File.AppendAllText(ErrorTelemetryPath, json + Environment.NewLine);
+                }
+                finally
+                {
+                    if (acquired) ProcessMutex?.ReleaseMutex();
+                }
+            }
+            finally
+            {
+                RwLock.ExitWriteLock();
+            }
+        }
+        catch
+        {
+            // Telemetry must never crash the host application, even in error tracking
         }
     }
 
@@ -464,6 +516,28 @@ public static class ContainerTelemetry
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         public bool OomKilled { get; set; }
     }
+
+    /// <summary>A single exception/error telemetry record.</summary>
+    public class TelemetryErrorEntry
+    {
+        [JsonPropertyName("ts")]
+        public string Timestamp { get; set; } = "";
+
+        [JsonPropertyName("cmp")]
+        public string Component { get; set; } = "";
+
+        [JsonPropertyName("act")]
+        public string Action { get; set; } = "";
+
+        [JsonPropertyName("ex_msg")]
+        public string? ExceptionMessage { get; set; }
+
+        [JsonPropertyName("stack")]
+        public string? StackTrace { get; set; }
+
+        [JsonPropertyName("ctx")]
+        public string? Context { get; set; }
+    }
 }
 
 /// <summary>
@@ -475,3 +549,12 @@ public static class ContainerTelemetry
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     WriteIndented = false)]
 internal partial class TelemetryJsonContext : JsonSerializerContext { }
+
+/// <summary>
+/// Source-generated JSON serialization context for <see cref="ContainerTelemetry.TelemetryErrorEntry"/>.
+/// </summary>
+[JsonSerializable(typeof(ContainerTelemetry.TelemetryErrorEntry))]
+[JsonSourceGenerationOptions(
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    WriteIndented = false)]
+internal partial class ErrorJsonContext : JsonSerializerContext { }

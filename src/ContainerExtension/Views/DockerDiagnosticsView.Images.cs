@@ -70,9 +70,9 @@ public partial class DockerDiagnosticsView
             var repoTag = Truncate(img.RepoTags?.FirstOrDefault() ?? "<none>:<none>", 35);
             var imageRow = CreateImageRow(repoTag, FormatBytes(img.Size), FormatTimeAgo(img.Created), isHeader: false);
 
-            // Add remove button
             var imageId = img.ID;
-            var removeBtn = new Button
+            Button removeBtn = null!;
+            removeBtn = new Button
             {
                 Content = "Remove",
                 FontSize = 10,
@@ -80,12 +80,24 @@ public partial class DockerDiagnosticsView
                 VerticalAlignment = VerticalAlignment.Center,
                 Command = new AsyncRelayCommand(async () =>
                 {
+                    var prevTip = ToolTip.GetTip(removeBtn);
                     try
                     {
+                        removeBtn.IsEnabled = false;
+                        removeBtn.Content = "Removing...";
                         await _strategy.RemoveImageAsync(imageId);
                         await RefreshAllAsync();
                     }
-                    catch { /* Best effort — may fail if image is in use */ }
+                    catch (Exception ex) 
+                    { 
+                        ContainerTelemetry.TrackError("DockerDiagnosticsView.Images", "Action_RemoveImage", ex);
+                        removeBtn.Content = "Error ✗";
+                        ToolTip.SetTip(removeBtn, $"Failed to remove: {ex.Message}");
+                        await Task.Delay(3000);
+                        removeBtn.Content = "Remove";
+                        ToolTip.SetTip(removeBtn, prevTip);
+                        removeBtn.IsEnabled = true;
+                    }
                 })
             };
             ToolTip.SetTip(removeBtn, "Delete this image from local storage (fails if a container is using it)");
