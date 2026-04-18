@@ -1522,6 +1522,16 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
     /// <summary>Releases the native Docker client connection.</summary>
     public void Dispose()
     {
+        if (Interlocked.CompareExchange(ref _staticClientForCleanup, null, _client) == _client)
+        {
+            AppDomain.CurrentDomain.ProcessExit -= CleanupDanglingContainers;
+            // Ensure orphans for this client are cleaned before it's disposed
+            CleanupDanglingContainers(null, EventArgs.Empty);
+            
+            // To allow future clients to act as cleanup hosts, reset the executed flag
+            Volatile.Write(ref _cleanupExecuted, 0);
+        }
+
         _client.Dispose();
     }
 }

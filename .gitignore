@@ -5,24 +5,10 @@
 # ── OS Artifacts ──────────────────────────────────────────────────────────────
 
 # macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-._*
 
 # Windows
-Thumbs.db
-Thumbs.db:encryptable
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
 
 # Linux
-*~
-.fuse_hidden*
-.directory
-.Trash-*
-.nfs*
 
 # ── IDEs & Editors ───────────────────────────────────────────────────────────
 
@@ -35,8 +21,6 @@ $RECYCLE.BIN/
 .vs/
 *.user
 *.suo
-*.swp
-*.swo
 *.bak
 *.DotSettings.user
 riderModule.iml

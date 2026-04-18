@@ -375,7 +375,10 @@ public class ContainerExtensionModule : OneWareModuleBase
         // Register with the dock framework for persistent right-side layout (matches AI Chat pattern)
         dockService.RegisterLayoutExtension<DockerDiagnosticsViewModel>(DockShowLocation.RightPinned);
 
-        // (Removed previous MainWindow_RightToolBarExtension DockerButtonView to prevent layout crashes, as RegisterLayoutExtension handles the dock button perfectly)
+        // ── Register Docker Toolbar Button ──────────────────────────────
+        var windowService = serviceProvider.Resolve<IWindowService>();
+        windowService.RegisterUiExtension("MainWindow_RightToolBarExtension", 
+            new OneWareUiExtension(_ => new DockerButtonView(dockService, dashboardVm)));
 
         // ── Register Dockable Dashboard View ────────────────────────────
         // Register a DataTemplate so OneWare can resolve the view for our VM
