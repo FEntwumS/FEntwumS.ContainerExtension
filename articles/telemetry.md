@@ -113,7 +113,7 @@ Use the **Copy Docker Run** feature:
 ```bash
 # Example copied command:
 docker run --rm \
-  -v /Users/mtorun/project:/workspace \
+  -v /path/to/project:/workspace \
   -w /workspace \
   --platform linux/amd64 \
   hdlc/ghdl:yosys \

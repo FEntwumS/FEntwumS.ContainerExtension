@@ -1,12 +1,9 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Media.Immutable;
 using ContainerExtension.ViewModels;
 using OneWare.Essentials.Enums;
 using OneWare.Essentials.Services;
-using OneWare.Essentials.ViewModels;
 using System;
 
 namespace ContainerExtension.Views;
@@ -21,9 +18,10 @@ public class DockerButtonView : UserControl
             Margin = new Thickness(1),
             Padding = new Thickness(6),
             Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0),
-            ToolTip = new ToolTip { Content = "Container Diagnostics" }
+            BorderThickness = new Thickness(0)
         };
+
+        ToolTip.SetTip(button, "Container Diagnostics");
 
         // UI initializations for Geometry can fail if invoked too early before
         // the Avalonia Renderer is initialized. Moving this inside a dispatcher
@@ -50,11 +48,11 @@ public class DockerButtonView : UserControl
 
         button.Click += (_, _) =>
         {
-            if (dockService.SearchView(dashboardVm.Id) == null)
+            if (dockService.SearchView(dashboardVm) == null)
             {
                 dockService.RegisterLayoutExtension<DockerDiagnosticsViewModel>(DockShowLocation.RightPinned);
             }
-            dockService.ShowView(dashboardVm.Id);
+            dockService.Show(dashboardVm, DockShowLocation.RightPinned);
         };
 
         Content = button;
