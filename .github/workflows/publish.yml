@@ -24,7 +24,7 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - name: Get Version
-        uses: kzrnm/get-net-sdk-project-versions-action@v1.3.0
+        uses: kzrnm/get-net-sdk-project-versions-action@v3.1.0
         id: get-version
         with:
           proj-path: src/ContainerExtension/ContainerExtension.csproj
