@@ -18,10 +18,22 @@ namespace ContainerExtension.ViewModels;
 public class DockerDiagnosticsViewModel : ExtendedTool
 {
     /// <summary>The DI service provider for resolving OneWare services.</summary>
-    public IServiceProvider ServiceProvider { get; }
+    public IServiceProvider? ServiceProvider { get; }
 
     /// <summary>The Docker execution strategy instance for live API queries.</summary>
-    public DockerExecutionStrategy Strategy { get; }
+    public DockerExecutionStrategy? Strategy { get; }
+
+    /// <summary>
+    /// Default parameterless constructor required by the Dock layout deserializer.
+    /// </summary>
+    public DockerDiagnosticsViewModel() : base(string.Empty)
+    {
+        Id = "Container_Dashboard";
+        Title = ContainerExtensionModule.DashboardTitle;
+        CanFloat = true;
+        CanPin = true;
+        ShowInSelector = false;
+    }
 
     /// <summary>
     /// Constructs the dockable Docker Dashboard ViewModel.
@@ -35,9 +47,6 @@ public class DockerDiagnosticsViewModel : ExtendedTool
         ServiceProvider = serviceProvider;
         Strategy = strategy;
         Title = ContainerExtensionModule.DashboardTitle;
-        CanFloat = true;
-        CanPin = true;
-        ShowInSelector = false;
 
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
@@ -57,5 +66,9 @@ public class DockerDiagnosticsViewModel : ExtendedTool
                 // Ignore exception to ensure stability
             }
         });
+        CanFloat = true;
+        CanPin = true;
+        ShowInSelector = false;
+
     }
 }

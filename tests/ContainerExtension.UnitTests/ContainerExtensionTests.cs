@@ -645,9 +645,9 @@ public class ContainerExtensionTests
     // ═══════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public void ParseEnvFile_ExportPrefix_IncludedAsPartOfKey()
+    public void ParseEnvFile_ExportPrefix_StrippedFromKey()
     {
-        // Current implementation does not strip 'export ' prefix — it becomes part of the key
+        // 'export ' prefix should be stripped (matches Docker Compose and shell .env conventions)
         var dir = Path.Combine(Path.GetTempPath(), $"container_test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
@@ -656,7 +656,7 @@ public class ContainerExtensionTests
             var result = DockerExecutionStrategy.ParseEnvFile(dir);
             Assert.NotNull(result);
             Assert.Single(result!);
-            Assert.Contains("export KEY=value", result);
+            Assert.Contains("KEY=value", result);
         }
         finally { Directory.Delete(dir, true); }
     }

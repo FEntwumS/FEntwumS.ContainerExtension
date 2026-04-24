@@ -28,7 +28,9 @@ public partial class DockerDiagnosticsView
             _containersContent.Children.Add(new TextBlock
             {
                 Text = "No containers found.",
-                Foreground = MutedColor, FontSize = 11, FontStyle = FontStyle.Italic
+                Foreground = MutedColor,
+                FontSize = 11,
+                FontStyle = FontStyle.Italic
             });
             return;
         }
@@ -47,7 +49,9 @@ public partial class DockerDiagnosticsView
             _containersContent.Children.Add(new TextBlock
             {
                 Text = $"No containers matching \"{Truncate(_searchFilter, 20)}\".",
-                Foreground = MutedColor, FontSize = 11, FontStyle = FontStyle.Italic
+                Foreground = MutedColor,
+                FontSize = 11,
+                FontStyle = FontStyle.Italic
             });
             return;
         }
@@ -141,14 +145,14 @@ public partial class DockerDiagnosticsView
                                     return;
                                 }
                             }
-                            
+
                             // Restore if cancelled
                             saveBtn.Content = "Save Logs";
                             saveBtn.IsEnabled = true;
                         }
-                        catch (Exception ex) 
-                        { 
-                            ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "LogsSaveToFile", ex); 
+                        catch (Exception ex)
+                        {
+                            ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "LogsSaveToFile", ex);
                             saveBtn.Content = "Save failed ✗";
                             ToolTip.SetTip(saveBtn, $"Export failed: {ex.Message}");
                             await Task.Delay(3000);
@@ -175,7 +179,8 @@ public partial class DockerDiagnosticsView
                     var logWindow = new Window
                     {
                         Title = $"Container Logs — {containerLabel}",
-                        Width = 700, Height = 450,
+                        Width = 700,
+                        Height = 450,
                         Content = new Grid
                         {
                             RowDefinitions = new RowDefinitions("Auto,*"),
@@ -212,8 +217,8 @@ public partial class DockerDiagnosticsView
                             await _strategy.StopContainerAsync(containerId);
                             await RefreshAllAsync();
                         }
-                        catch (Exception ex) 
-                        { 
+                        catch (Exception ex)
+                        {
                             ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Action_StopContainer", ex);
                             stopBtn.Content = "Error ✗";
                             ToolTip.SetTip(stopBtn, $"Failed to stop: {ex.Message}");

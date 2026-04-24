@@ -11,7 +11,7 @@ namespace FEntwumS.ContainerExtension.Registry;
 
 public static class RegistryClient
 {
-    private static readonly HttpClient _httpClient = new HttpClient();
+    private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
 
     /// <summary>
     /// Fetches available tags for a given remote image reference.
@@ -22,7 +22,7 @@ public static class RegistryClient
         try
         {
             var parts = ParseImageReference(imageReference);
-            
+
             if (parts.Registry == "ghcr.io")
             {
                 return await FetchGhcrTagsAsync(parts.Namespace, parts.Repository).ConfigureAwait(false);
@@ -33,7 +33,7 @@ public static class RegistryClient
         catch (Exception ex)
         {
             // Fail gracefully on private/unknown registries or network errors
-            ContainerTelemetry.TrackError("RegistryClient", "Global fetch trap triggered", ex);
+            global::ContainerExtension.ContainerTelemetry.TrackError("RegistryClient", "Global fetch trap triggered", ex);
             return new List<string>();
         }
     }
@@ -45,7 +45,7 @@ public static class RegistryClient
         string repo = imageReference;
 
         var parts = imageReference.Split('/');
-        
+
         if (parts.Length == 3)
         {
             registry = parts[0];
@@ -54,9 +54,9 @@ public static class RegistryClient
         }
         else if (parts.Length == 2)
         {
-            if (parts[0].Contains('.'))
+            if (parts[0].Contains('.') || parts[0].Contains(':'))
             {
-                // e.g. ghcr.io/repo
+                // e.g. ghcr.io/repo or localhost:5000/repo
                 registry = parts[0];
                 repo = parts[1].Split(':')[0];
             }
@@ -97,7 +97,7 @@ public static class RegistryClient
                 }
             }
         }
-        
+
         return tags.Where(t => !string.IsNullOrEmpty(t)).ToList();
     }
 
@@ -108,7 +108,7 @@ public static class RegistryClient
         var scopeRepo = string.IsNullOrEmpty(ns) ? repo : $"{ns}/{repo}";
         var tokenUrl = $"https://ghcr.io/token?scope=repository:{scopeRepo}:pull";
         using var tokenReq = new HttpRequestMessage(HttpMethod.Get, tokenUrl);
-        
+
         using var tokenResponse = await _httpClient.SendAsync(tokenReq).ConfigureAwait(false);
         tokenResponse.EnsureSuccessStatusCode();
 
@@ -138,8 +138,11 @@ public static class RegistryClient
                     tags.Add(val);
                 }
             }
-            // GHCR tags are not ordered by date in the standard OCI response, reverse to get latest loosely
-            tags.Reverse(); 
+            // OCI tags/list returns tags in lexicographic order, not chronological.
+            // Reversing gives z->a ordering, which is a rough approximation of
+            // "latest first" for simple version tags but is NOT temporal.
+            // Docker Hub provides an ordering=last_updated parameter; GHCR does not.
+            tags.Reverse();
             return tags.Take(20).ToList();
         }
 

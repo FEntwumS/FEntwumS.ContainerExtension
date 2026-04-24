@@ -32,6 +32,11 @@ public static class ContainerTelemetry
     /// <summary>Absolute path to the telemetry .jsonl file, exposed for dashboard display.</summary>
     public static string TelemetryFilePath => TelemetryPath;
 
+    /// LOCK ORDERING CONTRACT:
+    ///   1. RwLock (in-process)  -->  2. ProcessMutex (cross-process)
+    /// All methods MUST acquire RwLock first, then ProcessMutex.
+    /// Never call a write method (LogExecution, TrackError, ClearEntries) from within
+    /// a read lock -- ReaderWriterLockSlim does not support lock upgrading and will deadlock.
     private static readonly ReaderWriterLockSlim RwLock = new();
 
     /// <summary>
@@ -136,22 +141,22 @@ public static class ContainerTelemetry
                     if (maxEntries > 0)
                     {
                         // Initialize cache from file if unknown (-1)
-                        if (_cachedLineCount < 0)
+                        if (Volatile.Read(ref _cachedLineCount) < 0)
                         {
-                            _cachedLineCount = File.ReadLines(TelemetryPath).Count();
+                            Volatile.Write(ref _cachedLineCount, File.ReadAllLines(TelemetryPath).Length);
                         }
                         else
                         {
-                            _cachedLineCount++;
+                            Volatile.Write(ref _cachedLineCount, Volatile.Read(ref _cachedLineCount) + 1);
                         }
 
                         var trimThreshold = (int)(maxEntries * 1.2);
                         if (_cachedLineCount > trimThreshold)
                         {
-                            // Streaming trim: Queue keeps at most maxEntries lines in memory
-                            // instead of loading the entire file with ReadAllLines.
+                            // Trim: Queue keeps at most maxEntries lines
+                            // Load the entire file with ReadAllLines to release file handle quickly
                             var q = new Queue<string>(maxEntries);
-                            foreach (var line in File.ReadLines(TelemetryPath))
+                            foreach (var line in File.ReadAllLines(TelemetryPath))
                             {
                                 q.Enqueue(line);
                                 if (q.Count > maxEntries) q.Dequeue();
@@ -163,16 +168,16 @@ public static class ContainerTelemetry
                                     writer.WriteLine(line);
                             }
                             File.Move(tempFile, TelemetryPath, true);
-                            _cachedLineCount = maxEntries;
+                            Volatile.Write(ref _cachedLineCount, maxEntries);
                         }
                     }
                     else
                     {
-                        // No retention limit — just track count for future use
-                        if (_cachedLineCount < 0)
-                            _cachedLineCount = 1;
+                        // No retention limit -- just track count for future use
+                        if (Volatile.Read(ref _cachedLineCount) < 0)
+                            Volatile.Write(ref _cachedLineCount, 1);
                         else
-                            _cachedLineCount++;
+                            Volatile.Write(ref _cachedLineCount, Volatile.Read(ref _cachedLineCount) + 1);
                     }
                 }
                 finally
@@ -194,6 +199,7 @@ public static class ContainerTelemetry
     /// <summary>
     /// Appends a single error record to the telemetry error log.
     /// Used to persist transient faults and background exceptions without crashing the IDE.
+    /// Caps the error log at 500 entries to prevent unbounded disk growth.
     /// </summary>
     public static void TrackError(string component, string action, Exception? ex = null, string? context = null)
     {
@@ -212,7 +218,7 @@ public static class ContainerTelemetry
             };
 
             var json = JsonSerializer.Serialize(entry, ErrorJsonContext.Default.TelemetryErrorEntry);
-            
+
             RwLock.EnterWriteLock();
             try
             {
@@ -221,8 +227,32 @@ public static class ContainerTelemetry
                 {
                     acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
                     if (!acquired) return;
-                    
+
                     File.AppendAllText(ErrorTelemetryPath, json + Environment.NewLine);
+
+                    // Trim error log to prevent unbounded growth (cap at 500 entries)
+                    const int maxErrorEntries = 500;
+                    const int errorTrimThreshold = 600;
+                    if (File.Exists(ErrorTelemetryPath))
+                    {
+                        var lines = File.ReadAllLines(ErrorTelemetryPath);
+                        if (lines.Length > errorTrimThreshold)
+                        {
+                            var q = new Queue<string>(maxErrorEntries);
+                            foreach (var line in lines)
+                            {
+                                q.Enqueue(line);
+                                if (q.Count > maxErrorEntries) q.Dequeue();
+                            }
+                            var tempFile = ErrorTelemetryPath + ".tmp";
+                            using (var writer = new StreamWriter(tempFile))
+                            {
+                                foreach (var line in q)
+                                    writer.WriteLine(line);
+                            }
+                            File.Move(tempFile, ErrorTelemetryPath, true);
+                        }
+                    }
                 }
                 finally
                 {
@@ -259,8 +289,9 @@ public static class ContainerTelemetry
                     acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
                     if (!File.Exists(TelemetryPath)) return results;
 
+                    var allLines = File.ReadAllLines(TelemetryPath);
                     var q = new Queue<string>(count);
-                    foreach (var line in File.ReadLines(TelemetryPath))
+                    foreach (var line in allLines)
                     {
                         q.Enqueue(line);
                         if (q.Count > count) q.Dequeue();
@@ -307,7 +338,7 @@ public static class ContainerTelemetry
                     int total = 0, successes = 0;
                     double totalDuration = 0;
 
-                    foreach (var line in File.ReadLines(TelemetryPath))
+                    foreach (var line in File.ReadAllLines(TelemetryPath))
                     {
                         if (string.IsNullOrWhiteSpace(line)) continue;
                         var entry = JsonSerializer.Deserialize(line, TelemetryJsonContext.Default.TelemetryEntry);
@@ -384,7 +415,7 @@ public static class ContainerTelemetry
                 {
                     acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
                     if (File.Exists(TelemetryPath)) File.Delete(TelemetryPath);
-                    _cachedLineCount = 0; // Reset cache — file is now empty
+                    Volatile.Write(ref _cachedLineCount, -1); // Force re-read from disk on next write (handles cross-process races)
                 }
                 finally
                 {
@@ -427,7 +458,7 @@ public static class ContainerTelemetry
                     // deserialization pass that would occur with raw string queuing.
                     var q = new Queue<TelemetryEntry>(count);
 
-                    foreach (var line in File.ReadLines(TelemetryPath))
+                    foreach (var line in File.ReadAllLines(TelemetryPath))
                     {
                         if (string.IsNullOrWhiteSpace(line)) continue;
                         var entry = JsonSerializer.Deserialize(line, TelemetryJsonContext.Default.TelemetryEntry);

@@ -63,7 +63,9 @@ public partial class DockerDiagnosticsView
     {
         var block = new TextBlock
         {
-            Text = text, FontFamily = MonoFont, FontSize = isHeader ? 12 : 11,
+            Text = text,
+            FontFamily = MonoFont,
+            FontSize = isHeader ? 12 : 11,
             Foreground = foreground,
             FontWeight = isHeader ? FontWeight.Bold : FontWeight.Normal,
             VerticalAlignment = VerticalAlignment.Center,
@@ -105,20 +107,27 @@ public partial class DockerDiagnosticsView
     /// <summary>Creates a muted italic loading placeholder text.</summary>
     private static TextBlock CreateLoadingText(string text) => new()
     {
-        Text = text, Foreground = MutedColor, FontSize = 11, FontStyle = FontStyle.Italic
+        Text = text,
+        Foreground = MutedColor,
+        FontSize = 11,
+        FontStyle = FontStyle.Italic
     };
 
     /// <summary>Creates a "... and N more" overflow indicator text.</summary>
     private static TextBlock CreateMoreText(int remaining) => new()
     {
         Text = $"  ... and {remaining} more",
-        Foreground = MutedColor, FontSize = 11, FontStyle = FontStyle.Italic
+        Foreground = MutedColor,
+        FontSize = 11,
+        FontStyle = FontStyle.Italic
     };
 
     /// <summary>Creates a subtle 1px horizontal separator line for table headers.</summary>
     private static Border CreateSeparator() => new()
     {
-        Height = 1, Background = MutedColor, Opacity = 0.3,
+        Height = 1,
+        Background = MutedColor,
+        Opacity = 0.3,
         Margin = new Thickness(0, 0, 0, 2)
     };
 
@@ -129,7 +138,9 @@ public partial class DockerDiagnosticsView
         panel.Children.Add(new TextBlock
         {
             Text = "Daemon offline — start Docker to enable this section.",
-            Foreground = YellowColor, FontSize = 11, FontStyle = FontStyle.Italic
+            Foreground = YellowColor,
+            FontSize = 11,
+            FontStyle = FontStyle.Italic
         });
     }
 
@@ -138,7 +149,10 @@ public partial class DockerDiagnosticsView
     {
         var labelBlock = new TextBlock
         {
-            Text = label, Foreground = MutedColor, FontFamily = MonoFont, FontSize = 11,
+            Text = label,
+            Foreground = MutedColor,
+            FontFamily = MonoFont,
+            FontSize = 11,
             Margin = new Thickness(18, 2, 0, 0)
         };
         Grid.SetRow(labelBlock, row);
@@ -147,7 +161,10 @@ public partial class DockerDiagnosticsView
 
         var valueBlock = new TextBlock
         {
-            Text = value, Foreground = FontColor, FontFamily = MonoFont, FontSize = 11,
+            Text = value,
+            Foreground = FontColor,
+            FontFamily = MonoFont,
+            FontSize = 11,
             Margin = new Thickness(0, 2, 0, 0)
         };
         Grid.SetRow(valueBlock, row);

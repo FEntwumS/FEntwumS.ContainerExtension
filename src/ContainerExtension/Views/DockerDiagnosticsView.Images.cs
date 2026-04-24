@@ -28,7 +28,9 @@ public partial class DockerDiagnosticsView
             _imagesContent.Children.Add(new TextBlock
             {
                 Text = "No images found.",
-                Foreground = MutedColor, FontSize = 11, FontStyle = FontStyle.Italic
+                Foreground = MutedColor,
+                FontSize = 11,
+                FontStyle = FontStyle.Italic
             });
             return;
         }
@@ -88,8 +90,8 @@ public partial class DockerDiagnosticsView
                         await _strategy.RemoveImageAsync(imageId);
                         await RefreshAllAsync();
                     }
-                    catch (Exception ex) 
-                    { 
+                    catch (Exception ex)
+                    {
                         ContainerTelemetry.TrackError("DockerDiagnosticsView.Images", "Action_RemoveImage", ex);
                         removeBtn.Content = "Error ✗";
                         ToolTip.SetTip(removeBtn, $"Failed to remove: {ex.Message}");
@@ -117,7 +119,9 @@ public partial class DockerDiagnosticsView
             _imagesContent.Children.Add(new TextBlock
             {
                 Text = $"{danglingCount} dangling image(s) hidden — use Prune System to clean up.",
-                Foreground = MutedColor, FontSize = 10, FontStyle = FontStyle.Italic,
+                Foreground = MutedColor,
+                FontSize = 10,
+                FontStyle = FontStyle.Italic,
                 Margin = new Thickness(0, 4, 0, 0)
             });
         }
