@@ -45,14 +45,14 @@ namespace ContainerExtension.Views;
 public partial class DockerDiagnosticsView : UserControl
 {
     // ── Color Palette ───────────────────────────────────────────────────
-    private static readonly SolidColorBrush FontColor   = new(Color.Parse("#E0E0E0"));
-    private static readonly SolidColorBrush MutedColor  = new(Color.Parse("#888888"));
+    private static readonly SolidColorBrush FontColor = new(Color.Parse("#E0E0E0"));
+    private static readonly SolidColorBrush MutedColor = new(Color.Parse("#888888"));
     private static readonly SolidColorBrush AccentColor = new(Color.Parse(ContainerExtensionModule.DockerBlueHex)); // Docker blue
-    private static readonly SolidColorBrush GreenColor  = new(Color.Parse("#4CAF50"));
-    private static readonly SolidColorBrush RedColor    = new(Color.Parse("#FF6B6B"));
+    private static readonly SolidColorBrush GreenColor = new(Color.Parse("#4CAF50"));
+    private static readonly SolidColorBrush RedColor = new(Color.Parse("#FF6B6B"));
     private static readonly SolidColorBrush YellowColor = new(Color.Parse("#FFD54F"));
-    private static readonly SolidColorBrush CardBg      = new(Color.Parse("#1A2496ED"));
-    private static readonly FontFamily MonoFont         = new("Cascadia Code, Consolas, Menlo, monospace");
+    private static readonly SolidColorBrush CardBg = new(Color.Parse("#1A2496ED"));
+    private static readonly FontFamily MonoFont = new("Cascadia Code, Consolas, Menlo, monospace");
 
     // Grid column indices for sortable header rows (CA1861 — avoid per-call allocation)
     private static readonly int[] ThreeColumnIndices = { 0, 2, 4 };
@@ -173,13 +173,15 @@ public partial class DockerDiagnosticsView : UserControl
         _lastRefreshedText = new TextBlock
         {
             Text = "",
-            FontSize = 11, Foreground = MutedColor,
+            FontSize = 11,
+            Foreground = MutedColor,
             VerticalAlignment = VerticalAlignment.Center
         };
         _countdownText = new TextBlock
         {
             Text = "",
-            FontSize = 11, Foreground = MutedColor,
+            FontSize = 11,
+            Foreground = MutedColor,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(8, 0, 0, 0)
         };
@@ -356,7 +358,7 @@ public partial class DockerDiagnosticsView : UserControl
                         Dispatcher.UIThread.Post(() => _countdownText.Text = "Refreshing...");
                         await Dispatcher.UIThread.InvokeAsync(async () =>
                         {
-                            try { await RefreshAllAsync(); } 
+                            try { await RefreshAllAsync(); }
                             catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView", "AutoRefresh", ex); }
                         });
                     }
@@ -598,7 +600,7 @@ public partial class DockerDiagnosticsView : UserControl
         {
             tags = await FEntwumS.ContainerExtension.Registry.RegistryClient.FetchTagsAsync(currentImage);
         }
-        catch (Exception ex) 
+        catch (Exception ex)
         {
             ContainerTelemetry.TrackError("DockerDiagnosticsView", "FetchTagsAsync", ex);
         }
@@ -629,7 +631,7 @@ public partial class DockerDiagnosticsView : UserControl
                 };
                 comboBox.ItemsSource = tags.Select(t => $"{currentImage.Split(':')[0]}:{t}").ToList();
                 comboBox.SelectedItem = tags.Any(t => currentImage.EndsWith($":{t}", StringComparison.OrdinalIgnoreCase)) ? currentImage : currentImage;
-                
+
                 // Only allow switching to tags for the current image
                 comboBox.SelectionChanged += (s, e) =>
                 {
@@ -656,7 +658,7 @@ public partial class DockerDiagnosticsView : UserControl
                     FontSize = 12,
                     VerticalAlignment = VerticalAlignment.Center
                 });
-                
+
                 row.Children.Add(new TextBlock
                 {
                     Text = "(Tags unavailable)",
@@ -680,9 +682,9 @@ public partial class DockerDiagnosticsView : UserControl
                         {
                             var runtimePath = _strategy.GetRuntimePath();
                             await _terminalService.ExecuteInTerminalAsync($"{runtimePath} pull \"{activeImg}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5));
-                            
+
                             // Prune dangling images to free disk space
-                            _ = _strategy.PruneDanglingImagesAsync(); 
+                            _ = _strategy.PruneDanglingImagesAsync();
                         }
                         catch (Exception ex)
                         {
@@ -693,7 +695,7 @@ public partial class DockerDiagnosticsView : UserControl
                 })
             };
             ToolTip.SetTip(btn, "Pulls the selected version of the toolchain and safely cleans up old dangling layers.");
-            
+
             row.Children.Add(btn);
             _toolchainContent.Children.Add(row);
         });
@@ -706,7 +708,8 @@ public partial class DockerDiagnosticsView : UserControl
 
         var statusDot = new Border
         {
-            Width = 10, Height = 10,
+            Width = 10,
+            Height = 10,
             CornerRadius = new CornerRadius(5),
             Background = isReachable ? GreenColor : RedColor,
             VerticalAlignment = VerticalAlignment.Center,
@@ -764,7 +767,9 @@ public partial class DockerDiagnosticsView : UserControl
             _statusContent.Children.Add(new TextBlock
             {
                 Text = "Start Docker Desktop or the Docker daemon to enable container execution.",
-                Foreground = MutedColor, FontSize = 11, FontStyle = FontStyle.Italic,
+                Foreground = MutedColor,
+                FontSize = 11,
+                FontStyle = FontStyle.Italic,
                 Margin = new Thickness(18, 4, 0, 0)
             });
         }
@@ -845,12 +850,12 @@ public partial class DockerDiagnosticsView : UserControl
                 var val = pairs[i].value;
                 var valColor = val switch
                 {
-                    "On"       => GreenColor,
-                    "Off"      => RedColor,
+                    "On" => GreenColor,
+                    "Off" => RedColor,
                     "No limit" => MutedColor,
-                    "None"     => MutedColor,
-                    "(none)"   => MutedColor,
-                    _          => FontColor
+                    "None" => MutedColor,
+                    "(none)" => MutedColor,
+                    _ => FontColor
                 };
 
                 var valBlock = new TextBlock
@@ -875,7 +880,9 @@ public partial class DockerDiagnosticsView : UserControl
         _configContent.Children.Add(new TextBlock
         {
             Text = "Settings: Binary Management > Container Engine",
-            Foreground = MutedColor, FontSize = 10, FontStyle = FontStyle.Italic,
+            Foreground = MutedColor,
+            FontSize = 10,
+            FontStyle = FontStyle.Italic,
             Margin = new Thickness(0, 2, 0, 0)
         });
     }
@@ -888,6 +895,17 @@ public partial class DockerDiagnosticsView : UserControl
     {
         SetOfflineContent(_containersContent);
         SetOfflineContent(_imagesContent);
+    }
+
+    private void ShowTemporaryError(string titlePrefix, Exception ex)
+    {
+        var msg = $"{titlePrefix}: {ex.Message}";
+        Dispatcher.UIThread.Post(() => _headerTitle.Text = msg);
+        _ = System.Threading.Tasks.Task.Delay(5000).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            if (_headerTitle.Text != null && _headerTitle.Text.StartsWith(titlePrefix, System.StringComparison.Ordinal))
+                UpdateHeaderBadge(_cachedContainers.Count);
+        }), System.Threading.Tasks.TaskScheduler.Default);
     }
 
     private WrapPanel BuildQuickActionsRow()
@@ -907,16 +925,10 @@ public partial class DockerDiagnosticsView : UserControl
                 var img = settings.GetValueOrDefault("Image", ContainerExtensionModule.FallbackImage);
                 await _terminalService.ExecuteInTerminalAsync($"{runtimePath} pull \"{img}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5));
             }
-            catch (Exception ex) 
-            { 
+            catch (Exception ex)
+            {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_PullImage", ex);
-                _ = Dispatcher.UIThread.InvokeAsync(async () => 
-                {
-                    _headerTitle.Text = $"⚠️ Action failed: {ex.Message}";
-                    await Task.Delay(5000);
-                    if (_headerTitle.Text != null && _headerTitle.Text.StartsWith("⚠️ Action failed", System.StringComparison.Ordinal))
-                        UpdateHeaderBadge(_cachedContainers.Count);
-                });
+                ShowTemporaryError("⚠️ Action failed", ex);
             }
         }, "Download or update the configured default toolchain image"));
 
@@ -936,16 +948,10 @@ public partial class DockerDiagnosticsView : UserControl
                     _ = RefreshAllAsync(); // Fire-and-forget; RefreshAllAsync has its own error handling
                 });
             }
-            catch (Exception ex) 
-            { 
+            catch (Exception ex)
+            {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_UpdateAllImages", ex);
-                _ = Dispatcher.UIThread.InvokeAsync(async () => 
-                {
-                    _headerTitle.Text = $"⚠️ Action failed: {ex.Message}";
-                    await Task.Delay(5000);
-                    if (_headerTitle.Text != null && _headerTitle.Text.StartsWith("⚠️ Action failed", System.StringComparison.Ordinal))
-                        UpdateHeaderBadge(_cachedContainers.Count);
-                });
+                ShowTemporaryError("⚠️ Action failed", ex);
             }
         }, "Re-pull all local images to their latest tags (cross-platform, no shell required)"));
 
@@ -956,16 +962,10 @@ public partial class DockerDiagnosticsView : UserControl
                 var runtimePath = _strategy.GetRuntimePath();
                 await _terminalService.ExecuteInTerminalAsync($"{runtimePath} image prune -a -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2));
             }
-            catch (Exception ex) 
-            { 
+            catch (Exception ex)
+            {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_PruneAllImages", ex);
-                _ = Dispatcher.UIThread.InvokeAsync(async () => 
-                {
-                    _headerTitle.Text = $"⚠️ Action failed: {ex.Message}";
-                    await Task.Delay(5000);
-                    if (_headerTitle.Text != null && _headerTitle.Text.StartsWith("⚠️ Action failed", System.StringComparison.Ordinal))
-                        UpdateHeaderBadge(_cachedContainers.Count);
-                });
+                ShowTemporaryError("⚠️ Action failed", ex);
             }
         }, "⚠️ Remove ALL unused images (not just dangling). This frees disk space but deleted images must be re-pulled."));
 
@@ -976,16 +976,10 @@ public partial class DockerDiagnosticsView : UserControl
                 var runtimePath = _strategy.GetRuntimePath();
                 await _terminalService.ExecuteInTerminalAsync($"{runtimePath} system prune -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2));
             }
-            catch (Exception ex) 
-            { 
+            catch (Exception ex)
+            {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_PruneSystem", ex);
-                _ = Dispatcher.UIThread.InvokeAsync(async () => 
-                {
-                    _headerTitle.Text = $"⚠️ Action failed: {ex.Message}";
-                    await Task.Delay(5000);
-                    if (_headerTitle.Text != null && _headerTitle.Text.StartsWith("⚠️ Action failed", System.StringComparison.Ordinal))
-                        UpdateHeaderBadge(_cachedContainers.Count);
-                });
+                ShowTemporaryError("⚠️ Action failed", ex);
             }
         }, "⚠️ Remove ALL stopped containers, dangling images, and unused networks. This cannot be undone."));
 
@@ -996,16 +990,10 @@ public partial class DockerDiagnosticsView : UserControl
                 var runtimePath = _strategy.GetRuntimePath();
                 await _terminalService.ExecuteInTerminalAsync($"{runtimePath} run --rm hello-world", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2));
             }
-            catch (Exception ex) 
-            { 
+            catch (Exception ex)
+            {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_HelloWorldTest", ex);
-                _ = Dispatcher.UIThread.InvokeAsync(async () => 
-                {
-                    _headerTitle.Text = $"⚠️ Action failed: {ex.Message}";
-                    await Task.Delay(5000);
-                    if (_headerTitle.Text != null && _headerTitle.Text.StartsWith("⚠️ Action failed", System.StringComparison.Ordinal))
-                        UpdateHeaderBadge(_cachedContainers.Count);
-                });
+                ShowTemporaryError("⚠️ Action failed", ex);
             }
         }, "Run a disposable hello-world container to verify Docker is working correctly"));
 
@@ -1016,16 +1004,10 @@ public partial class DockerDiagnosticsView : UserControl
                 var runtimePath = _strategy.GetRuntimePath();
                 await _terminalService.ExecuteInTerminalAsync($"{runtimePath} info", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(1));
             }
-            catch (Exception ex) 
-            { 
+            catch (Exception ex)
+            {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_EngineInfo", ex);
-                _ = Dispatcher.UIThread.InvokeAsync(async () => 
-                {
-                    _headerTitle.Text = $"⚠️ Action failed: {ex.Message}";
-                    await Task.Delay(5000);
-                    if (_headerTitle.Text != null && _headerTitle.Text.StartsWith("⚠️ Action failed", System.StringComparison.Ordinal))
-                        UpdateHeaderBadge(_cachedContainers.Count);
-                });
+                ShowTemporaryError("⚠️ Action failed", ex);
             }
         }, "Show detailed Docker engine configuration, storage driver, and runtime info"));
 
@@ -1041,16 +1023,10 @@ public partial class DockerDiagnosticsView : UserControl
                     await Console.Out.WriteLineAsync($"[ContainerExtension] 📋 Copied to clipboard: {cmd}");
                 }
             }
-            catch (Exception ex) 
-            { 
+            catch (Exception ex)
+            {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_CopyDockerRun", ex);
-                _ = Dispatcher.UIThread.InvokeAsync(async () => 
-                {
-                    _headerTitle.Text = $"⚠️ Copy failed: {ex.Message}";
-                    await Task.Delay(5000);
-                    if (_headerTitle.Text != null && _headerTitle.Text.StartsWith("⚠️ Copy failed", System.StringComparison.Ordinal))
-                        UpdateHeaderBadge(_cachedContainers.Count);
-                });
+                ShowTemporaryError("⚠️ Copy failed", ex);
             }
         }, "Copy an equivalent 'docker run' command to the clipboard for manual debugging"));
 

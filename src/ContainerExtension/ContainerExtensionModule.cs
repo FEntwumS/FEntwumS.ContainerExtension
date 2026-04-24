@@ -96,37 +96,37 @@ public class ContainerExtensionModule : OneWareModuleBase
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             // Simulation — VHDL
-            ["ghdl"]               = "hdlc/ghdl:yosys",
-            ["nvc"]                = "hdlc/nvc",
+            ["ghdl"] = "hdlc/ghdl:yosys",
+            ["nvc"] = "hdlc/nvc",
 
             // Simulation — Verilog
-            ["iverilog"]           = "hdlc/iverilog",
-            ["verilator"]          = "hdlc/verilator",
+            ["iverilog"] = "hdlc/iverilog",
+            ["verilator"] = "hdlc/verilator",
 
             // Synthesis
-            ["yosys"]              = "hdlc/ghdl:yosys",
-            ["apicula"]            = "hdlc/apicula",
+            ["yosys"] = "hdlc/ghdl:yosys",
+            ["apicula"] = "hdlc/apicula",
 
             // Place & Route — tools with dedicated hdlc images
-            ["nextpnr-ecp5"]       = "hdlc/impl/prjtrellis",
-            ["nextpnr-generic"]    = "hdlc/impl/generic",
-            ["nextpnr-ice40"]      = "hdlc/impl/icestorm",
-            ["nextpnr-nexus"]      = "hdlc/impl/prjoxide",
+            ["nextpnr-ecp5"] = "hdlc/impl/prjtrellis",
+            ["nextpnr-generic"] = "hdlc/impl/generic",
+            ["nextpnr-ice40"] = "hdlc/impl/icestorm",
+            ["nextpnr-nexus"] = "hdlc/impl/prjoxide",
 
             // Place & Route — no standalone hdlc image; use the full impl stack
             ["nextpnr-himbaechel"] = "hdlc/impl",
-            ["nextpnr-machxo2"]    = "hdlc/impl",
+            ["nextpnr-machxo2"] = "hdlc/impl",
 
             // Packing / Programming
-            ["openFPGALoader"]     = "hdlc/prog",
-            ["iceprog"]            = "hdlc/impl/icestorm",
-            ["icepack"]            = "hdlc/impl/icestorm",
-            ["gowin_pack"]         = "hdlc/impl",
-            ["gmpack"]             = "hdlc/impl",
-            ["gmupack"]            = "hdlc/impl",
+            ["openFPGALoader"] = "hdlc/prog",
+            ["iceprog"] = "hdlc/impl/icestorm",
+            ["icepack"] = "hdlc/impl/icestorm",
+            ["gowin_pack"] = "hdlc/impl",
+            ["gmpack"] = "hdlc/impl",
+            ["gmupack"] = "hdlc/impl",
 
             // Visualisation
-            ["gtkwave"]            = "hdlc/gtkwave",
+            ["gtkwave"] = "hdlc/gtkwave",
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     // ── Shared UI Constants ─────────────────────────────────────────────────
@@ -377,7 +377,7 @@ public class ContainerExtensionModule : OneWareModuleBase
 
         // ── Register Docker Toolbar Button ──────────────────────────────
         var windowService = serviceProvider.Resolve<IWindowService>();
-        windowService.RegisterUiExtension("MainWindow_RightToolBarExtension", 
+        windowService.RegisterUiExtension("MainWindow_RightToolBarExtension",
             new OneWareUiExtension(_ => new DockerButtonView(dockService, dashboardVm)));
 
         // ── Register Dockable Dashboard View ────────────────────────────

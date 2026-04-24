@@ -119,6 +119,9 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
     /// <summary>Ensures the cleanup hook runs exactly once even if both ProcessExit and CancelKeyPress fire.</summary>
     private static int _cleanupExecuted;
 
+    /// <summary>Stored CancelKeyPress handler for proper unsubscription in <see cref="Dispose"/>.</summary>
+    private static ConsoleCancelEventHandler? _cancelKeyPressHandler;
+
     // ═══════════════════════════════════════════════════════════════════════
     //  Constructor
     // ═══════════════════════════════════════════════════════════════════════
@@ -186,14 +189,19 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         }
 
         DetectedRuntime = runtime;
-        using var config = new DockerClientConfiguration(uri!);
+        if (uri is null)
+            throw new InvalidOperationException(
+                "Could not resolve a Docker daemon URI. Ensure Docker is installed and running, " +
+                "or set the DOCKER_HOST environment variable.");
+        using var config = new DockerClientConfiguration(uri);
         _client = config.CreateClient();
 
         // Register the ProcessExit hook exactly once (thread-safe)
         if (Interlocked.CompareExchange(ref _staticClientForCleanup, _client, null) == null)
         {
             AppDomain.CurrentDomain.ProcessExit += CleanupDanglingContainers;
-            Console.CancelKeyPress += (s, e) => CleanupDanglingContainers(s, e);
+            _cancelKeyPressHandler = (s, e) => CleanupDanglingContainers(s, e);
+            Console.CancelKeyPress += _cancelKeyPressHandler;
         }
     }
 
@@ -654,7 +662,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
             }
             return output.ToString();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             return $"Error fetching logs: {ex.Message}";
         }
@@ -797,6 +805,10 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
             var trimmed = line.AsSpan().Trim();
             if (trimmed.IsEmpty || trimmed[0] == '#') continue;
 
+            // Strip 'export ' prefix (common in Docker Compose and shell .env files)
+            if (trimmed.StartsWith("export ".AsSpan(), StringComparison.Ordinal))
+                trimmed = trimmed[7..].TrimStart();
+
             var eqIdx = trimmed.IndexOf('=');
             if (eqIdx < 0) continue;
 
@@ -883,7 +895,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         // If an EDA tool (like Yosys) is instructed to write to 'build/output.v', 
         // it will crash if 'build/' does not exist. We scan the arguments to gracefully
         // guarantee the folder structure exists on the host before launching the container.
-        
+
         // Compute strict bounds suffix to prevent prefix bleed (e.g. matching /project2 against /project)
         var workingDirBound = workingDirFull;
         if (!workingDirBound.EndsWith(Path.DirectorySeparatorChar) && !workingDirBound.EndsWith(Path.AltDirectorySeparatorChar))
@@ -910,7 +922,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                         if (!string.IsNullOrWhiteSpace(dir))
                         {
                             var absoluteDir = Path.GetFullPath(Path.Combine(workingDirFull, dir));
-                            
+
                             // Bounds string normalization for check
                             var absBound = absoluteDir;
                             if (!absBound.EndsWith(Path.DirectorySeparatorChar) && !absBound.EndsWith(Path.AltDirectorySeparatorChar))
@@ -937,7 +949,15 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         if (command.Arguments != null)
         {
             foreach (var arg in command.Arguments)
-                fullCmd.Add(arg.Replace("\r", ""));
+            {
+                var processedArg = arg.Replace("\r", "");
+                // Wrap arguments with spaces in quotes to survive flawed shell-based entrypoints (e.g. Yosys -p scripts)
+                if (processedArg.Contains(' ') && !processedArg.StartsWith('\"') && !processedArg.StartsWith('\''))
+                {
+                    processedArg = $"\"{processedArg}\"";
+                }
+                fullCmd.Add(processedArg);
+            }
         }
 
         var autoRemove = SafeGetSetting<bool>(ContainerExtensionModule.AutoRemoveSetting, true);
@@ -950,7 +970,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         {
             var sanitized = ContainerNameSanitizer.Replace(rawPrefix, "");
             if (sanitized.Length > 0)
-                containerName = $"{sanitized.TrimEnd('-')}-{command.ToolName}-{DateTime.Now:HHmmssfff}";
+                containerName = $"{sanitized.TrimEnd('-')}-{command.ToolName}-{DateTime.Now:HHmmssfff}-{Guid.NewGuid().ToString("N")[..4]}";
         }
 
         var createParams = new CreateContainerParameters
@@ -1155,18 +1175,25 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         try
         {
             // Use IProgress<ContainerStatsResponse> for strongly-typed stats (recommended API).
-            // The callback fires ≈1/s with a new stats frame while stream=true.
+            // The callback fires ~1/s with a new stats frame while stream=true.
+            // Interlocked/Volatile used for formal correctness: Progress<T> posts
+            // callbacks via SynchronizationContext, which in non-UI contexts routes
+            // to the ThreadPool. While Docker stats arrive sequentially, using
+            // atomic operations makes the code safe regardless of scheduling.
             var progress = new Progress<ContainerStatsResponse>(stats =>
             {
-                // ── Memory: track peak RSS ──────────────────────────
+                // -- Memory: track peak RSS --------------------------
                 if (stats.MemoryStats?.Usage > 0)
                 {
                     var currentMem = (long)stats.MemoryStats.Usage;
-                    if (currentMem > peakMemory)
-                        peakMemory = currentMem;
+                    // Interlocked CAS loop for lock-free peak tracking
+                    long current;
+                    do { current = Interlocked.Read(ref peakMemory); }
+                    while (currentMem > current &&
+                           Interlocked.CompareExchange(ref peakMemory, currentMem, current) != current);
                 }
 
-                // ── CPU: calculate delta-based utilization % ────────
+                // -- CPU: calculate delta-based utilization % --------
                 if (stats.CPUStats?.CPUUsage?.TotalUsage > 0 &&
                     stats.CPUStats?.SystemUsage > 0)
                 {
@@ -1185,8 +1212,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                         if (systemDelta > 0 && onlineCpus > 0)
                         {
                             var cpuPercent = (cpuDelta / systemDelta) * onlineCpus * 100.0;
-                            if (cpuPercent > maxCpu)
-                                maxCpu = cpuPercent;
+                            Volatile.Write(ref maxCpu, Math.Max(Volatile.Read(ref maxCpu), cpuPercent));
                         }
                     }
 
@@ -1194,7 +1220,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                     prevSystemTotal = systemTotal;
                 }
 
-                sampleCount++;
+                Interlocked.Increment(ref sampleCount);
             });
 
             // Blocks until the stream closes (container exits) or cancellation fires.
@@ -1204,16 +1230,16 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 progress,
                 ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) { /* Expected — container exited */ }
-        catch (Exception ex)
+        catch (OperationCanceledException) { /* Expected -- container exited */ }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             SdkLog(command, $"[Docker SDK] Stats collection ended: {ex.Message}", RankInfo);
         }
 
-        if (sampleCount == 0)
+        if (Interlocked.CompareExchange(ref sampleCount, 0, 0) == 0)
             return null;
 
-        return new ResourceProfile(peakMemory, Math.Round(maxCpu, 1), sampleCount, OomKilled: false);
+        return new ResourceProfile(Interlocked.Read(ref peakMemory), Math.Round(Volatile.Read(ref maxCpu), 1), sampleCount, OomKilled: false);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1251,9 +1277,17 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 wasCancelled = true;
                 try
                 {
-#pragma warning disable VSTHRD110  // Intentional fire-and-forget during cancellation
-                    _client.Containers.StopContainerAsync(containerId,
+                    // Capture the Task to prevent unobserved exceptions and enable
+                    // diagnostic logging when the stop fails (e.g., container already removed).
+                    var stopTask = _client.Containers.StopContainerAsync(containerId,
                         new ContainerStopParameters { WaitBeforeKillSeconds = 2 });
+#pragma warning disable VSTHRD110 // Faults are observed in the ContinueWith body
+                    stopTask.ContinueWith(t =>
+                    {
+                        if (t.IsFaulted)
+                            ContainerTelemetry.TrackError("DockerExecutionStrategy",
+                                $"Async container stop failed for '{containerId[..12]}'", t.Exception?.InnerException);
+                    }, TaskScheduler.Default);
 #pragma warning restore VSTHRD110
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -1282,6 +1316,9 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
             SdkLog(command, $"[Docker SDK] Container {containerId[..12]} started.", RankInfo);
 
             // ── Step 4: Demultiplex Output ──────────────────────────────
+            // Use CancellationToken.None for the Task.Run call itself so the
+            // output demuxer body always executes, even if ct is already cancelled.
+            // This ensures the flush in the finally block runs unconditionally.
             var readTask = Task.Run(async () =>
             {
                 var buffer = new byte[8192];
@@ -1310,11 +1347,13 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                     }
                 }
                 catch (OperationCanceledException) { /* Expected on cancellation */ }
-
-                // Flush any remaining partial lines
-                if (stdoutBuf.Length > 0) command.OutputHandler?.Invoke(stdoutBuf.ToString());
-                if (stderrBuf.Length > 0) command.ErrorHandler?.Invoke(stderrBuf.ToString());
-            }, ct);
+                finally
+                {
+                    // Flush any remaining partial lines — runs even if ct was pre-cancelled
+                    if (stdoutBuf.Length > 0) command.OutputHandler?.Invoke(stdoutBuf.ToString());
+                    if (stderrBuf.Length > 0) command.ErrorHandler?.Invoke(stderrBuf.ToString());
+                }
+            }, CancellationToken.None);
 
             // ── Step 4b: Collect Resource Stats (parallel) ──────────────
             // Fire-and-forget stats collection alongside the output demuxer.
@@ -1349,9 +1388,21 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 ContainerTelemetry.TrackError("DockerExecutionStrategy", "Resource stats collection failed", ex);
             }
 
-            // Detect OOM kill: exit code 137 = SIGKILL (9) + 128 = kernel OOM killer
-            if (exitCode == 137 && profile != null)
-                profile = profile with { OomKilled = true };
+            // Definitive OOM detection: inspect container state instead of relying
+            // solely on exit code 137, which can also be caused by manual docker kill,
+            // docker stop --time 0, or host-level kill -9 (false positives).
+            try
+            {
+                var inspect = await _client.Containers.InspectContainerAsync(containerId, ct).ConfigureAwait(false);
+                if (inspect.State.OOMKilled && profile != null)
+                    profile = profile with { OomKilled = true };
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                // Fallback to exit code heuristic if inspect fails (container already removed, etc.)
+                if (exitCode == 137 && profile != null)
+                    profile = profile with { OomKilled = true };
+            }
 
             containerStopwatch.Stop();
 
@@ -1396,7 +1447,9 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
     /// <returns>A tuple of (success, captured_output).</returns>
     public async Task<(bool success, string output)> ExecuteAsync(ToolCommand command)
     {
-        var executable = (command.Executable ?? command.ToolName).Replace("\r", "");
+        // Note: \r stripping for the container command is done canonically in
+        // BuildContainerParameters. This local copy is used only for logging/telemetry.
+        var executable = command.Executable ?? command.ToolName;
         var stopwatch = Stopwatch.StartNew();
         string image = ContainerExtensionModule.FallbackImage;
         string? imageDigest = null;
@@ -1525,9 +1578,14 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         if (Interlocked.CompareExchange(ref _staticClientForCleanup, null, _client) == _client)
         {
             AppDomain.CurrentDomain.ProcessExit -= CleanupDanglingContainers;
+            if (_cancelKeyPressHandler != null)
+            {
+                Console.CancelKeyPress -= _cancelKeyPressHandler;
+                _cancelKeyPressHandler = null;
+            }
             // Ensure orphans for this client are cleaned before it's disposed
             CleanupDanglingContainers(null, EventArgs.Empty);
-            
+
             // To allow future clients to act as cleanup hosts, reset the executed flag
             Volatile.Write(ref _cleanupExecuted, 0);
         }

@@ -32,7 +32,9 @@ public partial class DockerDiagnosticsView
             _telemetryContent.Children.Add(new TextBlock
             {
                 Text = "Telemetry is disabled (Retention = None). Change the Telemetry Retention setting to enable execution history.",
-                Foreground = YellowColor, FontSize = 11, FontStyle = FontStyle.Italic
+                Foreground = YellowColor,
+                FontSize = 11,
+                FontStyle = FontStyle.Italic
             });
             return;
         }
@@ -47,7 +49,9 @@ public partial class DockerDiagnosticsView
             statsRow.Children.Add(new TextBlock
             {
                 Text = $"{totalRuns} runs | {successRate}% success | avg {avgDuration}s",
-                FontFamily = MonoFont, FontSize = 11, Foreground = FontColor,
+                FontFamily = MonoFont,
+                FontSize = 11,
+                Foreground = FontColor,
                 FontWeight = FontWeight.SemiBold,
                 VerticalAlignment = VerticalAlignment.Center
             });
@@ -79,7 +83,9 @@ public partial class DockerDiagnosticsView
             _telemetryContent.Children.Add(new TextBlock
             {
                 Text = "No executions recorded yet. Run a tool to see history here.",
-                Foreground = MutedColor, FontSize = 11, FontStyle = FontStyle.Italic
+                Foreground = MutedColor,
+                FontSize = 11,
+                FontStyle = FontStyle.Italic
             });
             return;
         }
@@ -243,7 +249,9 @@ public partial class DockerDiagnosticsView
                 _telemetryContent.Children.Add(new TextBlock
                 {
                     Text = $"... and {totalRuns - entries.Count} more run(s) — Open Log to see all entries",
-                    Foreground = MutedColor, FontSize = 10, FontStyle = FontStyle.Italic,
+                    Foreground = MutedColor,
+                    FontSize = 10,
+                    FontStyle = FontStyle.Italic,
                     Margin = new Thickness(0, 2, 0, 0)
                 });
             }
@@ -268,7 +276,9 @@ public partial class DockerDiagnosticsView
                     _telemetryContent.Children.Add(new TextBlock
                     {
                         Text = $"Exported to {destPath}",
-                        FontSize = 10, Foreground = GreenColor, FontStyle = FontStyle.Italic,
+                        FontSize = 10,
+                        Foreground = GreenColor,
+                        FontStyle = FontStyle.Italic,
                         Margin = new Thickness(0, 2, 0, 0)
                     });
                 }
@@ -282,7 +292,9 @@ public partial class DockerDiagnosticsView
             _telemetryContent.Children.Add(new TextBlock
             {
                 Text = "No recent executions recorded.",
-                FontSize = 11, Foreground = MutedColor, FontStyle = FontStyle.Italic
+                FontSize = 11,
+                Foreground = MutedColor,
+                FontStyle = FontStyle.Italic
             });
         }
     }
