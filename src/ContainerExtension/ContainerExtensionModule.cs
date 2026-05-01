@@ -154,7 +154,7 @@ public class ContainerExtensionModule : OneWareModuleBase
     // ═══════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Called during plugin discovery. Registers the execution strategy and 
+    /// Called during plugin discovery. Registers the execution strategy and
     /// dashboard viewmodel as singletons so the Dock Layout framework can resolve them.
     /// </summary>
     public override void RegisterServices(IServiceCollection services)

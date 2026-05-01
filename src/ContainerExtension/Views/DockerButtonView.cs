@@ -1,10 +1,12 @@
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.Layout;
+using CommunityToolkit.Mvvm.Input;
 using ContainerExtension.ViewModels;
 using OneWare.Essentials.Enums;
 using OneWare.Essentials.Services;
-using System;
 
 namespace ContainerExtension.Views;
 
@@ -12,49 +14,39 @@ public class DockerButtonView : UserControl
 {
     public DockerButtonView(IMainDockService dockService, DockerDiagnosticsViewModel dashboardVm)
     {
+        var textBlock = new TextBlock
+        {
+            Text = "🐳 Docker",
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center
+        };
+
         var button = new Button
         {
+            Content = textBlock,
             CornerRadius = new CornerRadius(4),
             Margin = new Thickness(1),
-            Padding = new Thickness(6),
+            Padding = new Thickness(6, 4),
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0)
         };
 
-        ToolTip.SetTip(button, "Container Diagnostics");
+        ToolTip.SetTip(button, "Container Dashboard");
 
-        // UI initializations for Geometry can fail if invoked too early before
-        // the Avalonia Renderer is initialized. Moving this inside a dispatcher
-        // post block ensures the platform is ready.
-        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        button.Command = new RelayCommand(() =>
         {
-            try
+            var existing = dockService.SearchView<DockerDiagnosticsViewModel>().FirstOrDefault();
+            if (existing != null)
             {
-                var pathIcon = new PathIcon
-                {
-                    Data = Geometry.Parse(ContainerExtensionModule.WhaleIconPath),
-                    Foreground = new SolidColorBrush(Color.Parse(ContainerExtensionModule.DockerBlueHex)),
-                    Width = 14,
-                    Height = 14
-                };
-                button.Content = pathIcon;
+                dockService.Show(existing);
+                return;
             }
-            catch (Exception ex)
-            {
-                // Better slightly broken UI than a hard crash on IDE startup
-                Console.WriteLine($"[ContainerExtension] Warning: Failed to render Docker button icon: {ex.Message}");
-            }
+
+            dockService.Show(dashboardVm, DockShowLocation.RightPinned);
         });
 
-        button.Click += (_, _) =>
-        {
-            if (dockService.SearchView(dashboardVm) == null)
-            {
-                dockService.RegisterLayoutExtension<DockerDiagnosticsViewModel>(DockShowLocation.RightPinned);
-            }
-            dockService.Show(dashboardVm, DockShowLocation.RightPinned);
-        };
-
+        Margin = new Thickness(5, 0, 0, 0);
         Content = button;
     }
 }

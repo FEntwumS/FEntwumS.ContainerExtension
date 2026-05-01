@@ -49,6 +49,14 @@ ENV PATH="/opt/oss-cad-suite/bin:${PATH}"
 
 WORKDIR /workspace
 
+# Drop root privileges for defense-ready execution
+RUN groupadd -g 1000 oneware \
+    && useradd -u 1000 -g oneware -m -s /bin/bash oneware \
+    && chown -R oneware:oneware /workspace \
+    && chown -R oneware:oneware /opt/oss-cad-suite
+
+USER oneware
+
 # Smoke test — verify key tools are functional
 RUN yosys --version && \
     nextpnr-ice40 --version && \

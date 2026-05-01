@@ -85,6 +85,7 @@ public static class ContainerTelemetry
     /// <param name="maxCpuPercent">Highest CPU utilization sample as a percentage (null if stats unavailable).</param>
     /// <param name="oomKilled">Whether the container was killed by the kernel OOM killer.</param>
     /// <param name="maxEntries">Maximum entries to retain (0 = unlimited).</param>
+    /// <param name="errorMessage">Optional error message if the execution failed before container start.</param>
     public static void LogExecution(
         string image,
         string tool,
@@ -96,7 +97,8 @@ public static class ContainerTelemetry
         long? peakMemoryBytes = null,
         double? maxCpuPercent = null,
         bool oomKilled = false,
-        int maxEntries = 0)
+        int maxEntries = 0,
+        string? errorMessage = null)
     {
         try
         {
@@ -118,7 +120,8 @@ public static class ContainerTelemetry
                 DockerRunCommand = dockerRunCommand,
                 PeakMemoryBytes = peakMemoryBytes,
                 MaxCpuPercent = maxCpuPercent.HasValue ? Math.Round(maxCpuPercent.Value, 1) : null,
-                OomKilled = oomKilled
+                OomKilled = oomKilled,
+                ErrorMessage = errorMessage
             };
 
             var json = JsonSerializer.Serialize(entry, TelemetryJsonContext.Default.TelemetryEntry);
@@ -546,6 +549,10 @@ public static class ContainerTelemetry
         [JsonPropertyName("oom")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         public bool OomKilled { get; set; }
+
+        /// <summary>Error message if execution failed before container start (null on success). Omitted when null.</summary>
+        [JsonPropertyName("error_msg")]
+        public string? ErrorMessage { get; set; }
     }
 
     /// <summary>A single exception/error telemetry record.</summary>

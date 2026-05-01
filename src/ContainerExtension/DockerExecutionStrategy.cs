@@ -373,7 +373,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         // Bind mounts
         if (p.HostConfig?.Binds != null)
             foreach (var bind in p.HostConfig.Binds)
-                sb.Append(CultureInfo.InvariantCulture, $" -v \"{bind}\"");
+                sb.Append(CultureInfo.InvariantCulture, $" -v \"{bind.Replace('\\', '/')}\"");
 
         // Working directory
         if (!string.IsNullOrEmpty(p.WorkingDir)) sb.Append(CultureInfo.InvariantCulture, $" -w {p.WorkingDir}");
@@ -886,13 +886,13 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
     /// <returns>Fully configured container creation parameters.</returns>
     private CreateContainerParameters BuildContainerParameters(string image, ToolCommand command)
     {
-        var executable = (command.Executable ?? command.ToolName).Replace("\r", "");
+        var executable = (command.Executable ?? command.ToolName).Replace("\r", "").Replace('\\', '/');
         var workingDirFull = Path.GetFullPath(command.WorkingDirectory);
         var rawPrefix = SafeGetSetting<string>(ContainerExtensionModule.ContainerNamePrefixSetting, "containerextension-");
 
         // ── Pre-emptively Create Output Directories ─────────────────────────────
         // Docker does not auto-create missing subdirectories inside volume mounts.
-        // If an EDA tool (like Yosys) is instructed to write to 'build/output.v', 
+        // If an EDA tool (like Yosys) is instructed to write to 'build/output.v',
         // it will crash if 'build/' does not exist. We scan the arguments to gracefully
         // guarantee the folder structure exists on the host before launching the container.
 
@@ -943,19 +943,17 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 }
             }
         }
-
         // Assemble the full command line
         var fullCmd = new List<string> { executable };
         if (command.Arguments != null)
         {
             foreach (var arg in command.Arguments)
             {
-                var processedArg = arg.Replace("\r", "");
-                // Wrap arguments with spaces in quotes to survive flawed shell-based entrypoints (e.g. Yosys -p scripts)
-                if (processedArg.Contains(' ') && !processedArg.StartsWith('\"') && !processedArg.StartsWith('\''))
-                {
-                    processedArg = $"\"{processedArg}\"";
-                }
+                // Docker SDK Cmd uses exec form (direct execve) — each list element
+                // is already a distinct argv entry. Do NOT add shell-style quotes
+                // around arguments with spaces; there is no shell to strip them,
+                // so they would become literal quote characters in the argument.
+                var processedArg = arg.Replace("\r", "").Replace('\\', '/');
                 fullCmd.Add(processedArg);
             }
         }
@@ -1447,6 +1445,17 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
     /// <returns>A tuple of (success, captured_output).</returns>
     public async Task<(bool success, string output)> ExecuteAsync(ToolCommand command)
     {
+        // === EARLY DEBUG TRACE — writes before ANY other code ===
+        const string debugLogPath = "/Users/mtorun/.oneware/docker_debug.log";
+        void DebugTrace(string msg)
+        {
+            try { File.AppendAllText(debugLogPath, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\n"); }
+            catch { /* never fail */ }
+        }
+        DebugTrace($">>> ExecuteAsync ENTERED. ToolName='{command.ToolName}', Executable='{command.Executable}'");
+        DebugTrace($"    WorkingDirectory='{command.WorkingDirectory}'");
+        DebugTrace($"    Arguments=[{string.Join(", ", command.Arguments ?? Array.Empty<string>())}]");
+
         // Note: \r stripping for the container command is done canonically in
         // BuildContainerParameters. This local copy is used only for logging/telemetry.
         var executable = command.Executable ?? command.ToolName;
@@ -1477,49 +1486,69 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
 
         SdkLog(command, $"[Docker SDK] ExecuteAsync started for '{executable}'.", RankInfo);
 
+
+        string? errorMessage = null;
+
         try
         {
             // Step 1: Resolve the container image
+            DebugTrace("Step 1: Resolving image...");
+            SdkLog(command, $"[Docker SDK] Step 1: Resolving image for tool '{executable}'...", RankInfo);
             image = ResolveImage(command.ToolName);
+            DebugTrace($"Step 1: Resolved image: {image}");
+            SdkLog(command, $"[Docker SDK] Step 1: Resolved image: {image}", RankInfo);
 
             // Step 2: Build container configuration
+            DebugTrace("Step 2: Building container parameters...");
+            SdkLog(command, $"[Docker SDK] Step 2: Building container parameters...", RankInfo);
             var createParams = BuildContainerParameters(image, command);
+            DebugTrace($"Step 2: Cmd = [{string.Join(", ", createParams.Cmd ?? new List<string>())}]");
+            SdkLog(command, $"[Docker SDK] Step 2: Cmd = [{string.Join(", ", createParams.Cmd ?? new List<string>())}]", RankInfo);
+            SdkLog(command, $"[Docker SDK] Step 2: WorkingDir = {createParams.WorkingDir}, Binds = [{string.Join(", ", createParams.HostConfig?.Binds ?? new List<string>())}]", RankInfo);
 
             // Step 3: Ensure image is available (auto-pull if needed)
+            DebugTrace($"Step 3: Ensuring image '{image}' is available...");
+            SdkLog(command, $"[Docker SDK] Step 3: Ensuring image '{image}' is available...", RankInfo);
             imageDigest = await EnsureImageAsync(image, command, ct).ConfigureAwait(false);
+            DebugTrace($"Step 3: Image ready. Digest = {imageDigest ?? "(none)"}");
+            SdkLog(command, $"[Docker SDK] Step 3: Image ready. Digest = {imageDigest ?? "(none)"}", RankInfo);
 
             // Reconstruct the exact CLI command for telemetry
             reconstructedDockerRun = ReconstructDockerRunCommand(createParams);
+            SdkLog(command, $"[Docker SDK] Equivalent CLI: {reconstructedDockerRun}", RankInfo);
 
             // Step 4: Run the container lifecycle
+            SdkLog(command, $"[Docker SDK] Step 4: Creating and starting container...", RankInfo);
             var result = await RunContainerAsync(createParams, command, ct).ConfigureAwait(false);
             exitCode = result.exitCode;
             wasCancelled = result.wasCancelled;
             resourceProfile = result.profile;
 
+            SdkLog(command, $"[Docker SDK] Container finished. Exit code: {exitCode}", RankInfo);
             return (exitCode == 0, result.output);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException oce)
         {
+            DebugTrace($"CAUGHT OperationCanceledException: {oce.Message}");
             wasCancelled = true;
-            if (_currentLogLevelRank.Value >= RankErrors)
-            {
-                var msg = timeoutMinutes > 0
-                    ? $"[Docker SDK] Execution timed out after {timeoutMinutes:N0} minute(s)."
-                    : "[Docker SDK] Operation cancelled.";
-                command.ErrorHandler?.Invoke(msg);
-            }
+            errorMessage = timeoutMinutes > 0
+                ? $"Execution timed out after {timeoutMinutes:N0} minute(s)."
+                : "Operation cancelled.";
+            command.ErrorHandler?.Invoke($"[Docker SDK] {errorMessage}");
             return (false, "Cancelled");
         }
         catch (Exception ex)
         {
-            if (_currentLogLevelRank.Value >= RankErrors)
-            {
-                var err = $"[Docker SDK Error] {ex.Message}";
-                if (ex.Message.Contains("No such image", StringComparison.OrdinalIgnoreCase))
-                    err += $"\n💡 Hint: Run 'docker pull {image}' to cache the image locally.";
-                command.ErrorHandler?.Invoke(err);
-            }
+            DebugTrace($"CAUGHT {ex.GetType().Name}: {ex.Message}");
+            DebugTrace($"  Stack: {ex.StackTrace}");
+            errorMessage = ex.Message;
+            var err = $"[Docker SDK Error] {ex.GetType().Name}: {ex.Message}";
+            if (ex.Message.Contains("No such image", StringComparison.OrdinalIgnoreCase))
+                err += $"\n  Hint: Run 'docker pull {image}' to cache the image locally.";
+            if (ex.Message.Contains("pull access denied", StringComparison.OrdinalIgnoreCase))
+                err += $"\n  Hint: The image '{image}' does not exist on Docker Hub or requires authentication.";
+            command.ErrorHandler?.Invoke(err);
+            ContainerTelemetry.TrackError("DockerExecutionStrategy", $"ExecuteAsync failed for '{executable}'", ex);
             return (false, ex.Message);
         }
         finally
@@ -1545,13 +1574,14 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                     peakMemoryBytes: resourceProfile?.PeakMemoryBytes,
                     maxCpuPercent: resourceProfile?.MaxCpuPercent,
                     oomKilled: resourceProfile?.OomKilled ?? false,
-                    maxEntries: maxEntries);
+                    maxEntries: maxEntries,
+                    errorMessage: errorMessage);
             }
 
             // Notify the IDE console for long-running jobs (>30s) so users who switched away are alerted
             if (stopwatch.Elapsed.TotalSeconds > 30)
             {
-                var status = exitCode == 0 ? "✅ succeeded" : (wasCancelled ? "⚠️ cancelled" : "❌ failed");
+                var status = exitCode == 0 ? "succeeded" : (wasCancelled ? "cancelled" : "failed");
                 Console.WriteLine(
                     $"[ContainerExtension] {status}: {executable} completed in {stopwatch.Elapsed.TotalSeconds:F1}s (exit {exitCode})");
             }
