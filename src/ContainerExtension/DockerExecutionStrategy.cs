@@ -413,7 +413,11 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         {
             foreach (var arg in p.Cmd)
             {
-                if (arg.Contains(' ') || arg.Contains('\t'))
+                if (string.IsNullOrEmpty(arg))
+                {
+                    sb.Append(" \"\"");
+                }
+                else if (arg.Contains(' ') || arg.Contains('\t'))
                 {
                     // Escape internal quotes if any
                     var escapedArg = arg.Replace("\"", "\\\"");
