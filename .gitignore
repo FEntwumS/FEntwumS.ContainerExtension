@@ -91,3 +91,7 @@ final_*.txt
 
 full_source_bundle.md
 generate_bundle.py
+
+# ── Credentials ──────────────────────────────────────────────────────────────
+
+youtube/youtube.json

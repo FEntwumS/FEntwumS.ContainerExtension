@@ -164,10 +164,21 @@ public partial class DockerDiagnosticsView : UserControl
             Margin = new Thickness(0, 2, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
-        searchBox.TextChanged += (_, _) =>
+        CancellationTokenSource? searchCts = null;
+        searchBox.TextChanged += async (_, _) =>
         {
+            searchCts?.Cancel();
+            searchCts?.Dispose();
+            searchCts = new CancellationTokenSource();
+            var token = searchCts.Token;
+
             _searchFilter = searchBox.Text ?? "";
-            ApplySearchFilter();
+            
+            try { await Task.Delay(250, token); }
+            catch (TaskCanceledException) { return; }
+
+            if (!token.IsCancellationRequested)
+                ApplySearchFilter();
         };
 
         _lastRefreshedText = new TextBlock
@@ -668,32 +679,41 @@ public partial class DockerDiagnosticsView : UserControl
                 });
             }
 
-            var btn = new Button
+            Button btn = null!;
+            btn = new Button
             {
                 Content = "Check for Updates & Pull",
                 Padding = new Thickness(8, 4),
-                VerticalAlignment = VerticalAlignment.Center,
-                Command = new RelayCommand(() =>
-                {
-                    var activeImg = tags.Count > 0 && row.Children[1] is ComboBox cb && cb.SelectedItem is string sel ? sel : currentImage;
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            var runtimePath = _strategy.GetRuntimePath();
-                            await _terminalService.ExecuteInTerminalAsync($"{runtimePath} pull \"{activeImg}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5));
-
-                            // Prune dangling images to free disk space
-                            _ = _strategy.PruneDanglingImagesAsync();
-                        }
-                        catch (Exception ex)
-                        {
-                            ContainerTelemetry.TrackError("DockerDiagnosticsView", "UpdateAndPullImage", ex);
-                            Dispatcher.UIThread.Post(() => _headerTitle.Text = $"⚠️ Update failed: {ex.Message}");
-                        }
-                    });
-                })
+                VerticalAlignment = VerticalAlignment.Center
             };
+            btn.Command = new AsyncRelayCommand(async () =>
+            {
+                var activeImg = tags.Count > 0 && row.Children[1] is ComboBox cb && cb.SelectedItem is string sel ? sel : currentImage;
+                var prevTip = ToolTip.GetTip(btn);
+                try
+                {
+                    btn.IsEnabled = false;
+                    btn.Content = "Pulling...";
+                    var runtimePath = _strategy.GetRuntimePath();
+                    await _terminalService.ExecuteInTerminalAsync($"{runtimePath} pull \"{activeImg}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5));
+
+                    // Prune dangling images to free disk space
+                    _ = _strategy.PruneDanglingImagesAsync();
+                }
+                catch (Exception ex)
+                {
+                    ContainerTelemetry.TrackError("DockerDiagnosticsView", "UpdateAndPullImage", ex);
+                    btn.Content = "Error ✗";
+                    ToolTip.SetTip(btn, $"Update failed: {ex.Message}");
+                    await Task.Delay(3000);
+                    ToolTip.SetTip(btn, prevTip);
+                }
+                finally
+                {
+                    btn.Content = "Check for Updates & Pull";
+                    btn.IsEnabled = true;
+                }
+            });
             ToolTip.SetTip(btn, "Pulls the selected version of the toolchain and safely cleans up old dangling layers.");
 
             row.Children.Add(btn);

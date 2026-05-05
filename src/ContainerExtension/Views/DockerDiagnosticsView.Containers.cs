@@ -243,12 +243,24 @@ public partial class DockerDiagnosticsView
                     VerticalAlignment = VerticalAlignment.Center,
                     Command = new AsyncRelayCommand(async () =>
                     {
+                        var prevTip = ToolTip.GetTip(startBtn);
                         try
                         {
+                            startBtn.IsEnabled = false;
+                            startBtn.Content = "Starting...";
                             await _strategy.StartContainerAsync(startContainerId);
                             await RefreshAllAsync();
                         }
-                        catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Action_StartContainer", ex); }
+                        catch (Exception ex)
+                        {
+                            ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Action_StartContainer", ex);
+                            startBtn.Content = "Error ✗";
+                            ToolTip.SetTip(startBtn, $"Failed to start: {ex.Message}");
+                            await Task.Delay(3000);
+                            startBtn.Content = "Start";
+                            ToolTip.SetTip(startBtn, prevTip);
+                            startBtn.IsEnabled = true;
+                        }
                     })
                 };
                 ToolTip.SetTip(startBtn, "Restart this stopped container");
@@ -263,12 +275,24 @@ public partial class DockerDiagnosticsView
                     VerticalAlignment = VerticalAlignment.Center,
                     Command = new AsyncRelayCommand(async () =>
                     {
+                        var prevTip = ToolTip.GetTip(removeBtn);
                         try
                         {
+                            removeBtn.IsEnabled = false;
+                            removeBtn.Content = "Removing...";
                             await _strategy.RemoveContainerAsync(rmContainerId);
                             await RefreshAllAsync();
                         }
-                        catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Action_RemoveContainer", ex); }
+                        catch (Exception ex)
+                        {
+                            ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Action_RemoveContainer", ex);
+                            removeBtn.Content = "Error ✗";
+                            ToolTip.SetTip(removeBtn, $"Failed to remove: {ex.Message}");
+                            await Task.Delay(3000);
+                            removeBtn.Content = "Remove";
+                            ToolTip.SetTip(removeBtn, prevTip);
+                            removeBtn.IsEnabled = true;
+                        }
                     })
                 };
                 ToolTip.SetTip(removeBtn, "Delete this stopped container and free its resources");

@@ -18,14 +18,17 @@ namespace ContainerExtension.ViewModels;
 public class DockerDiagnosticsViewModel : ExtendedTool
 {
     /// <summary>The DI service provider for resolving OneWare services.</summary>
+    [Newtonsoft.Json.JsonIgnore]
     public IServiceProvider? ServiceProvider { get; }
 
     /// <summary>The Docker execution strategy instance for live API queries.</summary>
+    [Newtonsoft.Json.JsonIgnore]
     public DockerExecutionStrategy? Strategy { get; }
 
     /// <summary>
     /// Default parameterless constructor required by the Dock layout deserializer.
     /// </summary>
+    [Newtonsoft.Json.JsonConstructor]
     public DockerDiagnosticsViewModel() : base(string.Empty)
     {
         Id = "Container_Dashboard";

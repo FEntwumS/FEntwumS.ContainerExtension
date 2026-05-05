@@ -13,6 +13,7 @@ using Docker.DotNet.Models;
 using Microsoft.Extensions.DependencyInjection;
 using OneWare.Essentials.Services;
 using OneWare.Essentials.ToolEngine;
+using ContainerExtension.Services.Docker;
 
 namespace ContainerExtension;
 
@@ -50,6 +51,10 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
 
     private readonly ISettingsService _settingsService;
     private readonly DockerClient _client;
+
+    private readonly DockerConnectionProvider _connectionProvider;
+    private readonly DockerImageManager _imageManager;
+    private readonly DockerContainerManager _containerManager;
 
     /// <summary>
     /// Exposes the Docker client for module-level operations (e.g. dangling container cleanup).
@@ -195,6 +200,10 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 "or set the DOCKER_HOST environment variable.");
         using var config = new DockerClientConfiguration(uri);
         _client = config.CreateClient();
+
+        _connectionProvider = new DockerConnectionProvider(_client);
+        _imageManager = new DockerImageManager(_client, _settingsService);
+        _containerManager = new DockerContainerManager(_client);
 
         // Register the ProcessExit hook exactly once (thread-safe)
         if (Interlocked.CompareExchange(ref _staticClientForCleanup, _client, null) == null)
@@ -464,19 +473,8 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
     /// Pings the daemon to verify connectivity. Used by the health check on plugin load.
     /// </summary>
     /// <returns><c>true</c> if the daemon is reachable; <c>false</c> otherwise.</returns>
-    public async Task<bool> PingAsync(CancellationToken ct = default)
-    {
-        try
-        {
-            await _client.System.PingAsync(ct).ConfigureAwait(false);
-            return true;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            ContainerTelemetry.TrackError("DockerExecutionStrategy", "Daemon ping failed", ex);
-            return false;
-        }
-    }
+    public Task<bool> PingAsync(CancellationToken ct = default)
+        => _connectionProvider.PingAsync(ct);
 
     // ═══════════════════════════════════════════════════════════════════════
     //  Dashboard Query Methods
@@ -486,224 +484,82 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
     /// Retrieves system-level information from the Docker daemon (version, OS, memory, CPUs).
     /// Used by the Docker Desktop dashboard status panel.
     /// </summary>
-    public async Task<SystemInfoResponse?> GetSystemInfoAsync(CancellationToken ct = default)
-    {
-        try { return await _client.System.GetSystemInfoAsync(ct).ConfigureAwait(false); }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            ContainerTelemetry.TrackError("DockerExecutionStrategy", "GetSystemInfoAsync failed", ex);
-            return null;
-        }
-    }
+    public Task<SystemInfoResponse?> GetSystemInfoAsync(CancellationToken ct = default)
+        => _connectionProvider.GetSystemInfoAsync(ct);
 
     /// <summary>
     /// Lists all containers (running and stopped) from the Docker daemon.
     /// Used by the Docker Desktop dashboard containers section.
     /// </summary>
-    public async Task<IList<ContainerListResponse>> ListContainersAsync(CancellationToken ct = default)
-    {
-        try
-        {
-            return await _client.Containers.ListContainersAsync(
-                new ContainersListParameters { All = true, Limit = 50 }, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            ContainerTelemetry.TrackError("DockerExecutionStrategy", "ListContainersAsync failed", ex);
-            return Array.Empty<ContainerListResponse>();
-        }
-    }
+    public Task<IList<ContainerListResponse>> ListContainersAsync(CancellationToken ct = default)
+        => _containerManager.ListContainersAsync(ct);
 
     /// <summary>
     /// Lists all locally cached Docker images.
     /// Used by the Docker Desktop dashboard images section.
     /// </summary>
-    public async Task<IList<ImagesListResponse>> ListImagesAsync(CancellationToken ct = default)
-    {
-        try
-        {
-            return await _client.Images.ListImagesAsync(
-                new ImagesListParameters { All = false }, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            ContainerTelemetry.TrackError("DockerExecutionStrategy", "ListImagesAsync failed", ex);
-            return Array.Empty<ImagesListResponse>();
-        }
-    }
+    public Task<IList<ImagesListResponse>> ListImagesAsync(CancellationToken ct = default)
+        => _imageManager.ListImagesAsync(ct);
 
     /// <summary>
     /// Stops a specific container by ID. Used by the dashboard's stop button.
     /// </summary>
-    public async Task StopContainerAsync(string containerId, CancellationToken ct = default)
-    {
-        await _client.Containers.StopContainerAsync(
-            containerId, new ContainerStopParameters { WaitBeforeKillSeconds = 5 }, ct).ConfigureAwait(false);
-    }
+    public Task StopContainerAsync(string containerId, CancellationToken ct = default)
+        => _containerManager.StopContainerAsync(containerId, ct);
 
     /// <summary>
     /// Starts a specific stopped container by ID. Used by the dashboard's start button.
     /// </summary>
-    public async Task StartContainerAsync(string containerId, CancellationToken ct = default)
-    {
-        await _client.Containers.StartContainerAsync(
-            containerId, new ContainerStartParameters(), ct).ConfigureAwait(false);
-    }
+    public Task StartContainerAsync(string containerId, CancellationToken ct = default)
+        => _containerManager.StartContainerAsync(containerId, ct);
 
     /// <summary>
     /// Removes a specific container by ID. Used by the dashboard's remove button.
     /// </summary>
-    public async Task RemoveContainerAsync(string containerId, CancellationToken ct = default)
-    {
-        await _client.Containers.RemoveContainerAsync(
-            containerId, new ContainerRemoveParameters { Force = true }, ct).ConfigureAwait(false);
-    }
+    public Task RemoveContainerAsync(string containerId, CancellationToken ct = default)
+        => _containerManager.RemoveContainerAsync(containerId, ct);
 
     /// <summary>
     /// Removes a specific image by ID. Used by the dashboard's remove button.
     /// </summary>
-    public async Task RemoveImageAsync(string imageId, CancellationToken ct = default)
-    {
-        await _client.Images.DeleteImageAsync(
-            imageId, new ImageDeleteParameters { Force = false }, ct).ConfigureAwait(false);
-    }
+    public Task RemoveImageAsync(string imageId, CancellationToken ct = default)
+        => _imageManager.RemoveImageAsync(imageId, ct);
 
     /// <summary>
     /// Re-pulls all tagged (non-dangling) local images via the Docker SDK.
     /// Cross-platform replacement for the bash-specific grep/xargs pipeline.
     /// Returns a summary of how many images were updated.
     /// </summary>
-    public async Task<(int pulled, int failed)> UpdateAllImagesAsync(Action<string>? progress = null, CancellationToken ct = default)
-    {
-        var images = await _client.Images.ListImagesAsync(
-            new ImagesListParameters { All = false }, ct).ConfigureAwait(false);
-
-        var platform = SafeGetSetting<string>(ContainerExtensionModule.PlatformSetting, "auto");
-        int pulled = 0, failed = 0;
-
-        foreach (var img in images)
-        {
-            if (img.RepoTags == null) continue;
-            foreach (var tag in img.RepoTags)
-            {
-                if (tag.Contains("<none>")) continue;
-                try
-                {
-                    progress?.Invoke($"Pulling {tag}...");
-                    var pullParams = new ImagesCreateParameters { FromImage = tag };
-                    if (!string.IsNullOrWhiteSpace(platform) && !platform.Equals("auto", StringComparison.OrdinalIgnoreCase))
-                        pullParams.Platform = platform;
-                    await _client.Images.CreateImageAsync(
-                        pullParams, null, new Progress<JSONMessage>(_ => { }), ct).ConfigureAwait(false);
-                    pulled++;
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
-                {
-                    ContainerTelemetry.TrackError("DockerExecutionStrategy", $"Re-pull failed for '{tag}'", ex);
-                    failed++;
-                }
-            }
-        }
-        return (pulled, failed);
-    }
+    public Task<(int pulled, int failed)> UpdateAllImagesAsync(Action<string>? progress = null, CancellationToken ct = default)
+        => _imageManager.UpdateAllImagesAsync(progress, ct);
 
     /// <summary>
     /// Prunes dangling (untagged) images from the local Docker daemon.
     /// Crucial for preventing disk space leaks after an image is updated or re-pulled.
     /// </summary>
-    public async Task<int> PruneDanglingImagesAsync(CancellationToken ct = default)
-    {
-        try
-        {
-            var filters = new Dictionary<string, IDictionary<string, bool>>
-            {
-                { "dangling", new Dictionary<string, bool> { { "true", true } } }
-            };
-
-            var response = await _client.Images.PruneImagesAsync(
-                new ImagesPruneParameters { Filters = filters }, ct).ConfigureAwait(false);
-
-            return response.ImagesDeleted?.Count ?? 0;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            ContainerTelemetry.TrackError("DockerExecutionStrategy", "Dangling image prune failed", ex);
-            return 0;
-        }
-    }
+    public Task<int> PruneDanglingImagesAsync(CancellationToken ct = default)
+        => _imageManager.PruneDanglingImagesAsync(ct);
 
     /// <summary>
     /// Retrieves the last <paramref name="tailLines"/> lines of a container's logs.
     /// Used by the dashboard's log viewer button.
     /// </summary>
-    public async Task<string> GetContainerLogsAsync(string containerId, int tailLines = 50, CancellationToken ct = default)
-    {
-        try
-        {
-            using var stream = await _client.Containers.GetContainerLogsAsync(
-                containerId,
-                false,
-                new ContainerLogsParameters { ShowStdout = true, ShowStderr = true, Tail = tailLines.ToString(CultureInfo.InvariantCulture) },
-                ct).ConfigureAwait(false);
-
-            var output = new StringBuilder();
-            var buffer = new byte[8192];
-            // Stateful decoder: caches trailing incomplete UTF-8 bytes across 8KB chunk
-            // boundaries, preventing multi-byte characters (emoji, CJK, Cyrillic) from
-            // being split and replaced with \uFFFD replacement characters.
-            var decoder = Encoding.UTF8.GetDecoder();
-            var charBuf = new char[Encoding.UTF8.GetMaxCharCount(buffer.Length)];
-            while (!ct.IsCancellationRequested)
-            {
-                var result = await stream.ReadOutputAsync(buffer, 0, buffer.Length, ct).ConfigureAwait(false);
-                if (result.EOF) break;
-                var charCount = decoder.GetChars(buffer, 0, result.Count, charBuf, 0, flush: false);
-                output.Append(charBuf, 0, charCount);
-            }
-            return output.ToString();
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            return $"Error fetching logs: {ex.Message}";
-        }
-    }
+    public Task<string> GetContainerLogsAsync(string containerId, int tailLines = 50, CancellationToken ct = default)
+        => _containerManager.GetContainerLogsAsync(containerId, tailLines, ct);
 
     /// <summary>
     /// Computes disk usage summary from an already-fetched image list.
     /// Avoids a duplicate ListImagesAsync call when the dashboard already has the data.
     /// </summary>
     public static (int imageCount, long totalSizeBytes, long reclaimableBytes) ComputeDiskUsage(IList<ImagesListResponse> images)
-    {
-        long totalSize = 0;
-        long dangling = 0;
-        foreach (var img in images)
-        {
-            totalSize += img.Size;
-            if (img.RepoTags == null || img.RepoTags.Count == 0 ||
-                (img.RepoTags.Count == 1 && img.RepoTags[0] == "<none>:<none>"))
-                dangling += img.Size;
-        }
-        return (images.Count, totalSize, dangling);
-    }
+        => DockerImageManager.ComputeDiskUsage(images);
 
     /// <summary>
     /// Returns a summary of Docker disk usage computed from the local image inventory.
     /// Prefer <see cref="ComputeDiskUsage"/> when images are already available.
     /// </summary>
-    public async Task<(int imageCount, long totalSizeBytes, long reclaimableBytes)> GetDiskUsageSummaryAsync(CancellationToken ct = default)
-    {
-        try
-        {
-            var images = await _client.Images.ListImagesAsync(
-                new ImagesListParameters { All = false }, ct).ConfigureAwait(false);
-            return ComputeDiskUsage(images);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            ContainerTelemetry.TrackError("DockerExecutionStrategy", "GetDiskUsageSummaryAsync failed", ex);
-            return (0, 0, 0);
-        }
-    }
+    public Task<(int imageCount, long totalSizeBytes, long reclaimableBytes)> GetDiskUsageSummaryAsync(CancellationToken ct = default)
+        => _imageManager.GetDiskUsageSummaryAsync(ct);
 
     // ═══════════════════════════════════════════════════════════════════════
     //  Orphan Container Cleanup

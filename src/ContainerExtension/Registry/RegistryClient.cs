@@ -81,8 +81,8 @@ public static class RegistryClient
         using var response = await _httpClient.GetAsync(url).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
-        var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-        using var doc = JsonDocument.Parse(json);
+        using var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+        using var doc = await JsonDocument.ParseAsync(stream).ConfigureAwait(false);
         var results = doc.RootElement.GetProperty("results");
 
         var tags = new List<string>();
@@ -98,7 +98,7 @@ public static class RegistryClient
             }
         }
 
-        return tags.Where(t => !string.IsNullOrEmpty(t)).ToList();
+        return tags;
     }
 
     private static async Task<List<string>> FetchGhcrTagsAsync(string ns, string repo)
@@ -112,8 +112,8 @@ public static class RegistryClient
         using var tokenResponse = await _httpClient.SendAsync(tokenReq).ConfigureAwait(false);
         tokenResponse.EnsureSuccessStatusCode();
 
-        var tokenJson = await tokenResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
-        using var tokenDoc = JsonDocument.Parse(tokenJson);
+        using var tokenStream = await tokenResponse.Content.ReadAsStreamAsync().ConfigureAwait(false);
+        using var tokenDoc = await JsonDocument.ParseAsync(tokenStream).ConfigureAwait(false);
         if (!tokenDoc.RootElement.TryGetProperty("token", out var tokenProp))
             return new List<string>();
 
@@ -125,8 +125,8 @@ public static class RegistryClient
         using var tagsResponse = await _httpClient.SendAsync(tagsReq).ConfigureAwait(false);
         tagsResponse.EnsureSuccessStatusCode();
 
-        var tagsJson = await tagsResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
-        using var tagsDoc = JsonDocument.Parse(tagsJson);
+        using var tagsStream = await tagsResponse.Content.ReadAsStreamAsync().ConfigureAwait(false);
+        using var tagsDoc = await JsonDocument.ParseAsync(tagsStream).ConfigureAwait(false);
         if (tagsDoc.RootElement.TryGetProperty("tags", out var tagsArray))
         {
             var tags = new List<string>();

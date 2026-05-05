@@ -10,43 +10,53 @@ using OneWare.Essentials.Services;
 
 namespace ContainerExtension.Views;
 
-public class DockerButtonView : UserControl
-{
-    public DockerButtonView(IMainDockService dockService, DockerDiagnosticsViewModel dashboardVm)
+    public class DockerButtonView : UserControl
     {
-        var textBlock = new TextBlock
-        {
-            Text = "🐳 Docker",
-            FontSize = 12,
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Center
-        };
+        private bool _isPinned;
 
-        var button = new Button
+        public DockerButtonView(IMainDockService dockService, DockerDiagnosticsViewModel dashboardVm)
         {
-            Content = textBlock,
-            CornerRadius = new CornerRadius(4),
-            Margin = new Thickness(1),
-            Padding = new Thickness(6, 4),
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0)
-        };
-
-        ToolTip.SetTip(button, "Container Dashboard");
-
-        button.Command = new RelayCommand(() =>
-        {
-            var existing = dockService.SearchView<DockerDiagnosticsViewModel>().FirstOrDefault();
-            if (existing != null)
+            var textBlock = new TextBlock
             {
-                dockService.Show(existing);
-                return;
-            }
+                Text = "🐳 Docker",
+                FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
 
-            dockService.Show(dashboardVm, DockShowLocation.RightPinned);
-        });
+            var button = new Button
+            {
+                Content = textBlock,
+                CornerRadius = new CornerRadius(4),
+                Margin = new Thickness(1),
+                Padding = new Thickness(6, 4),
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0)
+            };
 
-        Margin = new Thickness(5, 0, 0, 0);
-        Content = button;
+            ToolTip.SetTip(button, "Docker Dashboard");
+
+            button.Command = new RelayCommand(() =>
+            {
+                var existing = dockService.SearchView<DockerDiagnosticsViewModel>().FirstOrDefault();
+                if (existing != null)
+                {
+                    dockService.Show(existing);
+                    return;
+                }
+
+                if (!_isPinned)
+                {
+                    dockService.Show(dashboardVm, DockShowLocation.RightPinned);
+                    _isPinned = true;
+                }
+                else
+                {
+                    dockService.Show(dashboardVm);
+                }
+            });
+
+            Margin = new Thickness(5, 0, 0, 0);
+            Content = button;
+        }
     }
-}

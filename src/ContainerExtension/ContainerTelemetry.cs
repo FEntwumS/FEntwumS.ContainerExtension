@@ -146,7 +146,7 @@ public static class ContainerTelemetry
                         // Initialize cache from file if unknown (-1)
                         if (Volatile.Read(ref _cachedLineCount) < 0)
                         {
-                            Volatile.Write(ref _cachedLineCount, File.ReadAllLines(TelemetryPath).Length);
+                            Volatile.Write(ref _cachedLineCount, System.Linq.Enumerable.Count(File.ReadLines(TelemetryPath)));
                         }
                         else
                         {
@@ -157,9 +157,9 @@ public static class ContainerTelemetry
                         if (_cachedLineCount > trimThreshold)
                         {
                             // Trim: Queue keeps at most maxEntries lines
-                            // Load the entire file with ReadAllLines to release file handle quickly
+                            // Use ReadLines for lazy enumeration instead of reading all into an array
                             var q = new Queue<string>(maxEntries);
-                            foreach (var line in File.ReadAllLines(TelemetryPath))
+                            foreach (var line in File.ReadLines(TelemetryPath))
                             {
                                 q.Enqueue(line);
                                 if (q.Count > maxEntries) q.Dequeue();
@@ -238,11 +238,11 @@ public static class ContainerTelemetry
                     const int errorTrimThreshold = 600;
                     if (File.Exists(ErrorTelemetryPath))
                     {
-                        var lines = File.ReadAllLines(ErrorTelemetryPath);
-                        if (lines.Length > errorTrimThreshold)
+                        var lineCount = System.Linq.Enumerable.Count(File.ReadLines(ErrorTelemetryPath));
+                        if (lineCount > errorTrimThreshold)
                         {
                             var q = new Queue<string>(maxErrorEntries);
-                            foreach (var line in lines)
+                            foreach (var line in File.ReadLines(ErrorTelemetryPath))
                             {
                                 q.Enqueue(line);
                                 if (q.Count > maxErrorEntries) q.Dequeue();
@@ -292,9 +292,8 @@ public static class ContainerTelemetry
                     acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
                     if (!File.Exists(TelemetryPath)) return results;
 
-                    var allLines = File.ReadAllLines(TelemetryPath);
                     var q = new Queue<string>(count);
-                    foreach (var line in allLines)
+                    foreach (var line in File.ReadLines(TelemetryPath))
                     {
                         q.Enqueue(line);
                         if (q.Count > count) q.Dequeue();
@@ -341,7 +340,7 @@ public static class ContainerTelemetry
                     int total = 0, successes = 0;
                     double totalDuration = 0;
 
-                    foreach (var line in File.ReadAllLines(TelemetryPath))
+                    foreach (var line in File.ReadLines(TelemetryPath))
                     {
                         if (string.IsNullOrWhiteSpace(line)) continue;
                         var entry = JsonSerializer.Deserialize(line, TelemetryJsonContext.Default.TelemetryEntry);
@@ -461,7 +460,7 @@ public static class ContainerTelemetry
                     // deserialization pass that would occur with raw string queuing.
                     var q = new Queue<TelemetryEntry>(count);
 
-                    foreach (var line in File.ReadAllLines(TelemetryPath))
+                    foreach (var line in File.ReadLines(TelemetryPath))
                     {
                         if (string.IsNullOrWhiteSpace(line)) continue;
                         var entry = JsonSerializer.Deserialize(line, TelemetryJsonContext.Default.TelemetryEntry);
