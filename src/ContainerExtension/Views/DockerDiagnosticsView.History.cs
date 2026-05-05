@@ -1,3 +1,4 @@
+using static ContainerExtension.Views.UIBuilderHelpers;
 using System;
 using System.Globalization;
 using System.IO;

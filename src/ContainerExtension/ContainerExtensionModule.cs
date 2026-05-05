@@ -335,16 +335,43 @@ public class ContainerExtensionModule : OneWareModuleBase
             }
         );
 
+        // ── Fire-and-Forget Health Check + Pre-Pull ────────────────────
+        // Use a CTS that cancels on process exit to prevent ObjectDisposedException
+        // if the IDE shuts down while the background pre-pull is still running.
+        var startupCts = new CancellationTokenSource();
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => startupCts.Cancel();
+
         // ── Inject Strategy into All Tools ──────────────────────────────
         var toolService = serviceProvider.Resolve<IToolService>();
         var dockerStrategy = serviceProvider.Resolve<DockerExecutionStrategy>();
-        var packageService = serviceProvider.Resolve<IPackageService>();
 
         // Initial injection for tools already loaded
         InjectStrategyIntoAllTools(toolService, dockerStrategy, settingsService);
 
-        // Deferred injection for tools loaded later via plugins (fixes Issue #19 race condition)
-        packageService.PackagesUpdated += (_, _) => InjectStrategyIntoAllTools(toolService, dockerStrategy, settingsService);
+        // Robust polling mechanism to detect dynamically loaded tools (Resolves Issue #19 race conditions)
+        // Uses the startupCts linked to ProcessExit to avoid leaks
+        _ = Task.Run(async () =>
+        {
+            var knownToolCount = toolService.GetAllTools().Count;
+            while (!startupCts.Token.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(1000, startupCts.Token);
+                    var currentToolCount = toolService.GetAllTools().Count;
+                    if (currentToolCount != knownToolCount)
+                    {
+                        knownToolCount = currentToolCount;
+                        InjectStrategyIntoAllTools(toolService, dockerStrategy, settingsService);
+                    }
+                }
+                catch (TaskCanceledException) { break; }
+                catch (Exception ex)
+                {
+                    ContainerTelemetry.TrackError("ContainerExtensionModule", "ToolPollingError", ex);
+                }
+            }
+        }, startupCts.Token);
 
         // ── Create Dashboard VM (singleton) ──────────────────────────────
         var dockService = serviceProvider.Resolve<IMainDockService>();
@@ -363,12 +390,6 @@ public class ContainerExtensionModule : OneWareModuleBase
         Avalonia.Application.Current!.DataTemplates.Insert(0,
             new FuncDataTemplate<DockerDiagnosticsViewModel>((_, _) =>
                 new DockerDiagnosticsView(serviceProvider, dockerStrategy), true));
-
-        // ── Fire-and-Forget Health Check + Pre-Pull ────────────────────
-        // Use a CTS that cancels on process exit to prevent ObjectDisposedException
-        // if the IDE shuts down while the background pre-pull is still running.
-        var startupCts = new CancellationTokenSource();
-        AppDomain.CurrentDomain.ProcessExit += (_, _) => startupCts.Cancel();
 
         _ = Task.Run(async () =>
         {

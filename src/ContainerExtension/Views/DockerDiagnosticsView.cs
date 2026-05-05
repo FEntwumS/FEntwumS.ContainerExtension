@@ -1,3 +1,4 @@
+using static ContainerExtension.Views.UIBuilderHelpers;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -44,22 +45,9 @@ namespace ContainerExtension.Views;
     Justification = "UserControl lifecycle manages _refreshCts disposal via DetachedFromVisualTree handler.")]
 public partial class DockerDiagnosticsView : UserControl
 {
-    // ── Color Palette ───────────────────────────────────────────────────
-    private static readonly SolidColorBrush FontColor = new(Color.Parse("#E0E0E0"));
-    private static readonly SolidColorBrush MutedColor = new(Color.Parse("#888888"));
-    private static readonly SolidColorBrush AccentColor = new(Color.Parse(ContainerExtensionModule.DockerBlueHex)); // Docker blue
-    private static readonly SolidColorBrush GreenColor = new(Color.Parse("#4CAF50"));
-    private static readonly SolidColorBrush RedColor = new(Color.Parse("#FF6B6B"));
-    private static readonly SolidColorBrush YellowColor = new(Color.Parse("#FFD54F"));
-    private static readonly SolidColorBrush CardBg = new(Color.Parse("#1A2496ED"));
-    private static readonly FontFamily MonoFont = new("Cascadia Code, Consolas, Menlo, monospace");
-
     // Grid column indices for sortable header rows (CA1861 — avoid per-call allocation)
     private static readonly int[] ThreeColumnIndices = { 0, 2, 4 };
     private static readonly int[] SevenColumnIndices = { 0, 2, 4, 6, 8, 10, 12 };
-
-    // Session-persistent collapsed/expanded state (survives panel close/reopen within session)
-    private static readonly Dictionary<string, bool> SectionExpandedState = new();
 
     // ── Instance State ──────────────────────────────────────────────────
     private readonly DockerExecutionStrategy _strategy;
