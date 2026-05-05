@@ -417,10 +417,10 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 {
                     sb.Append(" \"\"");
                 }
-                else if (arg.Contains(' ') || arg.Contains('\t'))
+                else if (arg.Any(c => char.IsWhiteSpace(c) || ";&|<>*?[]{}()$\\'\"#~`!".Contains(c)))
                 {
-                    // Escape internal quotes if any
-                    var escapedArg = arg.Replace("\"", "\\\"");
+                    // Escape internal double quotes and backslashes for bash compatibility
+                    var escapedArg = arg.Replace("\\", "\\\\").Replace("\"", "\\\"");
                     sb.Append(CultureInfo.InvariantCulture, $" \"{escapedArg}\"");
                 }
                 else
