@@ -27,7 +27,7 @@ public sealed class DockerImageManager
     {
         try
         {
-            var value = _settingsService.GetSetting<T>(key);
+            var value = _settingsService.GetSettingValue<T>(key);
             if (value == null) return fallback;
             if (typeof(T) == typeof(string) && string.IsNullOrWhiteSpace(value.ToString()))
                 return fallback;

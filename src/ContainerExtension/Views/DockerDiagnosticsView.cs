@@ -165,21 +165,30 @@ public partial class DockerDiagnosticsView : UserControl
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
         CancellationTokenSource? searchCts = null;
+#pragma warning disable VSTHRD101 // Avoid using async lambda for a void returning delegate type
         searchBox.TextChanged += async (_, _) =>
         {
-            searchCts?.Cancel();
-            searchCts?.Dispose();
-            searchCts = new CancellationTokenSource();
-            var token = searchCts.Token;
+            try
+            {
+                searchCts?.Cancel();
+                searchCts?.Dispose();
+                searchCts = new CancellationTokenSource();
+                var token = searchCts.Token;
 
-            _searchFilter = searchBox.Text ?? "";
-            
-            try { await Task.Delay(250, token); }
-            catch (TaskCanceledException) { return; }
+                _searchFilter = searchBox.Text ?? "";
+                
+                try { await Task.Delay(250, token); }
+                catch (TaskCanceledException) { return; }
 
-            if (!token.IsCancellationRequested)
-                ApplySearchFilter();
+                if (!token.IsCancellationRequested)
+                    ApplySearchFilter();
+            }
+            catch (Exception ex)
+            {
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "SearchBox_TextChanged", ex);
+            }
         };
+#pragma warning restore VSTHRD101
 
         _lastRefreshedText = new TextBlock
         {

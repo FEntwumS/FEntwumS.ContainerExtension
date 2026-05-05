@@ -410,8 +410,21 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         // Image + command
         sb.Append(CultureInfo.InvariantCulture, $" {p.Image}");
         if (p.Cmd != null)
+        {
             foreach (var arg in p.Cmd)
-                sb.Append(CultureInfo.InvariantCulture, $" {arg}");
+            {
+                if (arg.Contains(' ') || arg.Contains('\t'))
+                {
+                    // Escape internal quotes if any
+                    var escapedArg = arg.Replace("\"", "\\\"");
+                    sb.Append(CultureInfo.InvariantCulture, $" \"{escapedArg}\"");
+                }
+                else
+                {
+                    sb.Append(CultureInfo.InvariantCulture, $" {arg}");
+                }
+            }
+        }
 
         return sb.ToString();
     }

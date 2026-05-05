@@ -235,7 +235,8 @@ public partial class DockerDiagnosticsView
             else
             {
                 var startContainerId = c.ID;
-                var startBtn = new Button
+                Button startBtn = null!;
+                startBtn = new Button
                 {
                     Content = "Start",
                     FontSize = 10,
@@ -267,7 +268,8 @@ public partial class DockerDiagnosticsView
                 btnPanel.Children.Add(startBtn);
 
                 var rmContainerId = c.ID;
-                var removeBtn = new Button
+                Button removeBtn = null!;
+                removeBtn = new Button
                 {
                     Content = "Remove",
                     FontSize = 10,

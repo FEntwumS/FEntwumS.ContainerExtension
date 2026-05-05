@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using ContainerExtension;
+using ContainerExtension.Validations;
 using Xunit;
 
 namespace ContainerExtension.UnitTests;
