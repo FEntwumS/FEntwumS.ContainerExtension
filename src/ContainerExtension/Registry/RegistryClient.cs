@@ -11,7 +11,14 @@ namespace FEntwumS.ContainerExtension.Registry;
 
 public static class RegistryClient
 {
-    private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+    private static readonly HttpClient _httpClient = CreateHttpClient();
+
+    private static HttpClient CreateHttpClient()
+    {
+        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("ContainerExtension/1.0");
+        return client;
+    }
 
     /// <summary>
     /// Fetches available tags for a given remote image reference.

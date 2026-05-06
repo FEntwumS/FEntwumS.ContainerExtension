@@ -68,6 +68,7 @@ public partial class DockerDiagnosticsView : UserControl
 
     // Auto-refresh state
     private CancellationTokenSource? _refreshCts;
+    private CancellationTokenSource? _searchDebounceCts;
     private readonly TextBlock _lastRefreshedText;
     private readonly TextBlock _countdownText;
     private int _refreshIntervalSeconds;
@@ -152,16 +153,15 @@ public partial class DockerDiagnosticsView : UserControl
             Margin = new Thickness(0, 2, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
-        CancellationTokenSource? searchCts = null;
 #pragma warning disable VSTHRD101 // Avoid using async lambda for a void returning delegate type
         searchBox.TextChanged += async (_, _) =>
         {
             try
             {
-                searchCts?.Cancel();
-                searchCts?.Dispose();
-                searchCts = new CancellationTokenSource();
-                var token = searchCts.Token;
+                _searchDebounceCts?.Cancel();
+                _searchDebounceCts?.Dispose();
+                _searchDebounceCts = new CancellationTokenSource();
+                var token = _searchDebounceCts.Token;
 
                 _searchFilter = searchBox.Text ?? "";
                 
@@ -301,6 +301,9 @@ public partial class DockerDiagnosticsView : UserControl
             _refreshCts?.Cancel();
             _refreshCts?.Dispose();
             _refreshCts = null;
+            _searchDebounceCts?.Cancel();
+            _searchDebounceCts?.Dispose();
+            _searchDebounceCts = null;
             _hasAttached = false; // Allow re-attach to refresh again (F15)
 
             // Close any orphan container log windows spawned from this dashboard
