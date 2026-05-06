@@ -9,7 +9,7 @@
 	shallow = true
 	ignore = dirty
 [submodule "docker/oss-cad-suite-build"]
-	path = docker/oss-cad-suite-build
+	path = docker/oss-cad-suite/oss-cad-suite-build
 	url = https://github.com/YosysHQ/oss-cad-suite-build.git
 	shallow = true
 	ignore = dirty

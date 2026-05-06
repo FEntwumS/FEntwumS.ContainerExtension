@@ -95,3 +95,6 @@ generate_bundle.py
 # ── Credentials ──────────────────────────────────────────────────────────────
 
 youtube/youtube.json
+NetListViewer/
+OneWare/
+Ghdl/
