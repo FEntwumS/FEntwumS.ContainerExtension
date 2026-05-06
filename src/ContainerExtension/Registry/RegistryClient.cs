@@ -26,6 +26,8 @@ public static class RegistryClient
     /// </summary>
     public static async Task<List<string>> FetchTagsAsync(string imageReference)
     {
+        if (string.IsNullOrWhiteSpace(imageReference)) return new List<string>();
+
         try
         {
             var parts = ParseImageReference(imageReference);

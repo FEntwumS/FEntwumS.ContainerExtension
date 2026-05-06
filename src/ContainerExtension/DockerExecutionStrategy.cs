@@ -472,8 +472,19 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         try
         {
             using var p = Process.Start(new ProcessStartInfo { FileName = "id", Arguments = arg, RedirectStandardOutput = true, UseShellExecute = false });
-            var id = p?.StandardOutput.ReadToEnd().Trim();
-            if (!string.IsNullOrEmpty(id) && int.TryParse(id, out _)) return id;
+            if (p != null)
+            {
+                if (p.WaitForExit(1000))
+                {
+                    var id = p.StandardOutput.ReadToEnd().Trim();
+                    if (!string.IsNullOrEmpty(id) && int.TryParse(id, out _)) return id;
+                }
+                else
+                {
+                    try { p.Kill(); } catch { /* Ignore kill errors */ }
+                    ContainerTelemetry.TrackError("DockerExecutionStrategy", $"UID/GID probe for '{arg}' timed out after 1000ms", null);
+                }
+            }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -841,7 +852,10 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         {
             var sanitized = ContainerNameSanitizer.Replace(rawPrefix, "");
             if (sanitized.Length > 0)
-                containerName = $"{sanitized.TrimEnd('-')}-{command.ToolName}-{DateTime.Now:HHmmssfff}-{Guid.NewGuid().ToString("N")[..4]}";
+            {
+                var safeToolName = ContainerNameSanitizer.Replace(command.ToolName ?? "tool", "");
+                containerName = $"{sanitized.TrimEnd('-')}-{safeToolName}-{DateTime.Now:HHmmssfff}-{Guid.NewGuid().ToString("N")[..4]}";
+            }
         }
 
         var createParams = new CreateContainerParameters
