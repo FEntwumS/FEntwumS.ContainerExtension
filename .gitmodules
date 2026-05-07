@@ -1,10 +1,10 @@
 [submodule "benchmarking_suite/neorv32"]
-	path = benchmarking_suite/neorv32
+	path = tests/benchmarking_suite/neorv32
 	url = https://github.com/stnolting/neorv32.git
 	shallow = true
 	ignore = dirty
 [submodule "benchmarking_suite/picorv32"]
-	path = benchmarking_suite/picorv32
+	path = tests/benchmarking_suite/picorv32
 	url = https://github.com/YosysHQ/picorv32.git
 	shallow = true
 	ignore = dirty
