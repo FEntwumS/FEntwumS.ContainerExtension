@@ -98,3 +98,11 @@ youtube/youtube.json
 NetListViewer/
 OneWare/
 Ghdl/
+_beispielprojekte/
+build_errors.log
+.dotnet_cli_home/
+.dotnet_home/
+.nuget_packages/
+.nuget_scratch/
+scratch/
+
