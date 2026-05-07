@@ -495,7 +495,7 @@ public partial class DockerDiagnosticsView : UserControl
                 // Daemon unreachable — show offline state for all daemon-dependent sections
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    if (ct.IsCancellationRequested) return;
+                    if (!_hasAttached) return;
                     PopulateStatus(false, null);
                     PopulateConfig(settings);
                     PopulateOfflineSections();
@@ -529,7 +529,7 @@ public partial class DockerDiagnosticsView : UserControl
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "RefreshAllAsync_ParallelQuery", ex);
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    if (ct.IsCancellationRequested) return;
+                    if (!_hasAttached) return;
                     _headerTitle.Text = $"{ContainerExtensionModule.DashboardTitle} ⚠️ API Error";
                     ToolTip.SetTip(_headerTitle, ex.Message);
                     _quickActionsRow.IsEnabled = true;
@@ -549,7 +549,7 @@ public partial class DockerDiagnosticsView : UserControl
             // Update UI on the Avalonia dispatcher thread
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                if (ct.IsCancellationRequested) return;
+                if (!_hasAttached) return;
                 PopulateStatus(true, info);
 
                 // Skip-if-unchanged: compare a lightweight fingerprint of container/image data

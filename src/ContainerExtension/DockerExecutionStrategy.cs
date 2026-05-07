@@ -813,7 +813,10 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                                 absBound += Path.DirectorySeparatorChar;
 
                             // Security check: rigorously verify that the determined path physically lives within the workspace
-                            if (absBound.StartsWith(workingDirBound, StringComparison.OrdinalIgnoreCase) &&
+                            var osAwareComparison = RuntimeInformation.IsOSPlatform(OSPlatform.Linux) 
+                                ? StringComparison.Ordinal 
+                                : StringComparison.OrdinalIgnoreCase;
+                            if (absBound.StartsWith(workingDirBound, osAwareComparison) &&
                                 !Directory.Exists(absoluteDir))
                             {
                                 Directory.CreateDirectory(absoluteDir);

@@ -133,7 +133,8 @@ public static class ContainerTelemetry
                 bool acquired = false;
                 try
                 {
-                    acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
+                    try { acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true; }
+                    catch (AbandonedMutexException) { acquired = true; }
                     if (!acquired) return; // Cross-process lock failed — skip write to prevent corruption
                     File.AppendAllText(TelemetryPath, json + Environment.NewLine);
 
@@ -228,7 +229,8 @@ public static class ContainerTelemetry
                 bool acquired = false;
                 try
                 {
-                    acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
+                    try { acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true; }
+                    catch (AbandonedMutexException) { acquired = true; }
                     if (!acquired) return;
 
                     File.AppendAllText(ErrorTelemetryPath, json + Environment.NewLine);
@@ -289,7 +291,8 @@ public static class ContainerTelemetry
                 bool acquired = false;
                 try
                 {
-                    acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
+                    try { acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true; }
+                    catch (AbandonedMutexException) { acquired = true; }
                     if (!File.Exists(TelemetryPath)) return results;
 
                     var q = new Queue<string>(count);
@@ -334,7 +337,8 @@ public static class ContainerTelemetry
                 bool acquired = false;
                 try
                 {
-                    acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
+                    try { acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true; }
+                    catch (AbandonedMutexException) { acquired = true; }
                     if (!File.Exists(TelemetryPath)) return (0, 0, 0);
 
                     int total = 0, successes = 0;
@@ -381,7 +385,8 @@ public static class ContainerTelemetry
                 bool acquired = false;
                 try
                 {
-                    acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
+                    try { acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true; }
+                    catch (AbandonedMutexException) { acquired = true; }
                     if (!File.Exists(TelemetryPath)) return false;
                     var destDir = Path.GetDirectoryName(destinationPath);
                     if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
@@ -415,7 +420,8 @@ public static class ContainerTelemetry
                 bool acquired = false;
                 try
                 {
-                    acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
+                    try { acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true; }
+                    catch (AbandonedMutexException) { acquired = true; }
                     if (File.Exists(TelemetryPath)) File.Delete(TelemetryPath);
                     Volatile.Write(ref _cachedLineCount, -1); // Force re-read from disk on next write (handles cross-process races)
                 }
@@ -452,7 +458,8 @@ public static class ContainerTelemetry
                 bool acquired = false;
                 try
                 {
-                    acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
+                    try { acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true; }
+                    catch (AbandonedMutexException) { acquired = true; }
                     if (!File.Exists(TelemetryPath))
                         return (results, 0, 0, 0);
 

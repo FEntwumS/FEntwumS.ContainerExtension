@@ -9,8 +9,8 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using System.Collections.Generic;
 using CommunityToolkit.Mvvm.Input;
-
 namespace ContainerExtension.Views;
 
 /// <summary>
@@ -42,7 +42,7 @@ public partial class DockerDiagnosticsView
 
         // Single-pass combined read: entries + stats in one file scan
         // (previously called GetStats and GetRecentEntries separately, deserializing the file twice)
-        var (entries, totalRuns, successRate, avgDuration) = ContainerTelemetry.GetRecentEntriesWithStats(10);
+        var (entries, totalRuns, successRate, avgDuration) = ContainerTelemetry.GetRecentEntriesWithStats(50);
 
         var statsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         if (totalRuns > 0)
@@ -100,6 +100,26 @@ public partial class DockerDiagnosticsView
 
         if (entries.Count > 0)
         {
+            // Historical Resource Trends
+            var cpuValues = entries.Where(e => e.MaxCpuPercent.HasValue).Select(e => e.MaxCpuPercent!.Value).Reverse().ToList();
+            var ramValues = entries.Where(e => e.PeakMemoryBytes.HasValue).Select(e => (double)e.PeakMemoryBytes!.Value).Reverse().ToList();
+
+            var trendsPanel = new StackPanel { Orientation = Orientation.Vertical, Spacing = 4, Margin = new Thickness(0, 4, 0, 12) };
+            trendsPanel.Children.Add(new TextBlock { Text = "HISTORICAL RESOURCE TRENDS", FontSize = 11, FontWeight = FontWeight.Bold, Foreground = AccentColor });
+
+            var trendsData = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16 };
+            if (cpuValues.Count > 0)
+            {
+                trendsData.Children.Add(new TextBlock { Text = $"CPU: {cpuValues.Average():F1}% avg  [{CreateSparkline(cpuValues)}]", FontFamily = MonoFont, FontSize = 11, Foreground = FontColor });
+            }
+            if (ramValues.Count > 0)
+            {
+                trendsData.Children.Add(new TextBlock { Text = $"RAM: {FormatBytes((long)ramValues.Max())} peak  [{CreateSparkline(ramValues)}]", FontFamily = MonoFont, FontSize = 11, Foreground = FontColor });
+            }
+            if (trendsData.Children.Count > 0) trendsPanel.Children.Add(trendsData);
+
+            _telemetryContent.Children.Add(trendsPanel);
+
             // Sortable header row
             _telemetryContent.Children.Add(CreateSortableHeaderRow(
                 new[] { ("STATUS", "status"), ("TOOL", "tool"), ("IMAGE", "image"), ("DURATION", "duration"), ("PEAK RAM", "ram"), ("MAX CPU", "cpu"), ("TIME", "time") },
@@ -321,5 +341,23 @@ public partial class DockerDiagnosticsView
         if (isHeader) AddGridCell(grid, 14, "ACTIONS", true, AccentColor);
 
         return grid;
+    }
+
+    /// <summary>Creates a unicode sparkline string from a sequence of values.</summary>
+    private static string CreateSparkline(IEnumerable<double> values)
+    {
+        var vals = values.ToList();
+        if (vals.Count == 0) return "";
+        var min = vals.Min();
+        var max = vals.Max();
+        string[] blocks = { " ", "▂", "▃", "▄", "▅", "▆", "▇", "█" };
+        var sb = new System.Text.StringBuilder(vals.Count);
+        foreach (var v in vals)
+        {
+            int idx = max == min ? 0 : (int)Math.Round((v - min) / (max - min) * (blocks.Length - 1));
+            idx = Math.Max(0, Math.Min(blocks.Length - 1, idx));
+            sb.Append(blocks[idx]);
+        }
+        return sb.ToString();
     }
 }
