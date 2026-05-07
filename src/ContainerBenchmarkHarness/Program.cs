@@ -22,13 +22,19 @@ namespace ContainerBenchmarkHarness;
 /// </summary>
 sealed class Program
 {
-    /// <summary>Entry point — parses CLI args and runs a single container execution.</summary>
+    /// <summary>Entry point — parses CLI args and runs a single container execution or stress tests telemetry.</summary>
     static async Task<int> Main(string[] args)
     {
         if (args.Length < 1)
         {
             Console.WriteLine("Usage: dotnet run -- <command> [args...]");
+            Console.WriteLine("   or: dotnet run -- stress-telemetry [--processes M] [--threads N] [--iterations K]");
             return 1;
+        }
+
+        if (args[0].Equals("stress-telemetry", StringComparison.OrdinalIgnoreCase))
+        {
+            return await RunStressTestAsync(args);
         }
 
         // Bootstrap a minimal DI container with a mock settings service
@@ -58,6 +64,115 @@ sealed class Program
 
         var result = await strategy.ExecuteAsync(command);
         return result.success ? 0 : 1;
+    }
+
+    private static async Task<int> RunStressTestAsync(string[] args)
+    {
+        int processes = 1;
+        int threads = 10;
+        int iterations = 100;
+        bool isChild = false;
+
+        for (int i = 1; i < args.Length; i++)
+        {
+            if (args[i] == "--processes" && i + 1 < args.Length) processes = int.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+            else if (args[i] == "--threads" && i + 1 < args.Length) threads = int.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+            else if (args[i] == "--iterations" && i + 1 < args.Length) iterations = int.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+            else if (args[i] == "--child") isChild = true;
+        }
+
+        var pid = Environment.ProcessId;
+        var prefix = isChild ? $"[Child {pid}]" : $"[Parent {pid}]";
+
+        // If parent and processes > 1, spawn children
+        var childProcs = new System.Collections.Generic.List<System.Diagnostics.Process>();
+        if (!isChild && processes > 1)
+        {
+            await Console.Out.WriteLineAsync($"{prefix} Spawning {processes - 1} child processes...");
+            var exePath = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(exePath))
+            {
+                await Console.Error.WriteLineAsync($"{prefix} Error: Unable to determine executable path.");
+                return 1;
+            }
+
+            for (int i = 1; i < processes; i++)
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = exePath,
+                    // If running via dotnet, args are passed differently, but since it's an exe (or `dotnet run` delegates), we pass the args directly
+                    // It's safer to reconstruct the exact command line args
+                    Arguments = $"stress-telemetry --processes {processes} --threads {threads} --iterations {iterations} --child",
+                    UseShellExecute = false
+                };
+                var p = System.Diagnostics.Process.Start(psi);
+                if (p != null) childProcs.Add(p);
+            }
+        }
+
+        await Console.Out.WriteLineAsync($"{prefix} Starting telemetry stress test: {threads} threads, {iterations} iterations per thread.");
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        int successCount = 0;
+        int errorCount = 0;
+
+        var tasks = new Task[threads];
+        for (int t = 0; t < threads; t++)
+        {
+            int threadId = t;
+            tasks[t] = Task.Run(async () =>
+            {
+                for (int i = 0; i < iterations; i++)
+                {
+                    try
+                    {
+                        ContainerTelemetry.LogExecution(
+                            image: "stress-test-image",
+                            tool: $"stress-test-{pid}-{threadId}",
+                            durationSeconds: 0.042 + (i % 10),
+                            exitCode: 0,
+                            imageDigest: null,
+                            wasCancelled: false,
+                            dockerRunCommand: $"--iter {i}",
+                            peakMemoryBytes: 1024 * 1024,
+                            maxCpuPercent: 5.5,
+                            oomKilled: false,
+                            maxEntries: 10000,
+                            errorMessage: null
+                        );
+                        Interlocked.Increment(ref successCount);
+                    }
+                    catch (Exception ex)
+                    {
+                        Interlocked.Increment(ref errorCount);
+                        await Console.Error.WriteLineAsync($"{prefix} Error on T{threadId} I{i}: {ex.Message}");
+                    }
+                }
+            });
+        }
+
+        await Task.WhenAll(tasks);
+        sw.Stop();
+
+        await Console.Out.WriteLineAsync($"{prefix} Done in {sw.ElapsedMilliseconds}ms. Success: {successCount}, Errors: {errorCount}");
+
+        if (!isChild && childProcs.Count > 0)
+        {
+            await Console.Out.WriteLineAsync($"{prefix} Waiting for {childProcs.Count} child processes to finish...");
+            foreach (var cp in childProcs)
+            {
+                cp.WaitForExit();
+                if (cp.ExitCode != 0)
+                {
+                    await Console.Error.WriteLineAsync($"{prefix} Child {cp.Id} exited with code {cp.ExitCode}");
+                    errorCount++;
+                }
+            }
+            await Console.Out.WriteLineAsync($"{prefix} All child processes finished.");
+        }
+
+        return errorCount == 0 ? 0 : 1;
     }
 }
 

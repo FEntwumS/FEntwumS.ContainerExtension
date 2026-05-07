@@ -20,9 +20,13 @@ namespace ContainerExtension.Views;
 public partial class DockerDiagnosticsView
 {
     /// <summary>Populates the Execution History section with a tabular display of the last 10 telemetry entries and aggregate stats.</summary>
-    private void PopulateTelemetry()
+#pragma warning disable VSTHRD100 // Avoid async void methods
+    private async void PopulateTelemetry()
+#pragma warning restore VSTHRD100
     {
-        _telemetryContent.Children.Clear();
+        try
+        {
+            _telemetryContent.Children.Clear();
 
         // Check if telemetry is disabled via the Retention = None setting
         string? retentionStr;
@@ -41,8 +45,8 @@ public partial class DockerDiagnosticsView
         }
 
         // Single-pass combined read: entries + stats in one file scan
-        // (previously called GetStats and GetRecentEntries separately, deserializing the file twice)
-        var (entries, totalRuns, successRate, avgDuration) = ContainerTelemetry.GetRecentEntriesWithStats(50);
+        // Run I/O intensive operation on a background thread to prevent UI freezing
+        var (entries, totalRuns, successRate, avgDuration) = await Task.Run(() => ContainerTelemetry.GetRecentEntriesWithStats(50));
 
         var statsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         if (totalRuns > 0)
@@ -317,6 +321,11 @@ public partial class DockerDiagnosticsView
                 Foreground = MutedColor,
                 FontStyle = FontStyle.Italic
             });
+        }
+        }
+        catch (Exception ex)
+        {
+            ContainerTelemetry.TrackError("DockerDiagnosticsView.History", "PopulateTelemetryAsync", ex);
         }
     }
 
