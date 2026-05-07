@@ -4,7 +4,7 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - Unreleased
 
 ### Added
 - **Sparkline Trends** — Visualized CPU and RAM usage trends directly in the `DockerDiagnosticsView` history panel.
@@ -20,9 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Detachment Race Conditions** — Fixed edge case race conditions in `DockerDiagnosticsView` view-model detachments.
 - **Regex Memory Thrashing** — Updated regex-based setting validators to use `RegexOptions.Compiled` for optimized execution.
 
-## [1.0.0] — 2026-04-10
-
-### Added
+### Initial Features
 
 - **Hybrid Strategy Pattern** — Transparent switching between native and Docker-based FPGA tool execution
 - **Multi-Runtime Support** — Auto-detection of Docker, Podman, Colima, and OrbStack via socket probing

@@ -841,6 +841,12 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 // around arguments with spaces; there is no shell to strip them,
                 // so they would become literal quote characters in the argument.
                 var processedArg = arg.Replace("\r", "").Replace('\\', '/');
+                if (processedArg.Length >= 2 &&
+                    ((processedArg.StartsWith('"') && processedArg.EndsWith('"')) ||
+                     (processedArg.StartsWith('\'') && processedArg.EndsWith('\''))))
+                {
+                    processedArg = processedArg.Substring(1, processedArg.Length - 2);
+                }
                 fullCmd.Add(processedArg);
             }
         }
