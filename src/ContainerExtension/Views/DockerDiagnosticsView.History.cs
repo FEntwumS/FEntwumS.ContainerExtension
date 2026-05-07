@@ -19,6 +19,8 @@ namespace ContainerExtension.Views;
 /// </summary>
 public partial class DockerDiagnosticsView
 {
+    private int _lastTelemetryFingerprint;
+
     /// <summary>Populates the Execution History section with a tabular display of the last 10 telemetry entries and aggregate stats.</summary>
 #pragma warning disable VSTHRD100 // Avoid async void methods
     private async void PopulateTelemetry()
@@ -26,27 +28,35 @@ public partial class DockerDiagnosticsView
     {
         try
         {
+            // Check if telemetry is disabled via the Retention = None setting
+            string? retentionStr;
+            try { retentionStr = _settingsService.GetSettingValue<string>(ContainerExtensionModule.TelemetryRetentionSetting); }
+            catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView.History", "ParseRetentionSetting", ex); retentionStr = "100"; }
+            
+            // Run I/O intensive operation on a background thread to prevent UI freezing
+            var (entries, totalRuns, successRate, avgDuration) = await Task.Run(() => ContainerTelemetry.GetRecentEntriesWithStats(50));
+
+            // Compute a simple fingerprint to prevent layout thrashing on every tick
+            var fp = HashCode.Combine(totalRuns, _searchFilter ?? string.Empty, retentionStr);
+            if (entries.Count > 0)
+                fp = HashCode.Combine(fp, entries[0].Timestamp);
+            
+            if (fp == _lastTelemetryFingerprint) return;
+            _lastTelemetryFingerprint = fp;
+
             _telemetryContent.Children.Clear();
 
-        // Check if telemetry is disabled via the Retention = None setting
-        string? retentionStr;
-        try { retentionStr = _settingsService.GetSettingValue<string>(ContainerExtensionModule.TelemetryRetentionSetting); }
-        catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView.History", "ParseRetentionSetting", ex); retentionStr = "100"; }
-        if (retentionStr == "None")
-        {
-            _telemetryContent.Children.Add(new TextBlock
+            if (retentionStr == "None")
             {
-                Text = "Telemetry is disabled (Retention = None). Change the Telemetry Retention setting to enable execution history.",
-                Foreground = YellowColor,
-                FontSize = 11,
-                FontStyle = FontStyle.Italic
-            });
-            return;
-        }
-
-        // Single-pass combined read: entries + stats in one file scan
-        // Run I/O intensive operation on a background thread to prevent UI freezing
-        var (entries, totalRuns, successRate, avgDuration) = await Task.Run(() => ContainerTelemetry.GetRecentEntriesWithStats(50));
+                _telemetryContent.Children.Add(new TextBlock
+                {
+                    Text = "Telemetry is disabled (Retention = None). Change the Telemetry Retention setting to enable execution history.",
+                    Foreground = YellowColor,
+                    FontSize = 11,
+                    FontStyle = FontStyle.Italic
+                });
+                return;
+            }
 
         var statsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         if (totalRuns > 0)
