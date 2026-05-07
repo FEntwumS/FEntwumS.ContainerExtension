@@ -162,17 +162,17 @@ dotnet build src/ContainerExtension/ContainerExtension.csproj -c Release -o publ
 
 # Generate API documentation (requires docfx tool)
 dotnet tool restore
-dotnet docfx docfx.json
+dotnet docfx docs/docfx.json
 ```
 
 ## API Documentation
 
-Auto-generated API documentation is available via [DocFX](https://dotnet.github.io/docfx/). The documentation source is defined in [`docfx.json`](docfx.json) with articles in [`articles/`](articles/):
+Auto-generated API documentation is available via [DocFX](https://dotnet.github.io/docfx/). The documentation source is defined in [`docs/docfx.json`](docs/docfx.json) with articles in [`docs/articles/`](docs/articles/):
 
-- [Getting Started](articles/getting-started.md)
-- [Configuration Guide](articles/configuration.md)
-- [Telemetry & Troubleshooting](articles/telemetry.md)
-- [Architecture Overview](articles/architecture.md)
+- [Getting Started](docs/articles/getting-started.md)
+- [Configuration Guide](docs/articles/configuration.md)
+- [Telemetry & Troubleshooting](docs/articles/telemetry.md)
+- [Architecture Overview](docs/articles/architecture.md)
 
 ## License
 

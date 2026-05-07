@@ -4,6 +4,22 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Sparkline Trends** — Visualized CPU and RAM usage trends directly in the `DockerDiagnosticsView` history panel.
+
+### Changed
+- **Project Structure** — Consolidated documentation into `docs/`, moved scratch scripts to `scripts/`, and standardized tests under `tests/benchmarking_suite/`.
+- **Telemetry Processing** — Migrated history I/O to a background asynchronous task to significantly improve UI responsiveness.
+- **UI Layout Optimization** — Introduced a state-caching fingerprint mechanism to eliminate UI layout thrashing when telemetry updates occur.
+- **Docker Wrapper Resiliency** — Strengthened Docker service exception handling to prevent runtime panics from being masked.
+
+### Fixed
+- **Deadlock Resolution** — Fixed `AbandonedMutexException` in `ContainerTelemetry` to prevent cross-process deadlocks during concurrent logging.
+- **Detachment Race Conditions** — Fixed edge case race conditions in `DockerDiagnosticsView` view-model detachments.
+- **Regex Memory Thrashing** — Updated regex-based setting validators to use `RegexOptions.Compiled` for optimized execution.
+
 ## [1.0.0] — 2026-04-10
 
 ### Added
