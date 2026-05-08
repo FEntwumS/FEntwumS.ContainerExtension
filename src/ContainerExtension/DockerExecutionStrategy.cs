@@ -830,26 +830,26 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 }
             }
         }
-        // Assemble the full command line
-        var fullCmd = new List<string> { executable };
-        if (command.Arguments != null)
+        // Assemble the full command line using sh -c
+        // This delegates argument parsing, quote stripping, and shell expansions (like *)
+        // to the container's native shell, avoiding complex string manipulation bugs in C#.
+        var fullCmdString = executable;
+        if (command.Arguments != null && command.Arguments.Count > 0)
         {
-            foreach (var arg in command.Arguments)
+            var argsStr = string.Join(" ", command.Arguments.Select(a =>
             {
-                // Docker SDK Cmd uses exec form (direct execve) — each list element
-                // is already a distinct argv entry. Do NOT add shell-style quotes
-                // around arguments with spaces; there is no shell to strip them,
-                // so they would become literal quote characters in the argument.
-                var processedArg = arg.Replace("\r", "").Replace('\\', '/');
-                if (processedArg.Length >= 2 &&
-                    ((processedArg.StartsWith('"') && processedArg.EndsWith('"')) ||
-                     (processedArg.StartsWith('\'') && processedArg.EndsWith('\''))))
+                var processed = a.Replace("\r", "").Replace('\\', '/');
+                // Quote if contains space or shell operators (to preserve multi-command arguments passed by ToolEngine)
+                // We deliberately do NOT quote '*' or '?' so that sh can expand file wildcards.
+                if (processed.Any(c => char.IsWhiteSpace(c) || ";|&<>()[`#".Contains(c)))
                 {
-                    processedArg = processedArg.Substring(1, processedArg.Length - 2);
+                    return $"\"{processed.Replace("\"", "\\\"")}\"";
                 }
-                fullCmd.Add(processedArg);
-            }
+                return processed;
+            }));
+            fullCmdString += " " + argsStr;
         }
+        var fullCmd = new List<string> { "sh", "-c", fullCmdString };
 
         var autoRemove = SafeGetSetting<bool>(ContainerExtensionModule.AutoRemoveSetting, true);
 
