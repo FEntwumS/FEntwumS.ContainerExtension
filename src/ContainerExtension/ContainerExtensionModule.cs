@@ -506,7 +506,7 @@ public class ContainerExtensionModule : OneWareModuleBase
             toolService.RegisterStrategy(globalTool.Key, dockerStrategy);
 
             // Register per-tool image override setting (only if not already registered)
-            if (settingsService.GetSetting($"{PerToolImagePrefix}{globalTool.Key}") == null)
+            if (!settingsService.HasSetting($"{PerToolImagePrefix}{globalTool.Key}"))
             {
                 settingsService.RegisterSetting(
                     "Binary Management", "Execution Strategy",
@@ -523,7 +523,7 @@ public class ContainerExtensionModule : OneWareModuleBase
             }
 
             // Append the Docker strategy option to the tool's ComboBox in Settings
-            if (settingsService.GetSetting(globalTool.Key) is ComboBoxSetting comboSetting)
+            if (settingsService.HasSetting(globalTool.Key) && settingsService.GetSetting(globalTool.Key) is ComboBoxSetting comboSetting)
             {
                 var newOptions = comboSetting.Options.ToList();
                 if (!newOptions.Contains(dockerStrategy.GetStrategyKey()))
