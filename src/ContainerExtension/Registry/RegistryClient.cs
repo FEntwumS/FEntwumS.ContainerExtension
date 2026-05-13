@@ -32,14 +32,14 @@ public static class RegistryClient
         {
             var parts = ParseImageReference(imageReference);
 
-            if (parts.Registry == "ghcr.io")
+            if (string.Equals(parts.Registry, "ghcr.io", StringComparison.Ordinal))
             {
                 return await FetchGhcrTagsAsync(parts.Namespace, parts.Repository).ConfigureAwait(false);
             }
             string ns = string.IsNullOrEmpty(parts.Namespace) ? "library" : parts.Namespace;
             return await FetchDockerHubTagsAsync(ns, parts.Repository).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // Fail gracefully on private/unknown registries or network errors
             global::ContainerExtension.ContainerTelemetry.TrackError("RegistryClient", "Global fetch trap triggered", ex);

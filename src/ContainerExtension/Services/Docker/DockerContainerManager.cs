@@ -93,6 +93,9 @@ public sealed class DockerContainerManager
                 var charCount = decoder.GetChars(buffer, 0, result.Count, charBuf, 0, flush: false);
                 output.Append(charBuf, 0, charCount);
             }
+            // Flush any remaining bytes cached inside the stateful decoder
+            var remaining = decoder.GetChars(Array.Empty<byte>(), 0, 0, charBuf, 0, flush: true);
+            if (remaining > 0) output.Append(charBuf, 0, remaining);
             return output.ToString();
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)

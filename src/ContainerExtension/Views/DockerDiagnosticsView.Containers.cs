@@ -59,7 +59,7 @@ public partial class DockerDiagnosticsView
 
         // Sortable header row
         _containersContent.Children.Add(CreateSortableHeaderRow(
-            new[] { ("NAME", "name"), ("IMAGE", "image"), ("STATUS", "status") },
+            [ ("NAME", "name"), ("IMAGE", "image"), ("STATUS", "status") ],
             _containerSort,
             key => { ToggleSort(ref _containerSort, key); PopulateContainers(_cachedContainers); },
             "160,8,180,8,150,8,Auto",
@@ -87,7 +87,7 @@ public partial class DockerDiagnosticsView
             var status = Truncate(c.Status ?? c.State ?? "unknown", 22);
             var isRunning = c.State?.Equals("running", StringComparison.OrdinalIgnoreCase) ?? false;
 
-            var statusColor = isRunning ? GreenColor : (c.State == "exited" ? MutedColor : YellowColor);
+            var statusColor = isRunning ? GreenColor : (string.Equals(c.State, "exited", StringComparison.Ordinal) ? MutedColor : YellowColor);
             var row = CreateContainerRow(Truncate(name, 20), image, status, isHeader: false, statusColor: statusColor);
 
             // Logs button — available for all containers (running and stopped)
@@ -108,7 +108,7 @@ public partial class DockerDiagnosticsView
                         return;
                     }
 
-                    var logs = await _strategy.GetContainerLogsAsync(logContainerId);
+                    var logs = await _strategy.GetContainerLogsAsync(logContainerId).ConfigureAwait(false);
                     var containerLabel = c.Names?.FirstOrDefault()?.TrimStart('/') ?? logContainerId[..12];
                     var logText = string.IsNullOrWhiteSpace(logs) ? "(no output)" : logs;
 
@@ -136,14 +136,17 @@ public partial class DockerDiagnosticsView
                                 {
                                     Title = "Save Container Logs",
                                     SuggestedFileName = $"container_logs_{containerLabel}_{DateTime.Now:yyyyMMdd_HHmmss}.txt"
-                                });
+                                }).ConfigureAwait(false);
                                 if (file != null)
                                 {
-                                    await using var stream = await file.OpenWriteAsync();
-                                    using var writer = new StreamWriter(stream);
-                                    await writer.WriteAsync(logText);
+                                    var stream = await file.OpenWriteAsync().ConfigureAwait(false);
+                                    await using (stream.ConfigureAwait(false))
+                                    {
+                                        using var writer = new StreamWriter(stream);
+                                    await writer.WriteAsync(logText).ConfigureAwait(false);
                                     saveBtn.Content = $"Saved ✓";
                                     return;
+                                    }
                                 }
                             }
 
@@ -156,7 +159,7 @@ public partial class DockerDiagnosticsView
                             ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "LogsSaveToFile", ex);
                             saveBtn.Content = "Save failed ✗";
                             ToolTip.SetTip(saveBtn, $"Export failed: {ex.Message}");
-                            await Task.Delay(3000);
+                            await Task.Delay(3000).ConfigureAwait(false);
                             saveBtn.Content = "Save Logs";
                             ToolTip.SetTip(saveBtn, prevTip);
                             saveBtn.IsEnabled = true;
@@ -215,15 +218,15 @@ public partial class DockerDiagnosticsView
                         {
                             stopBtn.IsEnabled = false;
                             stopBtn.Content = "Stopping...";
-                            await _strategy.StopContainerAsync(containerId);
-                            await RefreshAllAsync();
+                            await _strategy.StopContainerAsync(containerId).ConfigureAwait(false);
+                            await RefreshAllAsync().ConfigureAwait(false);
                         }
                         catch (Exception ex)
                         {
                             ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Action_StopContainer", ex);
                             stopBtn.Content = "Error ✗";
                             ToolTip.SetTip(stopBtn, $"Failed to stop: {ex.Message}");
-                            await Task.Delay(3000);
+                            await Task.Delay(3000).ConfigureAwait(false);
                             stopBtn.Content = "Stop";
                             ToolTip.SetTip(stopBtn, prevTip);
                             stopBtn.IsEnabled = true;
@@ -250,15 +253,15 @@ public partial class DockerDiagnosticsView
                         {
                             startBtn.IsEnabled = false;
                             startBtn.Content = "Starting...";
-                            await _strategy.StartContainerAsync(startContainerId);
-                            await RefreshAllAsync();
+                            await _strategy.StartContainerAsync(startContainerId).ConfigureAwait(false);
+                            await RefreshAllAsync().ConfigureAwait(false);
                         }
                         catch (Exception ex)
                         {
                             ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Action_StartContainer", ex);
                             startBtn.Content = "Error ✗";
                             ToolTip.SetTip(startBtn, $"Failed to start: {ex.Message}");
-                            await Task.Delay(3000);
+                            await Task.Delay(3000).ConfigureAwait(false);
                             startBtn.Content = "Start";
                             ToolTip.SetTip(startBtn, prevTip);
                             startBtn.IsEnabled = true;
@@ -283,15 +286,15 @@ public partial class DockerDiagnosticsView
                         {
                             removeBtn.IsEnabled = false;
                             removeBtn.Content = "Removing...";
-                            await _strategy.RemoveContainerAsync(rmContainerId);
-                            await RefreshAllAsync();
+                            await _strategy.RemoveContainerAsync(rmContainerId).ConfigureAwait(false);
+                            await RefreshAllAsync().ConfigureAwait(false);
                         }
                         catch (Exception ex)
                         {
                             ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Action_RemoveContainer", ex);
                             removeBtn.Content = "Error ✗";
                             ToolTip.SetTip(removeBtn, $"Failed to remove: {ex.Message}");
-                            await Task.Delay(3000);
+                            await Task.Delay(3000).ConfigureAwait(false);
                             removeBtn.Content = "Remove";
                             ToolTip.SetTip(removeBtn, prevTip);
                             removeBtn.IsEnabled = true;

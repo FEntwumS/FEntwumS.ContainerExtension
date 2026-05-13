@@ -37,9 +37,11 @@ public partial class DockerDiagnosticsView
         }
 
         // Filter out dangling (<none>:<none>) images — these are old layers replaced by newer pulls
-        var taggedImages = images.Where(i => i.RepoTags != null && i.RepoTags.Any(t => !t.Contains("<none>"))).ToList();
+        var allTaggedImages = images.Where(i => i.RepoTags != null && i.RepoTags.Any(t => !t.Contains("<none>"))).ToList();
+        var danglingCount = images.Count - allTaggedImages.Count;
 
         // Apply global search filter (case-insensitive substring match on repo:tag)
+        var taggedImages = allTaggedImages;
         if (!string.IsNullOrEmpty(_searchFilter))
             taggedImages = taggedImages.Where(i =>
                 i.RepoTags?.Any(t => t.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase)) ?? false
@@ -47,7 +49,7 @@ public partial class DockerDiagnosticsView
 
         // Sortable header row
         _imagesContent.Children.Add(CreateSortableHeaderRow(
-            new[] { ("REPOSITORY:TAG", "repo"), ("SIZE", "size"), ("CREATED", "created") },
+            [ ("REPOSITORY:TAG", "repo"), ("SIZE", "size"), ("CREATED", "created") ],
             _imageSort,
             key => { ToggleSort(ref _imageSort, key); PopulateImages(_cachedImages, _cachedDiskUsage); },
             "250,8,80,8,*,8,Auto",
@@ -88,15 +90,15 @@ public partial class DockerDiagnosticsView
                     {
                         removeBtn.IsEnabled = false;
                         removeBtn.Content = "Removing...";
-                        await _strategy.RemoveImageAsync(imageId);
-                        await RefreshAllAsync();
+                        await _strategy.RemoveImageAsync(imageId).ConfigureAwait(false);
+                        await RefreshAllAsync().ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
                         ContainerTelemetry.TrackError("DockerDiagnosticsView.Images", "Action_RemoveImage", ex);
                         removeBtn.Content = "Error ✗";
                         ToolTip.SetTip(removeBtn, $"Failed to remove: {ex.Message}");
-                        await Task.Delay(3000);
+                        await Task.Delay(3000).ConfigureAwait(false);
                         removeBtn.Content = "Remove";
                         ToolTip.SetTip(removeBtn, prevTip);
                         removeBtn.IsEnabled = true;
@@ -113,8 +115,7 @@ public partial class DockerDiagnosticsView
         if (taggedImages.Count > 15)
             _imagesContent.Children.Add(CreateMoreText(taggedImages.Count - 15));
 
-        // Show dangling image count if any exist
-        var danglingCount = images.Count - taggedImages.Count;
+        // Show dangling image count if any exist (computed before search filter)
         if (danglingCount > 0)
         {
             _imagesContent.Children.Add(new TextBlock

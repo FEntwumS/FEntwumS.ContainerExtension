@@ -34,19 +34,19 @@ public class DockerDiagnosticsWindow : Window
         Topmost = true;
 
         // Attempt Mica > Acrylic > Blur transparency
-        TransparencyLevelHint = new[]
-        {
+        TransparencyLevelHint = [
             WindowTransparencyLevel.Mica,
             WindowTransparencyLevel.AcrylicBlur,
             WindowTransparencyLevel.Blur
-        };
+        ];
 
         // Resolve the IDE's theme background brush
-        Application.Current!.TryFindResource(
+        object? bgRes = null;
+        Application.Current?.TryFindResource(
             "ThemeBackgroundBrushOp",
-            Application.Current!.RequestedThemeVariant,
-            out var bgRes);
-        bgRes ??= Application.Current!.FindResource("ThemeBackgroundBrushOp");
+            Application.Current.RequestedThemeVariant,
+            out bgRes);
+        bgRes ??= Application.Current?.FindResource("ThemeBackgroundBrushOp");
         Background = (bgRes as IBrush) ?? Brushes.Transparent;
 
         // Keyboard shortcuts: Cmd/Ctrl+W and Escape to close

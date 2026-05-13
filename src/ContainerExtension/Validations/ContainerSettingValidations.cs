@@ -1,4 +1,7 @@
+#pragma warning disable MA0048 // File name must match type name
+
 using System;
+using System.Linq;
 using System.Globalization;
 using OneWare.Essentials.Models;
 
@@ -56,7 +59,7 @@ internal sealed class DockerImageFormatValidation : ISettingValidation
     // Supports: repo, repo:tag, ns/repo:tag, host:port/repo:tag, image@sha256:digest
     private static readonly System.Text.RegularExpressions.Regex ImagePattern = new(
         @"^[a-zA-Z0-9][a-zA-Z0-9._\-]*(:\d{1,5})?(/[a-zA-Z0-9._\-]+)*(:[a-zA-Z0-9._\-]+)?(@sha256:[a-fA-F0-9]{64})?$",
-        System.Text.RegularExpressions.RegexOptions.Compiled);
+        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.ExplicitCapture);
 
     public bool Validate(object? value, out string? warningMessage)
     {
@@ -88,11 +91,8 @@ internal sealed class DaemonSocketValidation : ISettingValidation
         var str = value?.ToString();
         if (string.IsNullOrWhiteSpace(str)) return true; // Empty = auto-detect
 
-        foreach (var scheme in ValidSchemes)
-        {
-            if (str.StartsWith(scheme, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
+        if (ValidSchemes.Any(scheme => str.StartsWith(scheme, StringComparison.OrdinalIgnoreCase)))
+            return true;
 
         warningMessage = "Invalid socket URI. Must start with unix://, tcp://, or npipe://";
         return false;
@@ -108,7 +108,7 @@ internal sealed class ContainerNameValidation : ISettingValidation
 {
     private static readonly System.Text.RegularExpressions.Regex NamePattern = new(
         @"^[a-zA-Z0-9][a-zA-Z0-9._\-]*$",
-        System.Text.RegularExpressions.RegexOptions.Compiled);
+        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.ExplicitCapture);
 
     public bool Validate(object? value, out string? warningMessage)
     {

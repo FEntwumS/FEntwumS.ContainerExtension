@@ -193,7 +193,7 @@ public class ContainerExtensionModule : OneWareModuleBase
             "Binary Management", "Container Engine",
             PullPolicySetting,
             new ComboBoxSetting("Image Pull Policy", "if-not-present",
-                new object[] { "always", "if-not-present", "never" })
+                ["always", "if-not-present", "never"])
             { HoverDescription = "Controls when Docker images are pulled. 'always' = pull on every execution (CI/CD), 'if-not-present' = only pull when image is missing (default), 'never' = fail if image is not cached locally." }
         );
 
@@ -202,7 +202,7 @@ public class ContainerExtensionModule : OneWareModuleBase
             "Binary Management", "Container Engine",
             PlatformSetting,
             new ComboBoxSetting("Image Platform", "auto",
-                new object[] { "auto", "linux/amd64", "linux/arm64", "linux/arm/v7" })
+                ["auto", "linux/amd64", "linux/arm64", "linux/arm/v7"])
             { HoverDescription = "Force a specific platform for multi-arch image pulls. Useful on Apple Silicon when native ARM images are unavailable. 'auto' uses Docker's default platform detection." }
         );
 
@@ -245,7 +245,7 @@ public class ContainerExtensionModule : OneWareModuleBase
             "Binary Management", "Container Engine",
             NetworkModeSetting,
             new ComboBoxSetting("Network Mode", "bridge",
-                new object[] { "bridge", "host", "none" })
+                ["bridge", "host", "none"])
             { HoverDescription = "Docker network mode. 'bridge' (default, isolated), 'host' (shares host network — needed for license servers), 'none' (no networking)." }
         );
 
@@ -262,7 +262,7 @@ public class ContainerExtensionModule : OneWareModuleBase
             "Binary Management", "Container Engine",
             LogLevelSetting,
             new ComboBoxSetting("Log Level", "Verbose",
-                new object[] { "Off", "Errors Only", "Info", "Verbose" })
+                ["Off", "Errors Only", "Info", "Verbose"])
             { HoverDescription = "Controls Docker SDK output verbosity. 'Off' = silent (native feel), 'Errors Only' = show only errors, 'Info' = errors + command, start/stop, timing, 'Verbose' = full SDK output including pull progress, digests, etc." }
         );
 
@@ -300,7 +300,7 @@ public class ContainerExtensionModule : OneWareModuleBase
             "Binary Management", "Container Engine",
             DashboardRefreshSetting,
             new ComboBoxSetting("Dashboard Refresh", "Manual",
-                new object[] { "Manual", "2s", "5s", "10s", "15s", "30s", "60s", "120s" })
+                ["Manual", "2s", "5s", "10s", "15s", "30s", "60s", "120s"])
             { HoverDescription = "Auto-refresh interval for the Container Dashboard. 'Manual' = refresh only on open/button click. ⚠️ 2s rebuilds the entire UI tree each tick — use only for debugging. 5s–10s is recommended for active monitoring, 30s+ for background use." }
         );
 
@@ -309,7 +309,7 @@ public class ContainerExtensionModule : OneWareModuleBase
             "Binary Management", "Container Engine",
             TelemetryRetentionSetting,
             new ComboBoxSetting("Telemetry Retention", "100",
-                new object[] { "None", "25", "50", "100", "250", "500", "1000", "Unlimited" })
+                ["None", "25", "50", "100", "250", "500", "1000", "Unlimited"])
             { HoverDescription = "Maximum number of execution records stored in container_telemetry.jsonl. 'None' disables telemetry and deletes the log file. Older entries are automatically trimmed on each new execution. Higher values provide richer history for thesis evaluation." }
         );
 
@@ -357,7 +357,7 @@ public class ContainerExtensionModule : OneWareModuleBase
             {
                 try
                 {
-                    await Task.Delay(1000, startupCts.Token);
+                    await Task.Delay(1000, startupCts.Token).ConfigureAwait(false);
                     var currentToolCount = toolService.GetAllTools().Count;
                     if (currentToolCount != knownToolCount)
                     {
@@ -406,7 +406,7 @@ public class ContainerExtensionModule : OneWareModuleBase
                 {
                     using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     cts.CancelAfter(TimeSpan.FromSeconds(5));
-                    isReachable = await dockerStrategy.PingAsync(cts.Token);
+                    isReachable = await dockerStrategy.PingAsync(cts.Token).ConfigureAwait(false);
                     if (isReachable) break;
                 }
                 catch (Exception ex)
@@ -417,8 +417,8 @@ public class ContainerExtensionModule : OneWareModuleBase
                 if (attempt < maxRetries)
                 {
                     await Console.Error.WriteLineAsync(
-                        $"[ContainerExtension] ⏳ Daemon not reachable (attempt {attempt}/{maxRetries}), retrying in {retryDelayMs / 1000}s...");
-                    await Task.Delay(retryDelayMs, ct);
+                        $"[ContainerExtension] ⏳ Daemon not reachable (attempt {attempt}/{maxRetries}), retrying in {retryDelayMs / 1000}s...").ConfigureAwait(false);
+                    await Task.Delay(retryDelayMs, ct).ConfigureAwait(false);
                 }
             }
 
@@ -427,13 +427,15 @@ public class ContainerExtensionModule : OneWareModuleBase
             if (isReachable)
             {
                 await Console.Out.WriteLineAsync(
-                    $"[ContainerExtension] ✅ Connected to {dockerStrategy.DetectedRuntime} daemon.");
+                    $"[ContainerExtension] ✅ Connected to {dockerStrategy.DetectedRuntime} daemon.").ConfigureAwait(false);
 
                 // ── Prune Dangling Containers (IDE Crash Recovery) ──
                 try
                 {
                     var svc = serviceProvider.Resolve<ISettingsService>();
-                    var prefix = svc.GetSettingValue<string>(ContainerNamePrefixSetting);
+                    var prefix = svc.HasSetting(ContainerNamePrefixSetting)
+                        ? svc.GetSettingValue<string>(ContainerNamePrefixSetting)
+                        : null;
                     if (!string.IsNullOrWhiteSpace(prefix))
                     {
                         var containersToPrune = await dockerStrategy.Client.Containers.ListContainersAsync(
@@ -441,19 +443,20 @@ public class ContainerExtensionModule : OneWareModuleBase
                             {
                                 All = true,
                                 Filters = new Dictionary<string, IDictionary<string, bool>>
+(StringComparer.Ordinal)
                                 {
-                                    { "name", new Dictionary<string, bool> { { $"^{prefix}", true } } },
-                                    { "status", new Dictionary<string, bool> { { "exited", true }, { "dead", true }, { "created", true } } }
+                                    { "name", new Dictionary<string, bool>(StringComparer.Ordinal) { { $"^{prefix}", true } } },
+                                    { "status", new Dictionary<string, bool>(StringComparer.Ordinal) { { "exited", true }, { "dead", true }, { "created", true } } }
                                 }
-                            }, ct);
+                            }, ct).ConfigureAwait(false);
 
                         foreach (var container in containersToPrune)
                         {
                             try
                             {
                                 await dockerStrategy.Client.Containers.RemoveContainerAsync(container.ID,
-                                    new Docker.DotNet.Models.ContainerRemoveParameters { Force = true }, ct);
-                                await Console.Out.WriteLineAsync($"[ContainerExtension] 🧹 Reaped dangling container: {string.Join(", ", container.Names)}");
+                                    new Docker.DotNet.Models.ContainerRemoveParameters { Force = true }, ct).ConfigureAwait(false);
+                                await Console.Out.WriteLineAsync($"[ContainerExtension] 🧹 Reaped dangling container: {string.Join(", ", container.Names)}").ConfigureAwait(false);
                             }
                             catch (Exception ex)
                             {
@@ -465,7 +468,7 @@ public class ContainerExtensionModule : OneWareModuleBase
                 catch (Exception ex)
                 {
                     ContainerTelemetry.TrackError("ContainerExtensionModule", "Failed to clean dangling containers", ex);
-                    await Console.Error.WriteLineAsync($"[ContainerExtension] ⚠️ Failed to clean dangling containers: {ex.Message}");
+                    await Console.Error.WriteLineAsync($"[ContainerExtension] ⚠️ Failed to clean dangling containers: {ex.Message}").ConfigureAwait(false);
                 }
 
                 // Background pre-pull: cache the default image so the first compile is instant
@@ -474,22 +477,22 @@ public class ContainerExtensionModule : OneWareModuleBase
                     var defaultImage = dockerStrategy.GetDefaultImage();
                     using var pullCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     pullCts.CancelAfter(TimeSpan.FromMinutes(10));
-                    await dockerStrategy.PrePullImageAsync(defaultImage, pullCts.Token);
+                    await dockerStrategy.PrePullImageAsync(defaultImage, pullCts.Token).ConfigureAwait(false);
                     await Console.Out.WriteLineAsync(
-                        $"[ContainerExtension] 📦 Default image '{defaultImage}' is cached and ready.");
+                        $"[ContainerExtension] 📦 Default image '{defaultImage}' is cached and ready.").ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) { /* Shutdown requested — abort gracefully */ }
                 catch (Exception ex)
                 {
                     ContainerTelemetry.TrackError("ContainerExtensionModule", "Background pre-pull failed", ex);
                     await Console.Error.WriteLineAsync(
-                        $"[ContainerExtension] ⚠️ Background pre-pull failed (non-critical): {ex.Message}");
+                        $"[ContainerExtension] ⚠️ Background pre-pull failed (non-critical): {ex.Message}").ConfigureAwait(false);
                 }
             }
             else
             {
                 await Console.Error.WriteLineAsync(
-                    $"[ContainerExtension] ⚠️ Docker daemon is not reachable after {maxRetries} attempts. Container execution will fail until the daemon is started.");
+                    $"[ContainerExtension] ⚠️ Docker daemon is not reachable after {maxRetries} attempts. Container execution will fail until the daemon is started.").ConfigureAwait(false);
             }
         }, startupCts.Token);
     }

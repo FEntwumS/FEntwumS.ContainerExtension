@@ -37,9 +37,6 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
     /// <summary>Fixed container-side mount path for cross-platform compatibility.</summary>
     private const string ContainerWorkDir = "/workspace";
 
-    /// <summary>Compiled regex for sanitizing container name prefixes at runtime.</summary>
-    private static readonly System.Text.RegularExpressions.Regex ContainerNameSanitizer = new(
-        @"[^a-zA-Z0-9._\-]", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     // ── Cached UID/GID (Linux only, session-stable) ────────────────────────
     // UID and GID don't change during a session — cache to avoid spawning
@@ -116,7 +113,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
     /// The value indicates whether the container should be auto-removed on crash cleanup.
     /// Containers with AutoRemove=false are left intact to preserve debugging state.
     /// </summary>
-    private static readonly ConcurrentDictionary<string, bool> ActiveContainers = new();
+    private static readonly ConcurrentDictionary<string, bool> ActiveContainers = new(StringComparer.Ordinal);
 
     /// <summary>Static client reference for the ProcessExit/CancelKeyPress cleanup hook.</summary>
     private static DockerClient? _staticClientForCleanup;
@@ -182,7 +179,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
 
         if (!resolved)
         {
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            if (OperatingSystem.IsWindows())
             {
                 uri = new Uri("npipe://./pipe/docker_engine");
                 runtime = "docker";
@@ -226,6 +223,9 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
     {
         try
         {
+            if (!_settingsService.HasSetting(key))
+                return fallback;
+
             var value = _settingsService.GetSettingValue<T>(key);
             return value ?? fallback;
         }
@@ -270,6 +270,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         var retention = SafeGetSetting<string>(ContainerExtensionModule.TelemetryRetentionSetting, "100");
 
         return new Dictionary<string, string>
+(StringComparer.Ordinal)
         {
             ["Image"] = image,
             ["Pull Policy"] = pullPolicy,
@@ -344,7 +345,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         if (!string.IsNullOrWhiteSpace(namePrefix))
             sb.Append(CultureInfo.InvariantCulture, $" --name {namePrefix.TrimEnd('-')}-<tool>-<hhmmss>");
         sb.Append(CultureInfo.InvariantCulture, $" -v \"$(pwd)\":{ContainerWorkDir} -w {ContainerWorkDir}");
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        if (OperatingSystem.IsLinux())
             sb.Append(" --user $(id -u):$(id -g)");
         if (memMb > 0) sb.Append(CultureInfo.InvariantCulture, $" --memory {memMb:N0}m --memory-swap {memMb:N0}m");
         if (cpuCores > 0) sb.Append(CultureInfo.InvariantCulture, $" --cpus {cpuCores:N1}");
@@ -672,55 +673,6 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
     // ═══════════════════════════════════════════════════════════════════════
     //  .env File Parsing
     // ═══════════════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Parses a <c>.env</c> file from the working directory and returns a list of
-    /// <c>KEY=VALUE</c> strings for Docker container environment injection.
-    /// Handles both <c>KEY=value</c> and <c>KEY="quoted value"</c> formats.
-    /// </summary>
-    internal static List<string>? ParseEnvFile(string workingDir)
-    {
-        var envPath = Path.Combine(workingDir, ".env");
-        if (!File.Exists(envPath)) return null;
-
-        var envVars = new List<string>();
-        foreach (var line in File.ReadAllLines(envPath))
-        {
-            var trimmed = line.AsSpan().Trim();
-            if (trimmed.IsEmpty || trimmed[0] == '#') continue;
-
-            // Strip 'export ' prefix (common in Docker Compose and shell .env files)
-            if (trimmed.StartsWith("export ".AsSpan(), StringComparison.Ordinal))
-                trimmed = trimmed[7..].TrimStart();
-
-            var eqIdx = trimmed.IndexOf('=');
-            if (eqIdx < 0) continue;
-
-            var key = trimmed[..eqIdx];
-            var valueSpan = trimmed[(eqIdx + 1)..];
-
-            // Strip inline comments: KEY=value # comment (space-prefixed # only, matching Docker's behavior)
-            if (valueSpan.Length == 0 || (valueSpan[0] != '"' && valueSpan[0] != '\''))
-            {
-                var commentIdx = valueSpan.IndexOf(" #".AsSpan(), StringComparison.Ordinal);
-                if (commentIdx >= 0)
-                    valueSpan = valueSpan[..commentIdx];
-            }
-            valueSpan = valueSpan.Trim();
-
-            // Strip surrounding quotes: KEY="value" or KEY='value'
-            if (valueSpan.Length >= 2 &&
-                ((valueSpan[0] == '"' && valueSpan[^1] == '"') ||
-                 (valueSpan[0] == '\'' && valueSpan[^1] == '\'')))
-            {
-                valueSpan = valueSpan[1..^1];
-            }
-
-            envVars.Add($"{key.ToString()}={valueSpan.ToString()}");
-        }
-        return envVars.Count > 0 ? envVars : null;
-    }
-
     // ═══════════════════════════════════════════════════════════════════════
     //  Image Resolution
     // ═══════════════════════════════════════════════════════════════════════
@@ -759,185 +711,15 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
     //  Container Configuration
     // ═══════════════════════════════════════════════════════════════════════
 
-    private static readonly char[] ArgSplitChars = new[] { '=', ' ' };
-
-    /// <summary>
-    /// Builds the <see cref="CreateContainerParameters"/> with bind mount, UID mapping,
-    /// .env injection, and optional resource limits.
-    /// </summary>
-    /// <param name="image">The resolved Docker image reference.</param>
-    /// <param name="command">The IDE tool command payload.</param>
-    /// <returns>Fully configured container creation parameters.</returns>
     private CreateContainerParameters BuildContainerParameters(string image, ToolCommand command)
     {
-        var executable = (command.Executable ?? command.ToolName).Replace("\r", "").Replace('\\', '/');
-        var workingDirFull = Path.GetFullPath(command.WorkingDirectory);
-        var rawPrefix = SafeGetSetting<string>(ContainerExtensionModule.ContainerNamePrefixSetting, "containerextension-");
-
-        // ── Pre-emptively Create Output Directories ─────────────────────────────
-        // Docker does not auto-create missing subdirectories inside volume mounts.
-        // If an EDA tool (like Yosys) is instructed to write to 'build/output.v',
-        // it will crash if 'build/' does not exist. We scan the arguments to gracefully
-        // guarantee the folder structure exists on the host before launching the container.
-
-        // Compute strict bounds suffix to prevent prefix bleed (e.g. matching /project2 against /project)
-        var workingDirBound = workingDirFull;
-        if (!workingDirBound.EndsWith(Path.DirectorySeparatorChar) && !workingDirBound.EndsWith(Path.AltDirectorySeparatorChar))
-            workingDirBound += Path.DirectorySeparatorChar;
-
-        if (command.Arguments != null)
-        {
-            foreach (var arg in command.Arguments)
-            {
-                try
-                {
-                    var parts = arg.Split(ArgSplitChars, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length == 0) continue;
-
-                    var potentialPath = parts[parts.Length - 1].Trim('"', '\'', '\r', '\n', ' ');
-
-                    // Fast reject: must contain a path struct separator
-                    if (potentialPath.Contains('/') || potentialPath.Contains('\\'))
-                    {
-                        var dir = (potentialPath.EndsWith('/') || potentialPath.EndsWith('\\'))
-                            ? potentialPath
-                            : Path.GetDirectoryName(potentialPath);
-
-                        if (!string.IsNullOrWhiteSpace(dir))
-                        {
-                            var absoluteDir = Path.GetFullPath(Path.Combine(workingDirFull, dir));
-
-                            // Bounds string normalization for check
-                            var absBound = absoluteDir;
-                            if (!absBound.EndsWith(Path.DirectorySeparatorChar) && !absBound.EndsWith(Path.AltDirectorySeparatorChar))
-                                absBound += Path.DirectorySeparatorChar;
-
-                            // Security check: rigorously verify that the determined path physically lives within the workspace
-                            var osAwareComparison = RuntimeInformation.IsOSPlatform(OSPlatform.Linux) 
-                                ? StringComparison.Ordinal 
-                                : StringComparison.OrdinalIgnoreCase;
-                            if (absBound.StartsWith(workingDirBound, osAwareComparison) &&
-                                !Directory.Exists(absoluteDir))
-                            {
-                                Directory.CreateDirectory(absoluteDir);
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
-                {
-                    ContainerTelemetry.TrackError("DockerExecutionStrategy", "Path validation failed", ex);
-                }
-            }
-        }
-        // Assemble the full command line using sh -c
-        // This delegates argument parsing, quote stripping, and shell expansions (like *)
-        // to the container's native shell, avoiding complex string manipulation bugs in C#.
-        var fullCmdString = executable;
-        if (command.Arguments != null && command.Arguments.Count > 0)
-        {
-            var argsStr = string.Join(" ", command.Arguments.Select(a =>
-            {
-                var processed = a.Replace("\r", "").Replace('\\', '/');
-                // Quote if contains space or shell operators (to preserve multi-command arguments passed by ToolEngine)
-                // We deliberately do NOT quote '*' or '?' so that sh can expand file wildcards.
-                if (processed.Any(c => char.IsWhiteSpace(c) || ";|&<>()[`#".Contains(c)))
-                {
-                    return $"\"{processed.Replace("\"", "\\\"")}\"";
-                }
-                return processed;
-            }));
-            fullCmdString += " " + argsStr;
-        }
-        var fullCmd = new List<string> { "sh", "-c", fullCmdString };
-
-        var autoRemove = SafeGetSetting<bool>(ContainerExtensionModule.AutoRemoveSetting, true);
-
-        // Generate a named container for identification.
-        // Sanitize the prefix at runtime (strips invalid chars even if the validator is bypassed).
-        // Docker naming rules: [a-zA-Z0-9][a-zA-Z0-9_.-]
-        string? containerName = null;
-        if (!string.IsNullOrWhiteSpace(rawPrefix))
-        {
-            var sanitized = ContainerNameSanitizer.Replace(rawPrefix, "");
-            if (sanitized.Length > 0)
-            {
-                var safeToolName = ContainerNameSanitizer.Replace(command.ToolName ?? "tool", "");
-                containerName = $"{sanitized.TrimEnd('-')}-{safeToolName}-{DateTime.Now:HHmmssfff}-{Guid.NewGuid().ToString("N")[..4]}";
-            }
-        }
-
-        var createParams = new CreateContainerParameters
-        {
-            Image = image,
-            Name = containerName,
-            Cmd = fullCmd,
-            WorkingDir = ContainerWorkDir,
-            HostConfig = new HostConfig
-            {
-                Binds = new List<string> { $"{workingDirFull}:{ContainerWorkDir}" },
-                AutoRemove = autoRemove,
-                NetworkMode = SafeGetSetting<string>(ContainerExtensionModule.NetworkModeSetting, "bridge"),
-                // Inject tini as PID 1 to reap zombie subprocesses spawned by EDA tools
-                // (make, yosys, nextpnr) and forward SIGTERM/SIGINT to the actual workload.
-                Init = true
-            }
-        };
-
-        // Inject host UID/GID on Linux to prevent root-owned output files
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        {
-            createParams.User = $"{CachedUid.Value}:{CachedGid.Value}";
-        }
-
-        // Parse .env file from working directory
-        var envVars = ParseEnvFile(workingDirFull);
-        if (envVars != null)
-        {
-            createParams.Env = envVars;
-            SdkLog(command, $"[Docker SDK] Injecting {envVars.Count} environment variable(s) from .env file.");
-        }
-
-        // Apply optional resource limits (0 = no limit, from SliderSetting)
-        // Clamp to host capacity to prevent Docker ArgumentException
-        var memMb = SafeGetSetting<double>(ContainerExtensionModule.MemoryLimitSetting, 0);
-        var hostMemMb = ContainerExtensionModule.GetHostMemoryMB();
-        if (memMb > 0)
-        {
-            memMb = Math.Min(memMb, hostMemMb);
-            var memBytes = (long)(memMb * 1024 * 1024);
-            createParams.HostConfig.Memory = memBytes;
-            // Set MemorySwap equal to Memory to disable swap entirely.
-            // Without this, Docker doubles the effective limit via disk-backed swap,
-            // causing thrashing for I/O-heavy EDA synthesis workloads.
-            createParams.HostConfig.MemorySwap = memBytes;
-        }
-
-        var cpuCores = SafeGetSetting<double>(ContainerExtensionModule.CpuLimitSetting, 0);
-        var hostCores = (double)Environment.ProcessorCount;
-        if (cpuCores > 0)
-        {
-            cpuCores = Math.Min(cpuCores, hostCores);
-            createParams.HostConfig.NanoCPUs = (long)(cpuCores * 1_000_000_000);
-        }
-
-        // Apply Extra Container Labels as container labels (key=value pairs)
-        var extraFlags = SafeGetSetting<string>(ContainerExtensionModule.ExtraFlagsSetting, "");
-        if (!string.IsNullOrWhiteSpace(extraFlags))
-        {
-            createParams.Labels ??= new Dictionary<string, string>();
-            foreach (var flag in extraFlags.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                var eqIdx = flag.IndexOf('=');
-                if (eqIdx > 0)
-                    createParams.Labels[flag.Substring(0, eqIdx)] = flag.Substring(eqIdx + 1);
-                else
-                    createParams.Labels[flag] = "true";
-            }
-            SdkLog(command, $"[Docker SDK] Injecting {createParams.Labels.Count} extra label(s) from Extra Container Labels.");
-        }
-
-        return createParams;
+        return Services.Docker.DockerCommandBuilder.BuildContainerParameters(
+            image,
+            command,
+            _settingsService,
+            CachedUid.Value,
+            CachedGid.Value,
+            (cmd, msg) => SdkLog(cmd, msg));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -980,14 +762,14 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
             _ /* if-not-present */ => !imageExistsLocally
         };
 
-        if (!imageExistsLocally && pullPolicy == "never")
+        if (!imageExistsLocally && string.Equals(pullPolicy, "never", StringComparison.Ordinal))
         {
             throw new InvalidOperationException($"Image '{image}' not found locally and pull policy is 'never'.");
         }
 
         if (shouldPull)
         {
-            SdkLog(command, pullPolicy == "always" && imageExistsLocally
+            SdkLog(command, string.Equals(pullPolicy, "always", StringComparison.Ordinal) && imageExistsLocally
                 ? $"[Docker SDK] Pull policy 'always' — refreshing '{image}'..."
                 : $"[Docker SDK] Image '{image}' not found locally. Pulling...");
 
@@ -1341,16 +1123,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
     /// <returns>A tuple of (success, captured_output).</returns>
     public async Task<(bool success, string output)> ExecuteAsync(ToolCommand command)
     {
-        // === EARLY DEBUG TRACE — writes before ANY other code ===
-        const string debugLogPath = "/Users/mtorun/.oneware/docker_debug.log";
-        void DebugTrace(string msg)
-        {
-            try { File.AppendAllText(debugLogPath, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\n"); }
-            catch { /* never fail */ }
-        }
-        DebugTrace($">>> ExecuteAsync ENTERED. ToolName='{command.ToolName}', Executable='{command.Executable}'");
-        DebugTrace($"    WorkingDirectory='{command.WorkingDirectory}'");
-        DebugTrace($"    Arguments=[{string.Join(", ", command.Arguments ?? Array.Empty<string>())}]");
+
 
         // Note: \r stripping for the container command is done canonically in
         // BuildContainerParameters. This local copy is used only for logging/telemetry.
@@ -1388,25 +1161,24 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         try
         {
             // Step 1: Resolve the container image
-            DebugTrace("Step 1: Resolving image...");
+
             SdkLog(command, $"[Docker SDK] Step 1: Resolving image for tool '{executable}'...", RankInfo);
             image = ResolveImage(command.ToolName);
-            DebugTrace($"Step 1: Resolved image: {image}");
+
             SdkLog(command, $"[Docker SDK] Step 1: Resolved image: {image}", RankInfo);
 
             // Step 2: Build container configuration
-            DebugTrace("Step 2: Building container parameters...");
+
             SdkLog(command, $"[Docker SDK] Step 2: Building container parameters...", RankInfo);
             var createParams = BuildContainerParameters(image, command);
-            DebugTrace($"Step 2: Cmd = [{string.Join(", ", createParams.Cmd ?? new List<string>())}]");
+
             SdkLog(command, $"[Docker SDK] Step 2: Cmd = [{string.Join(", ", createParams.Cmd ?? new List<string>())}]", RankInfo);
             SdkLog(command, $"[Docker SDK] Step 2: WorkingDir = {createParams.WorkingDir}, Binds = [{string.Join(", ", createParams.HostConfig?.Binds ?? new List<string>())}]", RankInfo);
 
             // Step 3: Ensure image is available (auto-pull if needed)
-            DebugTrace($"Step 3: Ensuring image '{image}' is available...");
+
             SdkLog(command, $"[Docker SDK] Step 3: Ensuring image '{image}' is available...", RankInfo);
             imageDigest = await EnsureImageAsync(image, command, ct).ConfigureAwait(false);
-            DebugTrace($"Step 3: Image ready. Digest = {imageDigest ?? "(none)"}");
             SdkLog(command, $"[Docker SDK] Step 3: Image ready. Digest = {imageDigest ?? "(none)"}", RankInfo);
 
             // Reconstruct the exact CLI command for telemetry
@@ -1423,9 +1195,9 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
             SdkLog(command, $"[Docker SDK] Container finished. Exit code: {exitCode}", RankInfo);
             return (exitCode == 0, result.output);
         }
-        catch (OperationCanceledException oce)
+        catch (OperationCanceledException)
         {
-            DebugTrace($"CAUGHT OperationCanceledException: {oce.Message}");
+
             wasCancelled = true;
             errorMessage = timeoutMinutes > 0
                 ? $"Execution timed out after {timeoutMinutes:N0} minute(s)."
@@ -1435,8 +1207,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         }
         catch (Exception ex)
         {
-            DebugTrace($"CAUGHT {ex.GetType().Name}: {ex.Message}");
-            DebugTrace($"  Stack: {ex.StackTrace}");
+
             errorMessage = ex.Message;
             var err = $"[Docker SDK Error] {ex.GetType().Name}: {ex.Message}";
             if (ex.Message.Contains("No such image", StringComparison.OrdinalIgnoreCase))
@@ -1451,14 +1222,14 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         {
             stopwatch.Stop();
             var retentionStr = SafeGetSetting<string>(ContainerExtensionModule.TelemetryRetentionSetting, "100");
-            if (retentionStr == "None")
+            if (string.Equals(retentionStr, "None", StringComparison.Ordinal))
             {
                 // Delete telemetry file via ClearEntries() which acquires the Mutex properly
                 ContainerTelemetry.ClearEntries();
             }
             else
             {
-                var maxEntries = retentionStr == "Unlimited" ? 0 : int.TryParse(retentionStr, out var n) ? n : 100;
+                var maxEntries = string.Equals(retentionStr, "Unlimited", StringComparison.Ordinal) ? 0 : int.TryParse(retentionStr, out var n) ? n : 100;
                 ContainerTelemetry.LogExecution(
                     image: image,
                     tool: Path.GetFileNameWithoutExtension(executable),

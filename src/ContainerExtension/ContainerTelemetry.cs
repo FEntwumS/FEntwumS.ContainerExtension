@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -45,6 +46,11 @@ public static class ContainerTelemetry
     /// </summary>
     private static int _cachedLineCount = -1;
 
+    // Cache fields for GetRecentEntriesWithStats
+    private static DateTime _lastFileWriteTime = DateTime.MinValue;
+    private static int _cachedCount = -1;
+    private static (List<TelemetryEntry> entries, int totalRuns, double successRate, double avgDuration)? _cachedStatsResult;
+
     /// <summary>
     /// Named Mutex for cross-process synchronization.
     /// Multiple IDE instances and the benchmark harness share the same .jsonl file;
@@ -61,13 +67,6 @@ public static class ContainerTelemetry
         catch (UnauthorizedAccessException) { return null; }
         catch (Exception) { return null; } // Best effort, fallback to null (no cross-process sync)
     }
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        WriteIndented = false,
-        TypeInfoResolverChain = { TelemetryJsonContext.Default, ErrorJsonContext.Default }
-    };
 
     /// <summary>
     /// Appends a single execution record to the telemetry log.
@@ -447,9 +446,6 @@ public static class ContainerTelemetry
     /// <param name="count">Number of recent entries to retrieve (default: 20).</param>
     public static (List<TelemetryEntry> entries, int totalRuns, double successRate, double avgDuration) GetRecentEntriesWithStats(int count = 20)
     {
-        var results = new List<TelemetryEntry>();
-        int total = 0, successes = 0;
-        double totalDuration = 0;
         try
         {
             RwLock.EnterReadLock();
@@ -460,31 +456,67 @@ public static class ContainerTelemetry
                 {
                     try { acquired = ProcessMutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true; }
                     catch (AbandonedMutexException) { acquired = true; }
+                    
                     if (!File.Exists(TelemetryPath))
-                        return (results, 0, 0, 0);
+                        return (new List<TelemetryEntry>(), 0, 0, 0);
 
-                    // Sliding window of deserialized entries — avoids a second
-                    // deserialization pass that would occur with raw string queuing.
-                    var q = new Queue<TelemetryEntry>(count);
+                    var currentWriteTime = File.GetLastWriteTimeUtc(TelemetryPath);
+                    if (_cachedStatsResult.HasValue && _cachedCount == count && _lastFileWriteTime == currentWriteTime)
+                    {
+                        return _cachedStatsResult.Value;
+                    }
+
+                    var results = new List<TelemetryEntry>();
+                    int total = 0, successes = 0;
+                    double totalDuration = 0;
+
+                    // Sliding window of raw strings — avoids deserializing the entire file
+                    var q = new Queue<string>(count);
 
                     foreach (var line in File.ReadLines(TelemetryPath))
                     {
                         if (string.IsNullOrWhiteSpace(line)) continue;
-                        var entry = JsonSerializer.Deserialize(line, TelemetryJsonContext.Default.TelemetryEntry);
-                        if (entry == null) continue;
 
-                        // Stats accumulation (single pass)
+                        // Fast string-based metrics extraction (single pass, no allocations)
                         total++;
-                        if (entry.ExitCode == 0 && !entry.WasCancelled) successes++;
-                        totalDuration += entry.DurationSeconds;
+                        var span = line.AsSpan();
+                        if (span.Contains("\"exit\":0", StringComparison.Ordinal) && !span.Contains("\"cancelled\":true", StringComparison.Ordinal))
+                        {
+                            successes++;
+                        }
+
+                        var durStart = span.IndexOf("\"duration_s\":", StringComparison.Ordinal);
+                        if (durStart >= 0)
+                        {
+                            durStart += 13;
+                            var durEnd = span.Slice(durStart).IndexOfAny(',', '}');
+                            if (durEnd >= 0 && double.TryParse(span.Slice(durStart, durEnd), NumberStyles.Float, CultureInfo.InvariantCulture, out var dur))
+                            {
+                                totalDuration += dur;
+                            }
+                        }
 
                         // Sliding window for recent entries
-                        q.Enqueue(entry);
+                        q.Enqueue(line);
                         if (q.Count > count) q.Dequeue();
                     }
 
-                    // Newest-first ordering
-                    results.AddRange(q.Reverse());
+                    // Only deserialize the requested recent window
+                    foreach (var line in q.Reverse())
+                    {
+                        var entry = JsonSerializer.Deserialize(line, TelemetryJsonContext.Default.TelemetryEntry);
+                        if (entry != null) results.Add(entry);
+                    }
+
+                    var successRate = total > 0 ? Math.Round((double)successes / total * 100, 1) : 0;
+                    var avgDuration = total > 0 ? Math.Round(totalDuration / total, 2) : 0;
+                    
+                    var newResult = (results, total, successRate, avgDuration);
+                    _cachedStatsResult = newResult;
+                    _cachedCount = count;
+                    _lastFileWriteTime = currentWriteTime;
+                    
+                    return newResult;
                 }
                 finally
                 {
@@ -496,11 +528,10 @@ public static class ContainerTelemetry
                 RwLock.ExitReadLock();
             }
         }
-        catch { /* Best effort */ }
-
-        var successRate = total > 0 ? Math.Round((double)successes / total * 100, 1) : 0;
-        var avgDuration = total > 0 ? Math.Round(totalDuration / total, 2) : 0;
-        return (results, total, successRate, avgDuration);
+        catch 
+        { 
+            return (new List<TelemetryEntry>(), 0, 0, 0);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════

@@ -27,7 +27,7 @@ public static class UIBuilderHelpers
     public static readonly FontFamily MonoFont = new("Cascadia Code, Consolas, Menlo, monospace");
 
     // Session-persistent collapsed/expanded state (survives panel close/reopen within session)
-    private static readonly Dictionary<string, bool> SectionExpandedState = new();
+    private static readonly Dictionary<string, bool> SectionExpandedState = new(StringComparer.Ordinal);
 
     // ═══════════════════════════════════════════════════════════════════════
     //  UI Helpers
@@ -74,8 +74,8 @@ public static class UIBuilderHelpers
     /// </summary>
     public static void ToggleSort(ref (string column, bool ascending) sort, string clickedColumn)
     {
-        sort = sort.column == clickedColumn
-            ? (clickedColumn, !sort.ascending)
+        sort = string.Equals(sort.column, clickedColumn
+, StringComparison.Ordinal) ? (clickedColumn, !sort.ascending)
             : (clickedColumn, true);
     }
 
@@ -186,7 +186,7 @@ public static class UIBuilderHelpers
     /// <summary>Resets a button's content text after a delay (e.g. "Copied!" → "Copy").</summary>
     public static async Task ResetButtonTextAsync(Button btn, string originalText, int delayMs)
     {
-        await Task.Delay(delayMs);
+        await Task.Delay(delayMs).ConfigureAwait(false);
         Dispatcher.UIThread.Post(() => btn.Content = originalText);
     }
 }

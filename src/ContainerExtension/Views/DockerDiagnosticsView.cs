@@ -64,7 +64,7 @@ public partial class DockerDiagnosticsView : UserControl
     private readonly ISettingsService _settingsService;
 
     // Tracks open container log windows to prevent duplicate spawning
-    private readonly Dictionary<string, Window> _openLogWindows = new();
+    private readonly Dictionary<string, Window> _openLogWindows = new(StringComparer.Ordinal);
 
     // Auto-refresh state
     private CancellationTokenSource? _refreshCts;
@@ -107,8 +107,9 @@ public partial class DockerDiagnosticsView : UserControl
         _terminalService = serviceProvider.Resolve<ITerminalManagerService>();
 
         // Resolve the IDE's theme background brush
-        Application.Current!.TryFindResource("ThemeBackgroundBrushOp", Application.Current!.RequestedThemeVariant, out var bgRes);
-        bgRes ??= Application.Current!.FindResource("ThemeBackgroundBrushOp");
+        object? bgRes = null;
+        Application.Current?.TryFindResource("ThemeBackgroundBrushOp", Application.Current.RequestedThemeVariant, out bgRes);
+        bgRes ??= Application.Current?.FindResource("ThemeBackgroundBrushOp");
         Background = (bgRes as IBrush) ?? Brushes.Transparent;
 
         // Read plugin version from assembly metadata (set in .csproj <Version>)
@@ -153,19 +154,21 @@ public partial class DockerDiagnosticsView : UserControl
             Margin = new Thickness(0, 2, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
-#pragma warning disable VSTHRD101 // Avoid using async lambda for a void returning delegate type
-        searchBox.TextChanged += async (_, _) =>
+        var textChangedCmd = new AsyncRelayCommand(async () =>
         {
             try
             {
-                _searchDebounceCts?.Cancel();
-                _searchDebounceCts?.Dispose();
+                if (_searchDebounceCts != null)
+                {
+                    await _searchDebounceCts.CancelAsync().ConfigureAwait(false);
+                    _searchDebounceCts.Dispose();
+                }
                 _searchDebounceCts = new CancellationTokenSource();
                 var token = _searchDebounceCts.Token;
 
                 _searchFilter = searchBox.Text ?? "";
                 
-                try { await Task.Delay(250, token); }
+                try { await Task.Delay(250, token).ConfigureAwait(false); }
                 catch (TaskCanceledException) { return; }
 
                 if (!token.IsCancellationRequested)
@@ -175,8 +178,8 @@ public partial class DockerDiagnosticsView : UserControl
             {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "SearchBox_TextChanged", ex);
             }
-        };
-#pragma warning restore VSTHRD101
+        });
+        searchBox.TextChanged += (_, _) => textChangedCmd.Execute(null);
 
         _lastRefreshedText = new TextBlock
         {
@@ -284,26 +287,36 @@ public partial class DockerDiagnosticsView : UserControl
 
         // Fire-and-forget: load all live data after the control renders + start auto-refresh.
         // Avalonia event handlers require void return type; try/catch prevents unobserved exceptions.
-#pragma warning disable VSTHRD101
-        AttachedToVisualTree += async (_, _) =>
+        var attachCmd = new AsyncRelayCommand(async () =>
         {
             if (_hasAttached) return; // Prevent duplicate handlers on dock/undock cycles (F15)
             _hasAttached = true;
-            try { await RefreshAllAsync(); }
+            try { await RefreshAllAsync().ConfigureAwait(false); }
             catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView", "RefreshAllAsync_Attach", ex); }
-            try { await PopulateToolchainEnvironmentAsync(); }
+            try { await PopulateToolchainEnvironmentAsync().ConfigureAwait(false); }
             catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView", "PopulateToolchainEnvironment_Attach", ex); }
             StartAutoRefreshTimer();
-        };
-#pragma warning restore VSTHRD101
+        });
+        AttachedToVisualTree += (_, _) => attachCmd.Execute(null);
         DetachedFromVisualTree += (_, _) =>
         {
-            _refreshCts?.Cancel();
-            _refreshCts?.Dispose();
+            var rc = _refreshCts;
+            var sc = _searchDebounceCts;
             _refreshCts = null;
-            _searchDebounceCts?.Cancel();
-            _searchDebounceCts?.Dispose();
             _searchDebounceCts = null;
+            _ = Task.Run(async () =>
+            {
+                if (rc != null)
+                {
+                    await rc.CancelAsync().ConfigureAwait(false);
+                    rc.Dispose();
+                }
+                if (sc != null)
+                {
+                    await sc.CancelAsync().ConfigureAwait(false);
+                    sc.Dispose();
+                }
+            });
             _hasAttached = false; // Allow re-attach to refresh again (F15)
 
             // Close any orphan container log windows spawned from this dashboard
@@ -330,15 +343,22 @@ public partial class DockerDiagnosticsView : UserControl
     private void StartAutoRefreshTimer()
     {
         // Stop any previously created timers to prevent accumulation on re-attach
-        _refreshCts?.Cancel();
-        _refreshCts?.Dispose();
+        var rc = _refreshCts;
         _refreshCts = new CancellationTokenSource();
+        _ = Task.Run(async () =>
+        {
+            if (rc != null)
+            {
+                await rc.CancelAsync().ConfigureAwait(false);
+                rc.Dispose();
+            }
+        });
         var token = _refreshCts.Token;
 
-        string? interval;
-        try { interval = _settingsService.GetSettingValue<string>(ContainerExtensionModule.DashboardRefreshSetting); }
-        catch { interval = "Manual"; }
-        if (string.IsNullOrEmpty(interval) || interval == "Manual")
+        var interval = _settingsService.HasSetting(ContainerExtensionModule.DashboardRefreshSetting)
+            ? _settingsService.GetSettingValue<string>(ContainerExtensionModule.DashboardRefreshSetting)
+            : "Manual";
+        if (string.IsNullOrEmpty(interval) || string.Equals(interval, "Manual", StringComparison.Ordinal))
         {
             _countdownText.Text = "";
             return;
@@ -358,7 +378,7 @@ public partial class DockerDiagnosticsView : UserControl
             {
                 try
                 {
-                    await Task.Delay(1000, token);
+                    await Task.Delay(1000, token).ConfigureAwait(false);
                     if (token.IsCancellationRequested) break;
 
                     _secondsUntilRefresh--;
@@ -369,9 +389,9 @@ public partial class DockerDiagnosticsView : UserControl
                         Dispatcher.UIThread.Post(() => _countdownText.Text = "Refreshing...");
                         await Dispatcher.UIThread.InvokeAsync(async () =>
                         {
-                            try { await RefreshAllAsync(); }
+                            try { await RefreshAllAsync().ConfigureAwait(false); }
                             catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView", "AutoRefresh", ex); }
-                        });
+                        }).ConfigureAwait(false);
                     }
 
                     Dispatcher.UIThread.Post(() => _countdownText.Text = $"| next in {_secondsUntilRefresh}s");
@@ -418,7 +438,7 @@ public partial class DockerDiagnosticsView : UserControl
         {
             var (label, sortKey) = columns[i];
             var col = gridColumns[i];
-            var isActive = currentSort.column == sortKey;
+            var isActive = string.Equals(currentSort.column, sortKey, StringComparison.Ordinal);
             var arrow = isActive ? (currentSort.ascending ? " ▲" : " ▼") : "";
             var capturedKey = sortKey;
 
@@ -485,7 +505,7 @@ public partial class DockerDiagnosticsView : UserControl
             var ct = cts.Token;
 
             // Ping first to determine reachability
-            var isReachable = await _strategy.PingAsync(ct);
+            var isReachable = await _strategy.PingAsync(ct).ConfigureAwait(false);
 
             // Read settings snapshot (always available, synchronous)
             var settings = _strategy.GetActiveSettingsSummary();
@@ -501,7 +521,7 @@ public partial class DockerDiagnosticsView : UserControl
                     PopulateOfflineSections();
                     _quickActionsRow.IsEnabled = false;
                     _quickActionsRow.Opacity = 0.5;
-                    PopulateTelemetry();
+                    _ = PopulateTelemetryAsync();
                     UpdateHeaderBadge(0);
                     UpdateLastRefreshedTimestamp();
                 });
@@ -519,10 +539,10 @@ public partial class DockerDiagnosticsView : UserControl
 
             try
             {
-                await Task.WhenAll(infoTask, containersTask, imagesTask);
-                info = await infoTask;
-                containers = await containersTask;
-                images = await imagesTask;
+                await Task.WhenAll(infoTask, containersTask, imagesTask).ConfigureAwait(false);
+                info = await infoTask.ConfigureAwait(false);
+                containers = await containersTask.ConfigureAwait(false);
+                images = await imagesTask.ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -536,7 +556,7 @@ public partial class DockerDiagnosticsView : UserControl
                     _quickActionsRow.Opacity = 1.0;
                     PopulateStatus(false, null);
                     PopulateConfig(settings);
-                    PopulateTelemetry();
+                    _ = PopulateTelemetryAsync();
                     UpdateHeaderBadge(0);
                     UpdateLastRefreshedTimestamp();
                 });
@@ -573,7 +593,7 @@ public partial class DockerDiagnosticsView : UserControl
                 PopulateConfig(settings);
                 _quickActionsRow.IsEnabled = true;
                 _quickActionsRow.Opacity = 1.0;
-                PopulateTelemetry();
+                _ = PopulateTelemetryAsync();
                 UpdateHeaderBadge(containers.Count);
                 UpdateLastRefreshedTimestamp();
             });
@@ -609,7 +629,7 @@ public partial class DockerDiagnosticsView : UserControl
         List<string> tags = new();
         try
         {
-            tags = await FEntwumS.ContainerExtension.Registry.RegistryClient.FetchTagsAsync(currentImage);
+            tags = await FEntwumS.ContainerExtension.Registry.RegistryClient.FetchTagsAsync(currentImage).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -640,13 +660,14 @@ public partial class DockerDiagnosticsView : UserControl
                     VerticalAlignment = VerticalAlignment.Center,
                     FontSize = 12
                 };
-                comboBox.ItemsSource = tags.Select(t => $"{currentImage.Split(':')[0]}:{t}").ToList();
-                comboBox.SelectedItem = tags.Any(t => currentImage.EndsWith($":{t}", StringComparison.OrdinalIgnoreCase)) ? currentImage : currentImage;
+                var items = tags.Select(t => $"{currentImage.Split(':')[0]}:{t}").ToList();
+                comboBox.ItemsSource = items;
+                comboBox.SelectedItem = items.FirstOrDefault(i => i.Equals(currentImage, StringComparison.OrdinalIgnoreCase)) ?? items.FirstOrDefault();
 
                 // Only allow switching to tags for the current image
                 comboBox.SelectionChanged += (s, e) =>
                 {
-                    if (comboBox.SelectedItem is string newImage && newImage != currentImage)
+                    if (comboBox.SelectedItem is string newImage && !string.Equals(newImage, currentImage, StringComparison.Ordinal))
                     {
                         try
                         {
@@ -695,7 +716,7 @@ public partial class DockerDiagnosticsView : UserControl
                     btn.IsEnabled = false;
                     btn.Content = "Pulling...";
                     var runtimePath = _strategy.GetRuntimePath();
-                    await _terminalService.ExecuteInTerminalAsync($"{runtimePath} pull \"{activeImg}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5));
+                    await _terminalService.ExecuteInTerminalAsync($"{runtimePath} pull \"{activeImg}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5)).ConfigureAwait(false);
 
                     // Prune dangling images to free disk space
                     _ = _strategy.PruneDanglingImagesAsync();
@@ -705,7 +726,7 @@ public partial class DockerDiagnosticsView : UserControl
                     ContainerTelemetry.TrackError("DockerDiagnosticsView", "UpdateAndPullImage", ex);
                     btn.Content = "Error ✗";
                     ToolTip.SetTip(btn, $"Update failed: {ex.Message}");
-                    await Task.Delay(3000);
+                    await Task.Delay(3000).ConfigureAwait(false);
                     ToolTip.SetTip(btn, prevTip);
                 }
                 finally
@@ -816,12 +837,12 @@ public partial class DockerDiagnosticsView : UserControl
         // ── Grouped Settings ────────────────────────────────────────────
         var groups = new (string title, string[] keys)[]
         {
-            ("Image & Execution", new[] { "Image", "Pull Policy", "Platform", "Network" }),
-            ("Resource Limits",   new[] { "Memory", "CPU", "Timeout" }),
-            ("Container",         new[] { "Auto-Remove", "Name Prefix", "Extra Labels" }),
-            ("Logging",           new[] { "Log Level", "Timestamps" }),
-            ("Dashboard",         new[] { "Dashboard Refresh", "Retention" }),
-            ("Advanced",          new[] { "Runtime Path" }),
+            ("Image & Execution", [ "Image", "Pull Policy", "Platform", "Network" ]),
+            ("Resource Limits",   [ "Memory", "CPU", "Timeout" ]),
+            ("Container",         [ "Auto-Remove", "Name Prefix", "Extra Labels" ]),
+            ("Logging",           [ "Log Level", "Timestamps" ]),
+            ("Dashboard",         [ "Dashboard Refresh", "Retention" ]),
+            ("Advanced",          [ "Runtime Path" ]),
         };
 
         foreach (var (title, keys) in groups)
@@ -943,7 +964,7 @@ public partial class DockerDiagnosticsView : UserControl
                 var runtimePath = _strategy.GetRuntimePath();
                 var settings = _strategy.GetActiveSettingsSummary();
                 var img = settings.GetValueOrDefault("Image", ContainerExtensionModule.FallbackImage);
-                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} pull \"{img}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5));
+                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} pull \"{img}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5)).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -960,7 +981,7 @@ public partial class DockerDiagnosticsView : UserControl
                     msg => Dispatcher.UIThread.Post(() =>
                     {
                         _headerTitle.Text = $"{ContainerExtensionModule.DashboardTitle} — {msg}";
-                    }));
+                    })).ConfigureAwait(false);
                 Dispatcher.UIThread.Post(() =>
                 {
                     _headerTitle.Text = $"{ContainerExtensionModule.DashboardTitle} — Updated {result.pulled} image(s)" +
@@ -980,7 +1001,7 @@ public partial class DockerDiagnosticsView : UserControl
             try
             {
                 var runtimePath = _strategy.GetRuntimePath();
-                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} image prune -a -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2));
+                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} image prune -a -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -994,7 +1015,7 @@ public partial class DockerDiagnosticsView : UserControl
             try
             {
                 var runtimePath = _strategy.GetRuntimePath();
-                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} system prune -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2));
+                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} system prune -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -1008,7 +1029,7 @@ public partial class DockerDiagnosticsView : UserControl
             try
             {
                 var runtimePath = _strategy.GetRuntimePath();
-                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} run --rm hello-world", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2));
+                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} run --rm hello-world", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -1022,7 +1043,7 @@ public partial class DockerDiagnosticsView : UserControl
             try
             {
                 var runtimePath = _strategy.GetRuntimePath();
-                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} info", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(1));
+                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} info", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(1)).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -1039,8 +1060,8 @@ public partial class DockerDiagnosticsView : UserControl
                 var topLevel = TopLevel.GetTopLevel(this);
                 if (topLevel?.Clipboard != null)
                 {
-                    await topLevel.Clipboard.SetTextAsync(cmd);
-                    await Console.Out.WriteLineAsync($"[ContainerExtension] 📋 Copied to clipboard: {cmd}");
+                    await topLevel.Clipboard.SetTextAsync(cmd).ConfigureAwait(false);
+                    await Console.Out.WriteLineAsync($"[ContainerExtension] 📋 Copied to clipboard: {cmd}").ConfigureAwait(false);
                 }
             }
             catch (Exception ex)
@@ -1069,7 +1090,7 @@ public partial class DockerDiagnosticsView : UserControl
     {
         PopulateContainers(_cachedContainers);
         PopulateImages(_cachedImages, _cachedDiskUsage);
-        PopulateTelemetry();
+        _ = PopulateTelemetryAsync();
     }
 
 }

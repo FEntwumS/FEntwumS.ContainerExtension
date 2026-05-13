@@ -4,6 +4,9 @@ using System.IO;
 using System.Text;
 using ContainerExtension;
 using ContainerExtension.Validations;
+using ContainerExtension.Services.Docker;
+using OneWare.Essentials.Models;
+using OneWare.Essentials.ToolEngine;
 using Xunit;
 
 namespace ContainerExtension.UnitTests;
@@ -46,6 +49,7 @@ public class ContainerExtensionTests
     [InlineData("INVALID IMAGE!", false)]
     [InlineData("image with spaces", false)]
     [InlineData("@invalid", false)]
+    [InlineData("a.registry.with.a.very.very.very.long.domain.name.example.com:5000/and/an/extremely/long/path/with/many/many/many/components/repo:very_long_tag_name_that_tests_limits", true)] // Extreme length
     public void DockerImageFormat_ValidatesCorrectly(string input, bool expectedValid)
     {
         var result = _imageValidator.Validate(input, out var warning);
@@ -348,8 +352,69 @@ public class ContainerExtensionTests
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    //  BuildContainerParameters Tests (DockerCommandBuilder)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void BuildContainerParameters_BasicCommand_ProducesCorrectConfig()
+    {
+        var command = new ToolCommand { Executable = "ghdl", ToolName = "test", WorkingDirectory = "/workspace/dir", Arguments = new List<string> { "-a", "file.vhd" } };
+        
+        // Passing null for settingsService uses safe defaults via SafeGetSetting
+        var param = DockerCommandBuilder.BuildContainerParameters(
+            "test_image:latest",
+            command,
+            null!, // Settings will throw NRE internally and fall back to default
+            "1000", "1000",
+            (cmd, log) => { });
+
+        Assert.Equal("test_image:latest", param.Image);
+        Assert.Equal("/workspace", param.WorkingDir);
+        Assert.NotNull(param.Cmd);
+        Assert.Equal(3, param.Cmd.Count);
+        Assert.Equal("sh", param.Cmd[0]);
+        Assert.Equal("-c", param.Cmd[1]);
+        Assert.Equal("ghdl -a file.vhd", param.Cmd[2]);
+
+        Assert.NotNull(param.HostConfig);
+        Assert.Contains(param.HostConfig.Binds, b => b.EndsWith(":/workspace", StringComparison.Ordinal));
+        Assert.True(param.HostConfig.AutoRemove);
+        Assert.Equal("bridge", param.HostConfig.NetworkMode);
+
+        if (OperatingSystem.IsLinux())
+        {
+            Assert.Equal("1000:1000", param.User);
+        }
+    }
+
+    [Fact]
+    public void BuildContainerParameters_CommandWithSpecialCharacters_IsEscaped()
+    {
+        var command = new ToolCommand { Executable = "my_tool", ToolName = "test", WorkingDirectory = "/workspace", Arguments = new List<string> { "file with space.vhd", "part1;part2", "echo \"hello\"" } };
+        
+        var param = DockerCommandBuilder.BuildContainerParameters(
+            "test_image:latest", command, null!, null, null, (c, l) => { });
+
+        var shellCmd = param.Cmd![2];
+        Assert.Contains("\"file with space.vhd\"", shellCmd);
+        Assert.Contains("\"part1;part2\"", shellCmd);
+        Assert.Contains("\"echo \\\"hello\\\"\"", shellCmd);
+    }
+
+    [Fact]
+    public void BuildContainerParameters_NoArguments_BuildsCorrectly()
+    {
+        var command = new ToolCommand { Executable = "tool_only", ToolName = "test", WorkingDirectory = "/dir", Arguments = new List<string>() };
+        var param = DockerCommandBuilder.BuildContainerParameters(
+            "test_image", command, null!, null, null, (c, l) => { });
+
+        Assert.Equal("tool_only", param.Cmd![2]);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     //  ParseEnvFile Tests (DockerExecutionStrategy — .env parsing)
     // ═══════════════════════════════════════════════════════════════════════
+
 
     [Fact]
     public void ParseEnvFile_BasicKeyValue_Parsed()
@@ -359,7 +424,7 @@ public class ContainerExtensionTests
         try
         {
             File.WriteAllText(Path.Combine(dir, ".env"), "KEY1=value1\nKEY2=value2\n");
-            var result = DockerExecutionStrategy.ParseEnvFile(dir);
+            var result = DockerCommandBuilder.ParseEnvFile(dir);
             Assert.NotNull(result);
             Assert.Equal(2, result!.Count);
             Assert.Contains("KEY1=value1", result);
@@ -376,10 +441,27 @@ public class ContainerExtensionTests
         try
         {
             File.WriteAllText(Path.Combine(dir, ".env"), "# comment\n\n  \nKEY=value\n");
-            var result = DockerExecutionStrategy.ParseEnvFile(dir);
+            var result = DockerCommandBuilder.ParseEnvFile(dir);
             Assert.NotNull(result);
             Assert.Single(result!);
             Assert.Equal("KEY=value", result[0]);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public void ParseEnvFile_MalformedLines_HandledGracefully()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"container_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, ".env"), "NO_EQUALS_HERE\nKEY_ONLY=\n=VALUE_ONLY\nVALID=1");
+            var result = DockerCommandBuilder.ParseEnvFile(dir);
+            Assert.NotNull(result);
+            // Assuming NO_EQUALS_HERE might be parsed as key without value or ignored depending on logic.
+            // But we know 'KEY_ONLY=' and '=VALUE_ONLY' and 'VALID=1' should not throw.
+            Assert.Contains("VALID=1", result);
         }
         finally { Directory.Delete(dir, true); }
     }
@@ -392,7 +474,7 @@ public class ContainerExtensionTests
         try
         {
             File.WriteAllText(Path.Combine(dir, ".env"), "A=\"hello world\"\nB='single'\nC=bare # comment\n");
-            var result = DockerExecutionStrategy.ParseEnvFile(dir);
+            var result = DockerCommandBuilder.ParseEnvFile(dir);
             Assert.NotNull(result);
             Assert.Equal(3, result!.Count);
             Assert.Contains("A=hello world", result);
@@ -409,7 +491,7 @@ public class ContainerExtensionTests
         Directory.CreateDirectory(dir);
         try
         {
-            var result = DockerExecutionStrategy.ParseEnvFile(dir);
+            var result = DockerCommandBuilder.ParseEnvFile(dir);
             Assert.Null(result);
         }
         finally { Directory.Delete(dir, true); }
@@ -425,7 +507,7 @@ public class ContainerExtensionTests
         try
         {
             File.WriteAllText(Path.Combine(dir, ".env"), "COLOR=#FF0000\nURL=http://host/#anchor\n");
-            var result = DockerExecutionStrategy.ParseEnvFile(dir);
+            var result = DockerCommandBuilder.ParseEnvFile(dir);
             Assert.NotNull(result);
             Assert.Equal(2, result!.Count);
             Assert.Contains("COLOR=#FF0000", result);
@@ -654,7 +736,7 @@ public class ContainerExtensionTests
         try
         {
             File.WriteAllText(Path.Combine(dir, ".env"), "export KEY=value\n");
-            var result = DockerExecutionStrategy.ParseEnvFile(dir);
+            var result = DockerCommandBuilder.ParseEnvFile(dir);
             Assert.NotNull(result);
             Assert.Single(result!);
             Assert.Contains("KEY=value", result);
@@ -670,7 +752,7 @@ public class ContainerExtensionTests
         try
         {
             File.WriteAllText(Path.Combine(dir, ".env"), "EMPTY=\n");
-            var result = DockerExecutionStrategy.ParseEnvFile(dir);
+            var result = DockerCommandBuilder.ParseEnvFile(dir);
             Assert.NotNull(result);
             Assert.Single(result!);
             Assert.Equal("EMPTY=", result[0]);
@@ -687,7 +769,7 @@ public class ContainerExtensionTests
         try
         {
             File.WriteAllText(Path.Combine(dir, ".env"), "KEY=first\nKEY=second\n");
-            var result = DockerExecutionStrategy.ParseEnvFile(dir);
+            var result = DockerCommandBuilder.ParseEnvFile(dir);
             Assert.NotNull(result);
             Assert.Equal(2, result!.Count);
             Assert.Equal("KEY=first", result[0]);
@@ -704,7 +786,7 @@ public class ContainerExtensionTests
         try
         {
             File.WriteAllText(Path.Combine(dir, ".env"), "LANG=日本語\nEMOJI=🐳\n");
-            var result = DockerExecutionStrategy.ParseEnvFile(dir);
+            var result = DockerCommandBuilder.ParseEnvFile(dir);
             Assert.NotNull(result);
             Assert.Equal(2, result!.Count);
             Assert.Contains("LANG=日本語", result);
@@ -721,7 +803,7 @@ public class ContainerExtensionTests
         try
         {
             File.WriteAllText(Path.Combine(dir, ".env"), "NOEQUALS\nVALID=yes\n");
-            var result = DockerExecutionStrategy.ParseEnvFile(dir);
+            var result = DockerCommandBuilder.ParseEnvFile(dir);
             Assert.NotNull(result);
             Assert.Single(result!);
             Assert.Equal("VALID=yes", result[0]);

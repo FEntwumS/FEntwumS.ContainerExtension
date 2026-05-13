@@ -80,9 +80,9 @@ public partial class DockerDiagnosticsView
     {
         try
         {
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            if (OperatingSystem.IsMacOS())
                 Process.Start("open", $"\"{path}\"");
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            else if (OperatingSystem.IsWindows())
                 Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
             else
                 Process.Start("xdg-open", $"\"{path}\"");
@@ -114,11 +114,11 @@ public partial class DockerDiagnosticsView
 
         try
         {
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            if (OperatingSystem.IsMacOS())
             {
                 Process.Start("open", $"-a \"{appName}\"");
             }
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            else if (OperatingSystem.IsWindows())
             {
                 // Docker Desktop and Podman Desktop register URI schemes on Windows
                 var scheme = appName.Contains("Docker") ? "docker-desktop:" : "podman-desktop:";

@@ -27,14 +27,15 @@ public sealed class DockerImageManager
     {
         try
         {
-            var value = _settingsService.GetSettingValue<T>(key);
-            if (value == null) return fallback;
-            if (typeof(T) == typeof(string) && string.IsNullOrWhiteSpace(value.ToString()))
+            if (!_settingsService.HasSetting(key))
                 return fallback;
-            return value;
+
+            var value = _settingsService.GetSettingValue<T>(key);
+            return value ?? fallback;
         }
-        catch
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            ContainerTelemetry.TrackError("DockerImageManager", $"Setting '{key}' read failed", ex);
             return fallback;
         }
     }
@@ -112,8 +113,9 @@ public sealed class DockerImageManager
         try
         {
             var filters = new Dictionary<string, IDictionary<string, bool>>
+(StringComparer.Ordinal)
             {
-                { "dangling", new Dictionary<string, bool> { { "true", true } } }
+                { "dangling", new Dictionary<string, bool>(StringComparer.Ordinal) { { "true", true } } }
             };
 
             var response = await _client.Images.PruneImagesAsync(
@@ -138,7 +140,7 @@ public sealed class DockerImageManager
 
         int count = images.Count;
         long total = images.Sum(i => i.Size);
-        long reclaimable = images.Where(i => i.RepoTags == null || !i.RepoTags.Any() || i.RepoTags.All(t => t.Contains("<none>")))
+        long reclaimable = images.Where(i => i.RepoTags is null || i.RepoTags.Count == 0 || i.RepoTags.All(t => t.Contains("<none>")))
                                  .Sum(i => i.Size);
 
         return (count, total, reclaimable);
