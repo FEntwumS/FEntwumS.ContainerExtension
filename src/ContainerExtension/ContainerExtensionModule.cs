@@ -30,6 +30,8 @@ namespace ContainerExtension;
 /// </summary>
 public class ContainerExtensionModule : OneWareModuleBase
 {
+    // To prevent multiple Dashboard buttons in the status bar across workspace reloads
+    private static bool _isUiRegistered = false;
     // ── Setting Key Constants ────────────────────────────────────────────────
     // Centralized here to avoid magic strings across the codebase.
     // Referenced by DockerExecutionStrategy, DockerDiagnosticsView, and unit tests.
@@ -375,21 +377,31 @@ public class ContainerExtensionModule : OneWareModuleBase
 
         // ── Create Dashboard VM (singleton) ──────────────────────────────
         var dockService = serviceProvider.Resolve<IMainDockService>();
-        var dashboardVm = serviceProvider.Resolve<DockerDiagnosticsViewModel>();
 
         // Register with the dock framework for persistent right-side layout (matches AI Chat pattern)
         dockService.RegisterLayoutExtension<DockerDiagnosticsViewModel>(DockShowLocation.RightPinned);
 
-        // ── Register Docker Toolbar Button ──────────────────────────────
-        var windowService = serviceProvider.Resolve<IWindowService>();
-        windowService.RegisterUiExtension("MainWindow_RightToolBarExtension",
-            new OneWareUiExtension(_ => new DockerButtonView(dockService, dashboardVm)));
+        if (!_isUiRegistered)
+        {
+            _isUiRegistered = true;
 
-        // ── Register Dockable Dashboard View ────────────────────────────
-        // Register a DataTemplate so OneWare can resolve the view for our VM
-        Avalonia.Application.Current!.DataTemplates.Insert(0,
-            new FuncDataTemplate<DockerDiagnosticsViewModel>((_, _) =>
-                new DockerDiagnosticsView(serviceProvider, dockerStrategy), true));
+            // ── Register Docker Toolbar Button ──────────────────────────────
+            var windowService = serviceProvider.Resolve<IWindowService>();
+            windowService.RegisterUiExtension("MainWindow_RightToolBarExtension",
+                new OneWareUiExtension(sp =>
+                {
+                    var provider = (IServiceProvider)sp!;
+                    return new DockerButtonView(
+                        provider.Resolve<IMainDockService>(), 
+                        provider.Resolve<DockerDiagnosticsViewModel>());
+                }));
+
+            // ── Register Dockable Dashboard View ────────────────────────────
+            // Register a DataTemplate so OneWare can resolve the view for our VM
+            Avalonia.Application.Current!.DataTemplates.Insert(0,
+                new FuncDataTemplate<DockerDiagnosticsViewModel>((vm, _) =>
+                    new DockerDiagnosticsView(vm.ServiceProvider ?? serviceProvider, vm.Strategy ?? dockerStrategy), true));
+        }
 
         _ = Task.Run(async () =>
         {
