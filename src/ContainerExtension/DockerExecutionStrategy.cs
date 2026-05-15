@@ -94,7 +94,10 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 : message;
             // Fall back to ErrorHandler when OutputHandler is null.
             // Upstream tools like nextpnr and gmpack only set ErrorHandler.
-            (command.OutputHandler ?? command.ErrorHandler)?.Invoke(line);
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                (command.OutputHandler ?? command.ErrorHandler)?.Invoke(line);
+            });
         }
     }
 
@@ -196,7 +199,11 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 "Could not resolve a Docker daemon URI. Ensure Docker is installed and running, " +
                 "or set the DOCKER_HOST environment variable.");
         using var config = new DockerClientConfiguration(uri);
-        _client = config.CreateClient();
+        // Pin API version to 1.44 — the minimum required by Docker Engine v29+.
+        // Without this, Docker.DotNet 3.125.15 omits the version prefix, relying on
+        // daemon-side auto-negotiation which is fragile across engine upgrades.
+        // API 1.44 is supported by all Docker Engine versions ≥ v24.
+        _client = config.CreateClient(new System.Version(1, 44));
 
         _connectionProvider = new DockerConnectionProvider(_client);
         _imageManager = new DockerImageManager(_client, _settingsService);
@@ -657,7 +664,8 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
             if (buffer[i] == '\n')
             {
                 int lineEnd = (i > start && buffer[i - 1] == '\r') ? i - 1 : i;
-                handler?.Invoke(buffer.ToString(start, lineEnd - start));
+                var completedLine = buffer.ToString(start, lineEnd - start);
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => handler?.Invoke(completedLine));
                 start = i + 1;
             }
         }
@@ -1026,8 +1034,16 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 finally
                 {
                     // Flush any remaining partial lines — runs even if ct was pre-cancelled
-                    if (stdoutBuf.Length > 0) command.OutputHandler?.Invoke(stdoutBuf.ToString());
-                    if (stderrBuf.Length > 0) command.ErrorHandler?.Invoke(stderrBuf.ToString());
+                    if (stdoutBuf.Length > 0)
+                    {
+                        var finalStdout = stdoutBuf.ToString();
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() => command.OutputHandler?.Invoke(finalStdout));
+                    }
+                    if (stderrBuf.Length > 0)
+                    {
+                        var finalStderr = stderrBuf.ToString();
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() => command.ErrorHandler?.Invoke(finalStderr));
+                    }
                 }
             }, CancellationToken.None);
 
@@ -1050,7 +1066,8 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 wasCancelled = true;
                 // Distinguish between timeout-triggered and user-initiated cancellation
                 if (logRank >= RankErrors)
-                    command.ErrorHandler?.Invoke("[Docker SDK] Container execution was cancelled.");
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                        command.ErrorHandler?.Invoke("[Docker SDK] Container execution was cancelled."));
             }
 
             // Stop stats collection now that the container has exited
@@ -1202,7 +1219,8 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
             errorMessage = timeoutMinutes > 0
                 ? $"Execution timed out after {timeoutMinutes:N0} minute(s)."
                 : "Operation cancelled.";
-            command.ErrorHandler?.Invoke($"[Docker SDK] {errorMessage}");
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                command.ErrorHandler?.Invoke($"[Docker SDK] {errorMessage}"));
             return (false, "Cancelled");
         }
         catch (Exception ex)
@@ -1214,7 +1232,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 err += $"\n  Hint: Run 'docker pull {image}' to cache the image locally.";
             if (ex.Message.Contains("pull access denied", StringComparison.OrdinalIgnoreCase))
                 err += $"\n  Hint: The image '{image}' does not exist on Docker Hub or requires authentication.";
-            command.ErrorHandler?.Invoke(err);
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => command.ErrorHandler?.Invoke(err));
             ContainerTelemetry.TrackError("DockerExecutionStrategy", $"ExecuteAsync failed for '{executable}'", ex);
             return (false, ex.Message);
         }

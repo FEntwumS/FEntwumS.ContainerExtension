@@ -41,8 +41,24 @@ namespace ContainerExtension.Views;
                 var existing = dockService.SearchView<DockerDiagnosticsViewModel>().FirstOrDefault();
                 if (existing != null)
                 {
-                    dockService.Show(existing);
-                    return;
+                    // Detect uninitialized instance created by layout deserialization
+                    if (existing.ServiceProvider == null || existing.Strategy == null)
+                    {
+                        try
+                        {
+                            dockService.CloseDockable(existing);
+                        }
+                        catch
+                        {
+                            // Ignore dock service close errors to prevent crash
+                        }
+                        // Continue to show the fully initialized dashboardVm
+                    }
+                    else
+                    {
+                        dockService.Show(existing);
+                        return;
+                    }
                 }
 
                 if (!_isPinned)

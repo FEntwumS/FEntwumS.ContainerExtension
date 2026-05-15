@@ -397,10 +397,32 @@ public class ContainerExtensionModule : OneWareModuleBase
                 }));
 
             // ── Register Dockable Dashboard View ────────────────────────────
-            // Register a DataTemplate so OneWare can resolve the view for our VM
-            Avalonia.Application.Current!.DataTemplates.Insert(0,
-                new FuncDataTemplate<DockerDiagnosticsViewModel>((vm, _) =>
-                    new DockerDiagnosticsView(vm.ServiceProvider ?? serviceProvider, vm.Strategy ?? dockerStrategy), true));
+            // Register a DataTemplate so OneWare can resolve the view for our VM.
+            // Guard: the dock layout deserializer may create a VM via the parameterless
+            // JsonConstructor, leaving ServiceProvider and Strategy null. The closure
+            // captures serviceProvider/dockerStrategy as fallbacks, but we still guard
+            // against edge cases where both are null to prevent NullReferenceException.
+            var app = Avalonia.Application.Current;
+            if (app != null)
+            {
+                app.DataTemplates.Insert(0,
+                    new FuncDataTemplate<DockerDiagnosticsViewModel>((vm, _) =>
+                    {
+                        var sp = vm?.ServiceProvider ?? serviceProvider;
+                        var strat = vm?.Strategy ?? dockerStrategy;
+                        if (sp == null || strat == null)
+                        {
+                            return new Avalonia.Controls.TextBlock
+                            {
+                                Text = "Container Dashboard is loading…",
+                                Foreground = Avalonia.Media.Brushes.Gray,
+                                Margin = new Avalonia.Thickness(20),
+                                FontSize = 14
+                            };
+                        }
+                        return new DockerDiagnosticsView(sp, strat);
+                    }, true));
+            }
         }
 
         _ = Task.Run(async () =>
