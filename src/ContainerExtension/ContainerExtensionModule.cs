@@ -388,12 +388,11 @@ public class ContainerExtensionModule : OneWareModuleBase
             // ── Register Docker Toolbar Button ──────────────────────────────
             var windowService = serviceProvider.Resolve<IWindowService>();
             windowService.RegisterUiExtension("MainWindow_RightToolBarExtension",
-                new OneWareUiExtension(sp =>
+                new OneWareUiExtension(_ =>
                 {
-                    var provider = (IServiceProvider)sp!;
                     return new DockerButtonView(
-                        provider.Resolve<IMainDockService>()!, 
-                        provider.Resolve<DockerDiagnosticsViewModel>()!);
+                        serviceProvider.Resolve<IMainDockService>()!, 
+                        serviceProvider.Resolve<DockerDiagnosticsViewModel>()!);
                 }));
 
             // ── Register Dockable Dashboard View ────────────────────────────
