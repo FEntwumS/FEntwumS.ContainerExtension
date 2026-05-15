@@ -392,8 +392,8 @@ public class ContainerExtensionModule : OneWareModuleBase
                 {
                     var provider = (IServiceProvider)sp!;
                     return new DockerButtonView(
-                        provider.Resolve<IMainDockService>(), 
-                        provider.Resolve<DockerDiagnosticsViewModel>());
+                        provider.Resolve<IMainDockService>()!, 
+                        provider.Resolve<DockerDiagnosticsViewModel>()!);
                 }));
 
             // ── Register Dockable Dashboard View ────────────────────────────
