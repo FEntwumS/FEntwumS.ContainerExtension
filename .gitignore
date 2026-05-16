@@ -38,6 +38,8 @@ riderModule.iml
 bin/
 obj/
 publish/
+publish_debug/
+publish_new/
 /packages/
 native_tools/
 *.nupkg
@@ -89,21 +91,8 @@ final_*.txt
 .env
 
 # ── Scratch / Generated ──────────────────────────────────────────────────────
-
 full_source_bundle.md
-generate_bundle.py
 
-# ── Credentials ──────────────────────────────────────────────────────────────
+# ── Logs & Debugging ─────────────────────────────────────────────────────────
 
-youtube/youtube.json
-NetListViewer/
-OneWare/
-Ghdl/
-_beispielprojekte/
 build_errors.log
-.dotnet_cli_home/
-.dotnet_home/
-.nuget_packages/
-.nuget_scratch/
-scratch/
-

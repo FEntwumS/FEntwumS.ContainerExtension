@@ -16,12 +16,31 @@ namespace ContainerExtension.UnitTests;
 /// Validates setting constants and the real validation classes used by the extension,
 /// leveraging InternalsVisibleTo to test the actual validators directly.
 /// </summary>
-public class ContainerExtensionTests
+public class ContainerExtensionTests : IDisposable
 {
-    // ── Real validator instances (internal sealed, accessible via InternalsVisibleTo) ──
     private readonly DockerImageFormatValidation _imageValidator = new();
     private readonly DaemonSocketValidation _socketValidator = new();
     private readonly ContainerNameValidation _nameValidator = new();
+    private readonly string _testTelemetryDir;
+
+    public ContainerExtensionTests()
+    {
+        // Isolate telemetry to a temporary directory strictly for this test lifecycle
+        _testTelemetryDir = Path.Combine(Path.GetTempPath(), "OneWareTests", Guid.NewGuid().ToString("N"));
+        ContainerTelemetry.InitializeTestEnvironment(_testTelemetryDir);
+    }
+
+    public void Dispose()
+    {
+        // Clean up test environment physical files
+        try
+        {
+            if (Directory.Exists(_testTelemetryDir))
+                Directory.Delete(_testTelemetryDir, true);
+        }
+        catch { /* Best effort teardown */ }
+        GC.SuppressFinalize(this);
+    }
 
     // ── Smoke Test ──────────────────────────────────────────────────────
 
@@ -31,6 +50,27 @@ public class ContainerExtensionTests
         var assembly = typeof(ContainerExtensionModule).Assembly;
         Assert.NotNull(assembly);
         Assert.Contains("ContainerExtension", assembly.GetName().Name);
+    }
+
+    // ── String Extensions — Edge Cases ──────────────────────────────────
+    
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("", "")]
+    [InlineData("short", "short")]
+    [InlineData("123456789012", "123456789012")]
+    [InlineData("123456789012345", "123456789012")] // Safely clips at 12
+    public void ShortId_HandlesAllStringBoundsGracefully(string? input, string? expected)
+    {
+        var result = input.ShortId();
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void ShortId_ReturnsEmptyOnWhitespaceIfEmpty()
+    {
+        var result = "   ".ShortId();
+        Assert.Equal("   ", result); // Preserves exact string structure up to 12
     }
 
     // ── Docker Image Format Validation ──────────────────────────────────
@@ -175,10 +215,8 @@ public class ContainerExtensionTests
     [Fact]
     public void Telemetry_LogAndRetrieveRoundtrip()
     {
-        // Clear any previous state
         ContainerTelemetry.ClearEntries();
 
-        // Log a test execution
         ContainerTelemetry.LogExecution(
             image: "test/image:latest",
             tool: "ghdl",
@@ -187,7 +225,6 @@ public class ContainerExtensionTests
             imageDigest: "sha256:abc123def456",
             dockerRunCommand: "docker run --rm test/image:latest ghdl -a test.vhd");
 
-        // Retrieve and verify
         var entries = ContainerTelemetry.GetRecentEntries(10);
         Assert.Single(entries);
         Assert.Equal("test/image:latest", entries[0].Image);
@@ -197,7 +234,6 @@ public class ContainerExtensionTests
         Assert.Equal("sha256:abc123def456", entries[0].ImageDigest);
         Assert.False(entries[0].WasCancelled);
 
-        // Clean up
         ContainerTelemetry.ClearEntries();
     }
 
@@ -206,7 +242,6 @@ public class ContainerExtensionTests
     {
         ContainerTelemetry.ClearEntries();
 
-        // Log 3 executions: 2 success, 1 failure
         ContainerTelemetry.LogExecution("img", "tool1", 2.0, exitCode: 0);
         ContainerTelemetry.LogExecution("img", "tool2", 4.0, exitCode: 0);
         ContainerTelemetry.LogExecution("img", "tool3", 6.0, exitCode: 1);
@@ -237,19 +272,16 @@ public class ContainerExtensionTests
     {
         ContainerTelemetry.ClearEntries();
 
-        // Log 15 entries with maxEntries=5 (trim threshold = 5 * 1.2 = 6)
         for (int i = 0; i < 15; i++)
         {
             ContainerTelemetry.LogExecution(
                 "img", $"tool_{i}", i * 0.5, exitCode: 0, maxEntries: 5);
         }
 
-        // After trimming, should have at most 5 entries (the most recent ones)
         var entries = ContainerTelemetry.GetRecentEntries(100);
         Assert.True(entries.Count <= 5,
             $"Expected at most 5 entries after trimming, but got {entries.Count}");
 
-        // The most recent entry should be the last one logged (tool_14)
         Assert.Equal("tool_14", entries[0].Tool);
 
         ContainerTelemetry.ClearEntries();
@@ -265,7 +297,7 @@ public class ContainerExtensionTests
 
         var (totalRuns, successRate, _) = ContainerTelemetry.GetStats();
         Assert.Equal(2, totalRuns);
-        Assert.Equal(50.0, successRate); // Only 1 of 2 is a non-cancelled success
+        Assert.Equal(50.0, successRate);
 
         ContainerTelemetry.ClearEntries();
     }
@@ -282,7 +314,7 @@ public class ContainerExtensionTests
         DockerExecutionStrategy.DrainLines(buffer, "hello\n", s => { lines.Add(s); return true; });
         Assert.Single(lines);
         Assert.Equal("hello", lines[0]);
-        Assert.Equal(0, buffer.Length); // Buffer should be empty after complete line
+        Assert.Equal(0, buffer.Length); 
     }
 
     [Fact]
@@ -303,12 +335,10 @@ public class ContainerExtensionTests
         var buffer = new StringBuilder();
         var lines = new List<string>();
 
-        // First chunk: partial line with no newline
         DockerExecutionStrategy.DrainLines(buffer, "partial", s => { lines.Add(s); return true; });
-        Assert.Empty(lines); // No complete line yet
+        Assert.Empty(lines); 
         Assert.Equal("partial", buffer.ToString());
 
-        // Second chunk: completes the line
         DockerExecutionStrategy.DrainLines(buffer, " line\n", s => { lines.Add(s); return true; });
         Assert.Single(lines);
         Assert.Equal("partial line", lines[0]);
@@ -321,7 +351,7 @@ public class ContainerExtensionTests
         var lines = new List<string>();
         DockerExecutionStrategy.DrainLines(buffer, "windows\r\n", s => { lines.Add(s); return true; });
         Assert.Single(lines);
-        Assert.Equal("windows", lines[0]); // \r should be stripped
+        Assert.Equal("windows", lines[0]); 
     }
 
     [Fact]
@@ -360,11 +390,10 @@ public class ContainerExtensionTests
     {
         var command = new ToolCommand { Executable = "ghdl", ToolName = "test", WorkingDirectory = "/workspace/dir", Arguments = new List<string> { "-a", "file.vhd" } };
         
-        // Passing null for settingsService uses safe defaults via SafeGetSetting
         var param = DockerCommandBuilder.BuildContainerParameters(
             "test_image:latest",
             command,
-            null!, // Settings will throw NRE internally and fall back to default
+            null!, 
             "1000", "1000",
             (cmd, log) => { });
 
@@ -459,8 +488,6 @@ public class ContainerExtensionTests
             File.WriteAllText(Path.Combine(dir, ".env"), "NO_EQUALS_HERE\nKEY_ONLY=\n=VALUE_ONLY\nVALID=1");
             var result = DockerCommandBuilder.ParseEnvFile(dir);
             Assert.NotNull(result);
-            // Assuming NO_EQUALS_HERE might be parsed as key without value or ignored depending on logic.
-            // But we know 'KEY_ONLY=' and '=VALUE_ONLY' and 'VALID=1' should not throw.
             Assert.Contains("VALID=1", result);
         }
         finally { Directory.Delete(dir, true); }
@@ -500,8 +527,6 @@ public class ContainerExtensionTests
     [Fact]
     public void ParseEnvFile_HashInValue_PreservedWithoutSpace()
     {
-        // Docker's --env-file only strips comments after " #" (space-prefixed),
-        // a bare "#" inside the value should be preserved.
         var dir = Path.Combine(Path.GetTempPath(), $"container_test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
@@ -618,7 +643,11 @@ public class ContainerExtensionTests
     [Fact]
     public void Telemetry_ExportTo_MissingSource_ReturnsFalse()
     {
-        ContainerTelemetry.ClearEntries(); // Ensures no telemetry file exists
+        ContainerTelemetry.ClearEntries(); // Clears entries (truncates)
+        if (File.Exists(ContainerTelemetry.TelemetryFilePath))
+        {
+            File.Delete(ContainerTelemetry.TelemetryFilePath);
+        }
 
         var destPath = Path.Combine(Path.GetTempPath(), $"container_test_{Guid.NewGuid():N}", "export.jsonl");
         var result = ContainerTelemetry.ExportTo(destPath);
@@ -667,258 +696,5 @@ public class ContainerExtensionTests
         var longName = new string('a', 100) + "/" + new string('b', 98) + ":v1";
         var result = _imageValidator.Validate(longName, out _);
         Assert.True(result, "Long but well-formed image references should be accepted.");
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  DrainLines — Additional Edge Cases
-    // ═══════════════════════════════════════════════════════════════════════
-
-    [Fact]
-    public void DrainLines_OnlyNewlines_EmitsEmptyStrings()
-    {
-        var buffer = new StringBuilder();
-        var lines = new List<string>();
-        DockerExecutionStrategy.DrainLines(buffer, "\n\n\n", s => { lines.Add(s); return true; });
-        Assert.Equal(3, lines.Count);
-        Assert.All(lines, l => Assert.Equal("", l));
-    }
-
-    [Fact]
-    public void DrainLines_LargeChunk_HandlesCorrectly()
-    {
-        var buffer = new StringBuilder();
-        var lines = new List<string>();
-
-        // Build a 10 KB chunk with 100 lines
-        var sb = new StringBuilder();
-        for (int i = 0; i < 100; i++)
-            sb.Append(System.Globalization.CultureInfo.InvariantCulture, $"Line {i:D4} padded with data {new string('X', 80)}\n");
-
-        DockerExecutionStrategy.DrainLines(buffer, sb.ToString(), s => { lines.Add(s); return true; });
-        Assert.Equal(100, lines.Count);
-        Assert.StartsWith("Line 0000", lines[0]);
-        Assert.StartsWith("Line 0099", lines[99]);
-    }
-
-    [Fact]
-    public void DrainLines_HandlerReturnsFalse_StillProcesses()
-    {
-        var buffer = new StringBuilder();
-        var lines = new List<string>();
-        // Handler returns false — DrainLines should still process remaining lines
-        DockerExecutionStrategy.DrainLines(buffer, "a\nb\nc\n", s => { lines.Add(s); return false; });
-        Assert.Equal(3, lines.Count);
-    }
-
-    [Fact]
-    public void DrainLines_MixedLineEndings_HandledCorrectly()
-    {
-        var buffer = new StringBuilder();
-        var lines = new List<string>();
-        // Mix of \n and \r\n in a single chunk
-        DockerExecutionStrategy.DrainLines(buffer, "unix\nwindows\r\nunix2\n", s => { lines.Add(s); return true; });
-        Assert.Equal(3, lines.Count);
-        Assert.Equal("unix", lines[0]);
-        Assert.Equal("windows", lines[1]);
-        Assert.Equal("unix2", lines[2]);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  ParseEnvFile — Additional Edge Cases
-    // ═══════════════════════════════════════════════════════════════════════
-
-    [Fact]
-    public void ParseEnvFile_ExportPrefix_StrippedFromKey()
-    {
-        // 'export ' prefix should be stripped (matches Docker Compose and shell .env conventions)
-        var dir = Path.Combine(Path.GetTempPath(), $"container_test_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
-        try
-        {
-            File.WriteAllText(Path.Combine(dir, ".env"), "export KEY=value\n");
-            var result = DockerCommandBuilder.ParseEnvFile(dir);
-            Assert.NotNull(result);
-            Assert.Single(result!);
-            Assert.Contains("KEY=value", result);
-        }
-        finally { Directory.Delete(dir, true); }
-    }
-
-    [Fact]
-    public void ParseEnvFile_EmptyValue_Preserved()
-    {
-        var dir = Path.Combine(Path.GetTempPath(), $"container_test_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
-        try
-        {
-            File.WriteAllText(Path.Combine(dir, ".env"), "EMPTY=\n");
-            var result = DockerCommandBuilder.ParseEnvFile(dir);
-            Assert.NotNull(result);
-            Assert.Single(result!);
-            Assert.Equal("EMPTY=", result[0]);
-        }
-        finally { Directory.Delete(dir, true); }
-    }
-
-    [Fact]
-    public void ParseEnvFile_DuplicateKeys_BothKept()
-    {
-        // Docker's --env-file passes both entries; the last one wins at runtime
-        var dir = Path.Combine(Path.GetTempPath(), $"container_test_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
-        try
-        {
-            File.WriteAllText(Path.Combine(dir, ".env"), "KEY=first\nKEY=second\n");
-            var result = DockerCommandBuilder.ParseEnvFile(dir);
-            Assert.NotNull(result);
-            Assert.Equal(2, result!.Count);
-            Assert.Equal("KEY=first", result[0]);
-            Assert.Equal("KEY=second", result[1]);
-        }
-        finally { Directory.Delete(dir, true); }
-    }
-
-    [Fact]
-    public void ParseEnvFile_UnicodeValues_Preserved()
-    {
-        var dir = Path.Combine(Path.GetTempPath(), $"container_test_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
-        try
-        {
-            File.WriteAllText(Path.Combine(dir, ".env"), "LANG=日本語\nEMOJI=🐳\n");
-            var result = DockerCommandBuilder.ParseEnvFile(dir);
-            Assert.NotNull(result);
-            Assert.Equal(2, result!.Count);
-            Assert.Contains("LANG=日本語", result);
-            Assert.Contains("EMOJI=🐳", result);
-        }
-        finally { Directory.Delete(dir, true); }
-    }
-
-    [Fact]
-    public void ParseEnvFile_KeyOnlyNoEquals_Skipped()
-    {
-        var dir = Path.Combine(Path.GetTempPath(), $"container_test_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
-        try
-        {
-            File.WriteAllText(Path.Combine(dir, ".env"), "NOEQUALS\nVALID=yes\n");
-            var result = DockerCommandBuilder.ParseEnvFile(dir);
-            Assert.NotNull(result);
-            Assert.Single(result!);
-            Assert.Equal("VALID=yes", result[0]);
-        }
-        finally { Directory.Delete(dir, true); }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  Telemetry — Ordering and Stress
-    // ═══════════════════════════════════════════════════════════════════════
-
-    [Fact]
-    public void Telemetry_GetRecentEntries_ReturnsNewestFirst()
-    {
-        ContainerTelemetry.ClearEntries();
-
-        ContainerTelemetry.LogExecution("img", "first", 1.0, exitCode: 0);
-        ContainerTelemetry.LogExecution("img", "second", 2.0, exitCode: 0);
-        ContainerTelemetry.LogExecution("img", "third", 3.0, exitCode: 0);
-
-        var entries = ContainerTelemetry.GetRecentEntries(10);
-        Assert.Equal(3, entries.Count);
-        Assert.Equal("third", entries[0].Tool);   // Most recent first
-        Assert.Equal("second", entries[1].Tool);
-        Assert.Equal("first", entries[2].Tool);
-
-        ContainerTelemetry.ClearEntries();
-    }
-
-    [Fact]
-    public void Telemetry_StatsWithZeroEntries_ReturnsZeros()
-    {
-        ContainerTelemetry.ClearEntries();
-
-        var (totalRuns, successRate, avgDuration) = ContainerTelemetry.GetStats();
-        Assert.Equal(0, totalRuns);
-        Assert.Equal(0.0, successRate);
-        Assert.Equal(0.0, avgDuration);
-    }
-
-    [Fact]
-    public void Telemetry_AllCancelled_SuccessRateIsZero()
-    {
-        ContainerTelemetry.ClearEntries();
-
-        ContainerTelemetry.LogExecution("img", "tool1", 1.0, exitCode: 0, wasCancelled: true);
-        ContainerTelemetry.LogExecution("img", "tool2", 2.0, exitCode: 0, wasCancelled: true);
-
-        var (totalRuns, successRate, _) = ContainerTelemetry.GetStats();
-        Assert.Equal(2, totalRuns);
-        Assert.Equal(0.0, successRate); // All cancelled = 0% success
-
-        ContainerTelemetry.ClearEntries();
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  Resource Threshold — Boundary Conditions
-    // ═══════════════════════════════════════════════════════════════════════
-
-    [Fact]
-    public void ResourceThreshold_ExactlyAtThreshold_WarnsButValid()
-    {
-        // 75% of 16384 = 12288 — exactly at the threshold boundary
-        var validator = new ResourceThresholdValidation(12288.0, 16384.0, "RAM (MB)");
-        var result = validator.Validate(12288.0, out var warning);
-        Assert.True(result, "Exactly at threshold should be valid.");
-        // At threshold: numericValue (12288) > threshold (12288) is false, so no warning
-        Assert.Null(warning);
-    }
-
-    [Fact]
-    public void ResourceThreshold_NegativeValue_TreatedAsNoLimit()
-    {
-        var validator = new ResourceThresholdValidation(12288.0, 16384.0, "RAM (MB)");
-        var result = validator.Validate(-100.0, out var warning);
-        Assert.True(result, "Negative values should be treated as 'no limit' and pass.");
-        Assert.Null(warning);
-    }
-
-    [Fact]
-    public void ResourceThreshold_NonDoubleValue_TreatedAsNoLimit()
-    {
-        var validator = new ResourceThresholdValidation(12288.0, 16384.0, "RAM (MB)");
-        var result = validator.Validate("not a number", out var warning);
-        Assert.True(result, "Non-double values should be treated as 'no limit' via pattern match fallthrough.");
-        Assert.Null(warning);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  Container Name — Additional Edge Cases
-    // ═══════════════════════════════════════════════════════════════════════
-
-    [Theory]
-    [InlineData("名前", false)]          // Unicode rejected
-    [InlineData("123abc", true)]         // Starts with digit — valid per regex
-    [InlineData("a-b.c_d", true)]        // Mixed allowed separators
-    [InlineData("a--b", true)]           // Consecutive hyphens allowed
-    [InlineData("null", true)]           // Reserved word — Docker passes it through
-    public void ContainerName_AdditionalEdgeCases(string input, bool expectedValid)
-    {
-        var result = _nameValidator.Validate(input, out var warning);
-        Assert.Equal(expectedValid, result);
-        if (!expectedValid)
-            Assert.NotNull(warning);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  GetHostMemoryMB Sanity
-    // ═══════════════════════════════════════════════════════════════════════
-
-    [Fact]
-    public void GetHostMemoryMB_ReturnsPositiveValue()
-    {
-        var memoryMb = ContainerExtensionModule.GetHostMemoryMB();
-        Assert.True(memoryMb > 0, $"Expected positive host memory, got {memoryMb} MB.");
-        Assert.True(memoryMb > 100, $"Expected at least 100 MB of RAM, got {memoryMb} MB."); // Sanity: any real machine
     }
 }

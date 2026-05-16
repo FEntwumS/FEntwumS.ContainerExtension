@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
@@ -7,22 +8,12 @@ using OneWare.Essentials.ToolEngine;
 using OneWare.Essentials.Services;
 using OneWare.Essentials.Models;
 using ContainerExtension;
+using System.Collections.Generic;
 
 namespace ContainerBenchmarkHarness;
 
-/// <summary>
-/// Standalone CLI harness that exercises the <see cref="DockerExecutionStrategy"/>
-/// outside of the OneWare Studio IDE, enabling the Python benchmark script
-/// (<c>benchmark.py --backend dotnet</c>) to measure Docker.DotNet SDK overhead
-/// in isolation.
-/// <para>
-/// <b>Usage:</b> <c>dotnet run -- &lt;tool&gt; [args...]</c><br/>
-/// <b>Example:</b> <c>dotnet run -- ghdl --version</c>
-/// </para>
-/// </summary>
 sealed class Program
 {
-    /// <summary>Entry point — parses CLI args and runs a single container execution or stress tests telemetry.</summary>
     static async Task<int> Main(string[] args)
     {
         if (args.Length < 1)
@@ -37,14 +28,12 @@ sealed class Program
             return await RunStressTestAsync(args);
         }
 
-        // Bootstrap a minimal DI container with a mock settings service
         var services = new ServiceCollection();
         services.AddSingleton<ISettingsService, MockSettingsService>();
         var sp = services.BuildServiceProvider();
 
         var strategy = new DockerExecutionStrategy(sp);
 
-        // Parse the tool name and its arguments
         var toolName = args[0];
         var toolArgs = new string[args.Length - 1];
         Array.Copy(args, 1, toolArgs, 0, args.Length - 1);
@@ -84,8 +73,7 @@ sealed class Program
         var pid = Environment.ProcessId;
         var prefix = isChild ? $"[Child {pid}]" : $"[Parent {pid}]";
 
-        // If parent and processes > 1, spawn children
-        var childProcs = new System.Collections.Generic.List<System.Diagnostics.Process>();
+        var childProcs = new List<System.Diagnostics.Process>();
         if (!isChild && processes > 1)
         {
             await Console.Out.WriteLineAsync($"{prefix} Spawning {processes - 1} child processes...");
@@ -101,8 +89,6 @@ sealed class Program
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = exePath,
-                    // If running via dotnet, args are passed differently, but since it's an exe (or `dotnet run` delegates), we pass the args directly
-                    // It's safer to reconstruct the exact command line args
                     Arguments = $"stress-telemetry --processes {processes} --threads {threads} --iterations {iterations} --child",
                     UseShellExecute = false
                 };
@@ -160,15 +146,21 @@ sealed class Program
         if (!isChild && childProcs.Count > 0)
         {
             await Console.Out.WriteLineAsync($"{prefix} Waiting for {childProcs.Count} child processes to finish...");
-            foreach (var cp in childProcs)
+            
+            // Execute parallelized awaits with guaranteed unmanaged OS handle cleanup
+            await Task.WhenAll(childProcs.Select(async cp => 
             {
-                cp.WaitForExit();
-                if (cp.ExitCode != 0)
+                using (cp) // CRITICAL: Free OS process handle
                 {
-                    await Console.Error.WriteLineAsync($"{prefix} Child {cp.Id} exited with code {cp.ExitCode}");
-                    errorCount++;
+                    await cp.WaitForExitAsync().ConfigureAwait(false);
+                    if (cp.ExitCode != 0)
+                    {
+                        await Console.Error.WriteLineAsync($"{prefix} Child {cp.Id} exited with code {cp.ExitCode}");
+                        Interlocked.Increment(ref errorCount);
+                    }
                 }
-            }
+            }));
+            
             await Console.Out.WriteLineAsync($"{prefix} All child processes finished.");
         }
 
@@ -176,11 +168,6 @@ sealed class Program
     }
 }
 
-/// <summary>
-/// Minimal mock of <see cref="ISettingsService"/> for standalone use outside the IDE.
-/// Returns sensible defaults matching the plugin's registered settings to ensure
-/// behavioral parity between IDE and harness execution.
-/// </summary>
 #pragma warning disable CA1822 // Interface stubs cannot be static
 sealed class MockSettingsService : ISettingsService
 {
@@ -206,6 +193,9 @@ sealed class MockSettingsService : ISettingsService
 
     public event EventHandler<SaveEventArgs>? Saved = delegate { };
 
+    // FIX: Must check dictionary to ensure SafeGetSetting resolves the defaults accurately
+    public bool HasSetting(string key) => Defaults.ContainsKey(key);
+
     public T GetSettingValue<T>(string key)
     {
         if (Defaults.TryGetValue(key, out var value) && value is T typed)
@@ -213,7 +203,6 @@ sealed class MockSettingsService : ISettingsService
         return default(T)!;
     }
 
-    // ── Stub implementations (not exercised in benchmark mode) ──────────
     public void RegisterSettingCategory(string category, int order, string? icon) { }
     public void RegisterSettingSubCategory(string category, string subCategory, int order, string? icon) { }
     public void RegisterSettingSubCategory(string category, string subCategory) { }
@@ -231,7 +220,6 @@ sealed class MockSettingsService : ISettingsService
     public void UpdateSetting(string key, OneWare.Essentials.Models.TitledSetting setting) { }
     public void RegisterCustom(string category, string subCategory, string key, OneWare.Essentials.Models.CustomSetting setting) { }
     public OneWare.Essentials.Models.Setting GetSetting(string key) => null!;
-    public bool HasSetting(string key) => false;
     public T[] GetComboOptions<T>(string key) => Array.Empty<T>();
     public void SetSettingValue(string key, object value) { }
     public IObservable<T> GetSettingObservable<T>(string key) => System.Reactive.Linq.Observable.Empty<T>();
