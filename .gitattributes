@@ -51,8 +51,8 @@ Dockerfile  text
 
 # ── GitHub Linguist Overrides ────────────────────────────────────────────────
 # Exclude submodules and generated docs from language statistics
-benchmarking_suite/neorv32/**  linguist-vendored
-benchmarking_suite/picorv32/** linguist-vendored
+tests/benchmarking_suite/neorv32/**  linguist-vendored
+tests/benchmarking_suite/picorv32/** linguist-vendored
 docker/oss-cad-suite/oss-cad-suite-build/**  linguist-vendored
 **/api/**                      linguist-generated
 **/_site/**                    linguist-generated
