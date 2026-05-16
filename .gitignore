@@ -94,5 +94,4 @@ final_*.txt
 full_source_bundle.md
 
 # ── Logs & Debugging ─────────────────────────────────────────────────────────
-
 build_errors.log

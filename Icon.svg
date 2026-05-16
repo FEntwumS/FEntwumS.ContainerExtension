@@ -1,157 +1,85 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
   <defs>
-    <!-- Clip to hide the part of the logo "inside" the whale -->
-    <clipPath id="logo-clip">
-      <path d="
-        M 0,0 L 256,0 L 256,256 L 0,256 Z
-        M 95,108 L 155,98 L 175,140 L 155,162 L 95,172 Z
-      " clip-rule="evenodd"/>
-    </clipPath>
+    <!-- Gradients -->
+    <linearGradient id="hull-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#374151" />
+      <stop offset="100%" stop-color="#111827" />
+    </linearGradient>
+    <linearGradient id="ow-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2A2A4A" />
+      <stop offset="100%" stop-color="#1A1A2E" />
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000" flood-opacity="0.3" />
+    </filter>
+
+    <!-- Container Templates -->
+    <g id="cont-blue">
+      <rect x="0" y="0" width="40" height="20" rx="2" fill="#2496ED" stroke="rgba(0,0,0,0.3)" stroke-width="1"/>
+      <path d="M 8,2 L 8,18 M 16,2 L 16,18 M 24,2 L 24,18 M 32,2 L 32,18" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+    <g id="cont-orange">
+      <rect x="0" y="0" width="40" height="20" rx="2" fill="#F59E0B" stroke="rgba(0,0,0,0.3)" stroke-width="1"/>
+      <path d="M 8,2 L 8,18 M 16,2 L 16,18 M 24,2 L 24,18 M 32,2 L 32,18" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+    <g id="cont-green">
+      <rect x="0" y="0" width="40" height="20" rx="2" fill="#10B981" stroke="rgba(0,0,0,0.3)" stroke-width="1"/>
+      <path d="M 8,2 L 8,18 M 16,2 L 16,18 M 24,2 L 24,18 M 32,2 L 32,18" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+    <g id="cont-wide">
+      <rect x="0" y="0" width="48" height="20" rx="2" fill="#3B82F6" stroke="rgba(0,0,0,0.3)" stroke-width="1"/>
+      <path d="M 8,2 L 8,18 M 16,2 L 16,18 M 24,2 L 24,18 M 32,2 L 32,18 M 40,2 L 40,18" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
   </defs>
 
-  <!-- ════════════════════════════════════════════════════════════════════
-       WHALE — Classic Docker whale silhouette, facing left, mouth open
-       ════════════════════════════════════════════════════════════════════ -->
-  <g>
-    <!-- Main body + head -->
-    <path d="
-      M 204,152
-      C 210,128 202,108 186,96
-      C 170,84 148,80 130,84
-      C 112,88 98,96 92,108
-      L 78,118
-      L 72,130
-      L 80,138
-      C 76,144 80,152 88,158
-      C 96,164 112,168 132,168
-      C 156,168 176,164 190,156
-      C 198,152 204,152 204,152
-      Z
-    " fill="#2496ED"/>
-
-    <!-- Upper jaw / snout -->
-    <path d="
-      M 92,108
-      L 62,100
-      L 56,112
-      L 72,118
-      Z
-    " fill="#2496ED"/>
-
-    <!-- Lower jaw -->
-    <path d="
-      M 72,130
-      L 52,126
-      L 50,136
-      L 64,142
-      L 80,138
-      Z
-    " fill="#1D87CE"/>
-
-    <!-- Mouth interior (dark gap between jaws) -->
-    <path d="
-      M 72,118
-      L 56,112
-      L 52,126
-      L 72,130
-      L 78,124
-      Z
-    " fill="#0B4870"/>
-
-    <!-- Eye -->
-    <circle cx="108" cy="104" r="5" fill="white"/>
-    <circle cx="106.5" cy="103" r="2.5" fill="#0D2137"/>
-    <circle cx="105.5" cy="102" r="0.8" fill="white"/>
-
-    <!-- Tail fluke -->
-    <path d="
-      M 200,140
-      Q 218,124 228,108
-      Q 222,120 224,134
-      Q 216,146 206,152
-      Z
-    " fill="#2496ED"/>
-
-    <!-- Tail fluke lower -->
-    <path d="
-      M 202,152
-      Q 218,148 226,138
-      Q 222,150 216,158
-      Q 210,160 204,158
-      Z
-    " fill="#1D87CE"/>
-
-    <!-- ── Cargo containers (3 bottom + 2 top) ───────────────────── -->
-    <!-- Bottom row -->
-    <g fill="#1D87CE" stroke="#2496ED" stroke-width="0.5">
-      <rect x="112" y="72" width="18" height="12" rx="2"/>
-      <rect x="133" y="72" width="18" height="12" rx="2"/>
-      <rect x="154" y="72" width="18" height="12" rx="2"/>
-    </g>
-    <!-- Top row -->
-    <g fill="#5AB4F5" stroke="#2496ED" stroke-width="0.5">
-      <rect x="122" y="58" width="18" height="12" rx="2"/>
-      <rect x="143" y="58" width="18" height="12" rx="2"/>
-    </g>
-    <!-- Container line details -->
-    <g stroke="rgba(255,255,255,0.2)" stroke-width="0.5" fill="none">
-      <line x1="121" y1="78" x2="129" y2="78"/>
-      <line x1="142" y1="78" x2="150" y2="78"/>
-      <line x1="163" y1="78" x2="171" y2="78"/>
-      <line x1="131" y1="64" x2="139" y2="64"/>
-      <line x1="152" y1="64" x2="160" y2="64"/>
-    </g>
-
-    <!-- Belly highlight -->
-    <path d="
-      M 100,150
-      Q 120,160 150,162
-      Q 170,160 185,154
-      Q 170,166 145,168
-      Q 115,168 100,158
-      Z
-    " fill="#1D87CE" opacity="0.5"/>
-
-    <!-- Water splash / spray -->
-    <circle cx="120" cy="50" r="3" fill="#5AB4F5" opacity="0.5"/>
-    <circle cx="128" cy="44" r="2" fill="#5AB4F5" opacity="0.35"/>
-    <circle cx="114" cy="45" r="2" fill="#5AB4F5" opacity="0.35"/>
+  <!-- Ship Bridge/Cabin -->
+  <g filter="url(#shadow)">
+    <rect x="24" y="90" width="44" height="70" rx="4" fill="#4B5563" stroke="#1F2937" stroke-width="1"/>
+    <!-- Bridge roof -->
+    <rect x="20" y="86" width="52" height="6" rx="2" fill="#1F2937"/>
+    <!-- Windows -->
+    <rect x="30" y="100" width="32" height="12" rx="2" fill="#93C5FD"/>
+    <!-- Secondary windows -->
+    <rect x="30" y="120" width="32" height="8" rx="1" fill="#60A5FA"/>
+    <!-- Radar Mast -->
+    <line x1="46" y1="86" x2="46" y2="60" stroke="#9CA3AF" stroke-width="3"/>
+    <line x1="36" y1="60" x2="56" y2="60" stroke="#F3F4F6" stroke-width="2"/>
   </g>
 
-  <!-- ════════════════════════════════════════════════════════════════════
-       ONEWARE "E" LOGO — tilted, being chomped by the whale
-       ════════════════════════════════════════════════════════════════════ -->
-  <g clip-path="url(#logo-clip)">
-    <g transform="translate(48, 140) rotate(-20)">
-      <!-- Shadow -->
-      <rect x="-24" y="-22" width="52" height="52" rx="9" fill="rgba(0,0,0,0.15)" transform="translate(2,2)"/>
+  <!-- Cargo Stack Column 1 -->
+  <use href="#cont-blue" x="75" y="140" filter="url(#shadow)"/>
+  <use href="#cont-orange" x="75" y="120" filter="url(#shadow)"/>
+  <use href="#cont-green" x="75" y="100" filter="url(#shadow)"/>
+  <use href="#cont-blue" x="75" y="80" filter="url(#shadow)"/>
 
-      <!-- Dark rounded square background -->
-      <rect x="-24" y="-22" width="52" height="52" rx="9" fill="#1A1A2E"/>
+  <!-- Cargo Stack Column 3 -->
+  <use href="#cont-orange" x="173" y="140" filter="url(#shadow)"/>
+  <use href="#cont-blue" x="173" y="120" filter="url(#shadow)"/>
+  <use href="#cont-green" x="173" y="100" filter="url(#shadow)"/>
 
-      <!-- Subtle inner border -->
-      <rect x="-24" y="-22" width="52" height="52" rx="9"
-            fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-
-      <!-- ── White "E" letterform ─────────────────────────── -->
-      <!-- Vertical spine -->
-      <rect x="-14" y="-13" width="6" height="32" rx="1" fill="white"/>
-
-      <!-- Top horizontal bar -->
-      <rect x="-14" y="-13" width="24" height="6" rx="1" fill="white"/>
-
-      <!-- Middle horizontal bar (shorter) -->
-      <rect x="-14" y="-1" width="17" height="6" rx="1" fill="white"/>
-
-      <!-- Bottom horizontal bar -->
-      <rect x="-14" y="13" width="24" height="6" rx="1" fill="white"/>
+  <!-- Cargo Stack Column 2 (Center) -->
+  <use href="#cont-wide" x="120" y="140" filter="url(#shadow)"/>
+  
+  <!-- Hero: OneWare Logo Container -->
+  <g transform="translate(120, 92)" filter="url(#shadow)">
+    <rect x="0" y="0" width="48" height="48" rx="8" fill="url(#ow-grad)" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"/>
+    <g fill="white" transform="translate(24, 24)">
+      <!-- E Shape -->
+      <rect x="-12" y="-12" width="5" height="26" rx="1"/>
+      <rect x="-12" y="-12" width="20" height="5" rx="1"/>
+      <rect x="-12" y="-2" width="14" height="5" rx="1"/>
+      <rect x="-12" y="9" width="20" height="5" rx="1"/>
     </g>
   </g>
 
-  <!-- Chomp / bite-mark crumbs floating away -->
-  <g fill="#1A1A2E" opacity="0.6">
-    <rect x="82" y="106" width="4" height="4" rx="1" transform="rotate(-30, 84, 108)"/>
-    <rect x="76" y="98" width="3" height="3" rx="0.8" transform="rotate(-45, 77, 99)"/>
-    <rect x="86" y="96" width="2.5" height="2.5" rx="0.6" transform="rotate(-10, 87, 97)"/>
-  </g>
+  <!-- The Hull -->
+  <path d="M 16,160 L 36,200 L 200,200 L 240,160 Z" fill="url(#hull-grad)" filter="url(#shadow)"/>
+  
+  <!-- Hull details (waterline) -->
+  <path d="M 31,190 L 205,190" stroke="#DC2626" stroke-width="4"/>
+  <path d="M 220,165 L 230,165" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Water Waves -->
+  <path d="M -10,195 Q 20,185 50,200 T 110,200 T 170,200 T 230,200 T 270,195 L 270,260 L -10,260 Z" fill="#2496ED" opacity="0.8"/>
+  <path d="M -10,205 Q 30,215 70,200 T 150,200 T 230,200 T 270,205 L 270,260 L -10,260 Z" fill="#1D87CE"/>
 </svg>

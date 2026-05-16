@@ -44,7 +44,7 @@ dotnet test
 
 # Build and publish the benchmark harness
 dotnet publish src/ContainerBenchmarkHarness/ContainerBenchmarkHarness.csproj \
-  -c Release -o benchmarking_suite/harness_bin
+  -c Release -o tests/benchmarking_suite/harness_bin
 ```
 
 ## Supported Container Runtimes
