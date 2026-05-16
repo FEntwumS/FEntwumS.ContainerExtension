@@ -14,9 +14,12 @@ Fixes #xxx
 - [ ] New feature (non-breaking change which adds functionality)
 - [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
 - [ ] Documentation update
+- [ ] Security hardening / Infrastructure update
 
-## Checklist before requesting a review
+## Verification & Hardening Checklist
 
-- [ ] I have performed a self-review of my code
-- [ ] I have ensured `Console.Write` leaks are absent
-- [ ] I have successfully run `dotnet test` locally
+- [ ] I have performed a self-review of my code.
+- [ ] I have verified that the code compiles with zero warnings (`dotnet build -c Release -warnaserror`).
+- [ ] I have successfully run `dotnet test` locally and all tests pass.
+- [ ] I have ensured thread-safe lifecycle management and absence of memory/concurrency leaks.
+- [ ] I have ensured `Console.Write` leaks are absent in the production build.

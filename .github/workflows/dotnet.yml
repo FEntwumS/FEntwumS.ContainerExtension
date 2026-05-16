@@ -38,7 +38,7 @@ jobs:
       run: dotnet restore OneWare.ContainerExtension.slnx
 
     - name: Build
-      run: dotnet build OneWare.ContainerExtension.slnx --no-restore
+      run: dotnet build OneWare.ContainerExtension.slnx --no-restore -warnaserror
 
     - name: Test
-      run: dotnet test OneWare.ContainerExtension.slnx --no-build --verbosity normal
+      run: dotnet test OneWare.ContainerExtension.slnx --no-build --verbosity normal -warnaserror

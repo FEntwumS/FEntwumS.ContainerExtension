@@ -9,7 +9,7 @@
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability in this project, please report it
-responsibly by emailing **mert.torun@smail.th-koeln.de** instead of opening
+responsibly by emailing **<mtorun0x7cd@icloud.com>** instead of opening
 a public issue.
 
 You should receive an acknowledgement within **48 hours**. Critical issues

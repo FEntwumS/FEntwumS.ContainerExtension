@@ -29,7 +29,7 @@ jobs:
         with:
           proj-path: src/ContainerExtension/ContainerExtension.csproj
       - name: Build
-        run: dotnet build src/ContainerExtension/ContainerExtension.csproj -c Release -o publish
+        run: dotnet build src/ContainerExtension/ContainerExtension.csproj -c Release -o publish -warnaserror
       - name: Compress
         uses: thedoctor0/zip-release@0.7.1
         with:

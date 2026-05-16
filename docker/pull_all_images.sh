@@ -52,6 +52,8 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo " CORE — ContainerExtension default tool images"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# pull "fentwums/oss-cad-suite:latest" "OSS CAD Suite (All-in-One Defense-Ready Image)" # until its available
+
 pull "hdlc/ghdl:yosys"           "GHDL + Yosys plugin [FALLBACK DEFAULT]"
 pull "hdlc/nvc"                  "NVC (VHDL simulator)"
 pull "hdlc/iverilog"             "Icarus Verilog (Verilog simulation)"
