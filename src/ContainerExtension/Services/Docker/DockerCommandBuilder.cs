@@ -273,7 +273,14 @@ internal static class DockerCommandBuilder
             bool isGhdlMakeOrElabOrRun = false;
             var rawExe = command.Executable ?? command.ToolName ?? "";
             if (rawExe.Contains("ghdl", StringComparison.OrdinalIgnoreCase) &&
-                argsList.Any(arg => arg != null && (arg.Equals("-m", StringComparison.Ordinal) || arg.Equals("-e", StringComparison.Ordinal) || arg.Equals("-r", StringComparison.Ordinal))))
+                argsList.Any(arg => arg != null && (
+                    arg.Equals("-m", StringComparison.Ordinal) || 
+                    arg.Equals("-e", StringComparison.Ordinal) || 
+                    arg.Equals("-r", StringComparison.Ordinal) ||
+                    arg.Equals("--synth", StringComparison.Ordinal) ||
+                    arg.Equals("--elab", StringComparison.Ordinal) ||
+                    arg.Equals("--run", StringComparison.Ordinal)
+                )))
             {
                 isGhdlMakeOrElabOrRun = true;
             }

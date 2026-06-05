@@ -1923,6 +1923,46 @@ public sealed class ContainerExtensionTests : IDisposable
             Directory.Delete(tempDir, true);
         }
     }
+
+    [Fact]
+    public void BuildContainerParameters_GhdlSynthWithLibraryAutoDetection()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"ghdl_synth_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var projectJson = @"{
+  ""GHDL-LIB_iceduino"": [
+    ""osflow/boards/iceduino/neorv32_iceduino_top.vhd""
+  ]
+}";
+            File.WriteAllText(Path.Combine(tempDir, "test.fpgaproj"), projectJson);
+
+            var command = new ToolCommand
+            {
+                Executable = "ghdl",
+                ToolName = "ghdl",
+                WorkingDirectory = tempDir,
+                CommandArguments = new List<ICommandArgument>
+                {
+                    new TestCommandArgument("--synth"),
+                    new TestCommandArgument("--std=08"),
+                    new TestCommandArgument("--workdir=build"),
+                    new TestCommandArgument("neorv32_iceduino_top")
+                }
+            };
+
+            var param = DockerCommandBuilder.BuildContainerParameters(
+                "img", command, null!, null, null, (c, l) => { });
+
+            var shellCmd = param.Cmd![2];
+            Assert.Equal("ghdl --synth --work=iceduino --std=08 --workdir=/workspace/build neorv32_iceduino_top", shellCmd);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
 #pragma warning restore CA1305, CA1307, CA1031, CA1822, CS8019, CA1308
 }
 
