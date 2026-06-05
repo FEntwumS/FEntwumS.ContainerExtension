@@ -6,7 +6,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 # --- Stage 1: Downloader ---
-FROM ubuntu:24.04 AS downloader
+FROM ubuntu:26.04 AS downloader
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -29,7 +29,7 @@ RUN wget --retry-connrefused --read-timeout=60 --timeout=30 -qO /tmp/oss-cad-sui
     && rm -rf /opt/oss-cad-suite/lib/python3*/test
 
 # --- Stage 2: Final Image ---
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 LABEL org.opencontainers.image.authors="YosysHQ, Mert Torun"
 LABEL org.opencontainers.image.title="OSS CAD Suite"
