@@ -1,26 +1,25 @@
-<!--
-  Directory.Build.props — Shared MSBuild properties for all projects.
-  Centralizes common settings to avoid duplication across .csproj files.
-  https://learn.microsoft.com/en-us/visualstudio/msbuild/customize-by-directory
--->
 <Project>
     <PropertyGroup>
-        <!-- Language & Framework -->
         <LangVersion>latest</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
 
-        <!-- Build Quality -->
         <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-        <AnalysisLevel>latest-recommended</AnalysisLevel>
+        <AnalysisLevel>latest-all</AnalysisLevel>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-        <!-- Upstream OneWare.AvaloniaEdit ships zh-hans locale with wrong casing -->
+        
         <NoWarn>NETSDK1187</NoWarn>
 
-        <!-- Assembly Metadata -->
+        <Deterministic>true</Deterministic>
+        <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
+        <NuGetAudit>true</NuGetAudit>
+        <NuGetAuditMode>all</NuGetAuditMode>
+        <NuGetAuditLevel>low</NuGetAuditLevel>
+
         <Authors>Mert Torun</Authors>
         <Company>TH Köln</Company>
-        <Copyright>© 2026 Mert Torun</Copyright>
+        <Copyright>© 2025 - 2026 Mert Torun</Copyright>
         <RepositoryUrl>https://github.com/FEntwumS/FEntwumS.ContainerExtension</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
     </PropertyGroup>

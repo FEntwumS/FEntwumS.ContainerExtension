@@ -1,17 +1,17 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
-title: "OneWare Container Extension"
+title: "OneWare Container Extension (Production-Ready)"
 abstract: >-
   A modular plugin for OneWare Studio that enables transparent,
-  containerized execution of FPGA toolchains via the Hybrid Strategy
+  production-ready containerized execution of FPGA toolchains via the Hybrid Strategy
   Pattern. Supports Docker, Podman, Colima, and OrbStack.
 authors:
   - family-names: Torun
     given-names: Mert
     email: mtorun0x7cd@icloud.com
     affiliation: TH Köln – University of Applied Sciences
-date-released: "2026-04-10"
+date-released: "2026-05-16"
 version: "1.0.0"
 license: MIT
 repository-code: "https://github.com/FEntwumS/FEntwumS.ContainerExtension"
@@ -21,6 +21,7 @@ keywords:
   - fpga
   - containerization
   - hybrid-strategy-pattern
+  - production-ready
   - ghdl
   - yosys
   - nextpnr

@@ -119,18 +119,18 @@ def calculate_stats(times: List[float]) -> dict:
     }
 
 
-def detect_outliers(times: List[float]) -> List[int]:
+def detect_outliers(times: List[float], sigma: float = OUTLIER_SIGMA) -> List[int]:
     """
-    Returns indices of iterations that are more than OUTLIER_SIGMA standard
+    Returns indices of iterations that are more than sigma standard
     deviations from the mean. Useful for identifying cold-start effects.
     """
     if len(times) < 3:
         return []
     mean = statistics.mean(times)
     stdev = statistics.stdev(times)
-    if stdev == 0:
+    if stdev < 1e-9:
         return []
-    return [i for i, t in enumerate(times) if abs(t - mean) > OUTLIER_SIGMA * stdev]
+    return [i for i, t in enumerate(times) if abs(t - mean) > sigma * stdev]
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  Command Execution
@@ -170,7 +170,7 @@ def run_command(cmd: List[str], cwd: Optional[str] = None,
 #  Docker Pre-Pull
 # ═════════════════════════════════════════════════════════════════════════════
 
-def ensure_image_pulled(image: str, platform_flag: Optional[str] = None) -> None:
+def ensure_image_pulled(image: str, platform_flag: Optional[str] = None, timeout: int = 300) -> None:
     """
     Ensures the Docker image is pulled before benchmarking begins.
     This prevents the first iteration from including pull time in its measurement.
@@ -182,11 +182,12 @@ def ensure_image_pulled(image: str, platform_flag: Optional[str] = None) -> None
 
     logging.info(f"Pre-pulling image: {image}")
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if result.returncode == 0:
             logging.info(f"Image ready: {image}")
         else:
-            logging.warning(f"Image pull returned non-zero ({result.returncode}). "
+            stderr_msg = result.stderr.strip() if result.stderr else "Unknown error"
+            logging.warning(f"Image pull returned non-zero ({result.returncode}): {stderr_msg}. "
                             f"First iteration may include pull time.")
     except Exception as e:
         logging.warning(f"Image pre-pull failed: {e}. Proceeding anyway.")
@@ -197,7 +198,8 @@ def ensure_image_pulled(image: str, platform_flag: Optional[str] = None) -> None
 
 def perform_benchmark_suite(name: str, cmd: List[str], cwd: str,
                             iterations: int, warmup: int,
-                            timeout: Optional[int] = None) -> Tuple[Optional[List[float]], Optional[List[int]]]:
+                            timeout: Optional[int] = None,
+                            outlier_sigma: float = OUTLIER_SIGMA) -> Tuple[Optional[List[float]], Optional[List[int]]]:
     """
     Executes a benchmark configuration: warmup phase + measured iterations.
     Returns (execution_times, return_codes) for statistical analysis.
@@ -235,9 +237,9 @@ def perform_benchmark_suite(name: str, cmd: List[str], cwd: str,
                      f"Mean: {stats['mean']:.4f}s ± {stats['stdev']:.4f}s | "
                      f"Median: {stats['median']:.4f}s | CV: {stats['cv_percent']:.1f}%")
 
-        outliers = detect_outliers(times)
+        outliers = detect_outliers(times, outlier_sigma)
         if outliers:
-            logging.warning(f"  ⚠️  Outlier iterations (>{OUTLIER_SIGMA}σ): "
+            logging.warning(f"  ⚠️  Outlier iterations (>{outlier_sigma}σ): "
                             f"{[i+1 for i in outliers]} — consider cold-start effects")
 
     return times, rcs
@@ -293,8 +295,15 @@ def compare_results(file_a: str, file_b: str) -> None:
     regression/improvement table with delta percentages.
     """
     def load_json(path: str) -> dict:
-        with open(path) as f:
-            return json.load(f)
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except FileNotFoundError:
+            print(f"Error: File not found at '{path}'", file=sys.stderr)
+            sys.exit(1)
+        except PermissionError:
+            print(f"Error: Permission denied when reading file at '{path}'", file=sys.stderr)
+            sys.exit(1)
 
     a = load_json(file_a)
     b = load_json(file_b)
@@ -331,13 +340,16 @@ def compare_results(file_a: str, file_b: str) -> None:
             str_a = f"{val_a:>10.4f}s" if val_a is not None else "N/A".center(12)
             str_b = f"{val_b:>10.4f}s" if val_b is not None else "N/A".center(12)
 
-            if val_a is not None and val_b is not None and val_a > 0:
+            if val_a is not None and val_b is not None:
                 delta = val_b - val_a
-                pct = ((val_b / val_a) - 1.0) * 100
                 sign = "+" if delta >= 0 else ""
                 symbol = "⬆️ slower" if delta > 0.0001 else ("⬇️ faster" if delta < -0.0001 else "  ≈ same")
                 str_delta = f"{sign}{delta:>8.4f}s"
-                str_pct = f"{sign}{pct:.1f}%"
+                if val_a > 0:
+                    pct = ((val_b / val_a) - 1.0) * 100
+                    str_pct = f"{sign}{pct:.1f}%"
+                else:
+                    str_pct = "N/A".center(8)
             else:
                 str_delta = "N/A".center(10)
                 str_pct = "N/A".center(8)
@@ -411,6 +423,10 @@ def export_json(args, native_times: Optional[List[float]],
 
     try:
         out_path = os.path.abspath(args.output)
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if not out_path.startswith(repo_root):
+            logging.error(f"Security error: Output file '{out_path}' lies outside the repository root '{repo_root}'.")
+            return
         os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
         with open(out_path, 'w') as f:
             json.dump(data, f, indent=4)
@@ -439,6 +455,10 @@ def parse_arguments():
                         help="Number of unrecorded warmup runs to populate caches.")
     parser.add_argument("--timeout", type=int, default=None,
                         help="Per-iteration timeout in seconds. Prevents hanging benchmarks.")
+    parser.add_argument("--pull-timeout", type=int, default=300,
+                        help="Timeout in seconds for pre-pulling the Docker image.")
+    parser.add_argument("--outlier-sigma", type=float, default=OUTLIER_SIGMA,
+                        help="Sigma threshold for outlier detection.")
     parser.add_argument("--verbose", action="store_true",
                         help="Enable verbose debug logging.")
     parser.add_argument("--output", type=str,
@@ -543,7 +563,7 @@ def main():
 
     # Docker image pre-pull (prevents first iteration from including pull time)
     if not args.skip_pull and "cli" in backends:
-        ensure_image_pulled(args.image, args.platform)
+        ensure_image_pulled(args.image, args.platform, args.pull_timeout)
 
     # 1. Native Execution
     native_times: Optional[List[float]] = None
@@ -551,7 +571,8 @@ def main():
     if not args.skip_native:
         native_times, native_rcs = perform_benchmark_suite(
             "Native Execution", native_cmd, cwd=workspace_dir,
-            warmup=args.warmup, iterations=args.iterations, timeout=args.timeout
+            warmup=args.warmup, iterations=args.iterations, timeout=args.timeout,
+            outlier_sigma=args.outlier_sigma
         )
         if not native_times:
             logging.warning("Native execution failed or not found. Proceeding with containerized benchmarks only.")
@@ -562,7 +583,8 @@ def main():
         times, rcs = perform_benchmark_suite(
             f"Containerized Execution ({backend.upper()})",
             backend_cmds[backend], cwd=workspace_dir,
-            warmup=args.warmup, iterations=args.iterations, timeout=args.timeout
+            warmup=args.warmup, iterations=args.iterations, timeout=args.timeout,
+            outlier_sigma=args.outlier_sigma
         )
         docker_results[backend] = {"times": times, "rcs": rcs}
 
