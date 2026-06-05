@@ -70,8 +70,10 @@ RUN (userdel -r ubuntu || true) \
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD yosys -V || exit 1
 
+ENV TINI_SUBREAPER=1
+
 # Process Management: Use tini to reap zombie processes properly when forwarding CLI arguments
-ENTRYPOINT ["/usr/bin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 
 # Execute securely as non-root user
 USER oneware

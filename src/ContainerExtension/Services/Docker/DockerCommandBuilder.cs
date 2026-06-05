@@ -311,6 +311,10 @@ internal static class DockerCommandBuilder
                     var baseName = Path.GetFileNameWithoutExtension(normalized);
                     mapped = string.IsNullOrWhiteSpace(baseName) ? a : baseName;
                 }
+                else if (IsSinglePathArgument(a, out var prefix, out var pathPart))
+                {
+                    mapped = prefix + MapPathToContainer(pathPart, workingDirFull, workingDirCanonical);
+                }
                 else if (a.Contains(' ') || a.Contains(';') || a.Contains(','))
                 {
                     mapped = MapCommandScriptPaths(a, workingDirFull, workingDirCanonical);
@@ -1257,5 +1261,64 @@ internal static class DockerCommandBuilder
             }
         }
         return segment;
+    }
+
+    private static bool IsSinglePathArgument(string arg, out string prefix, out string pathPart)
+    {
+        prefix = "";
+        pathPart = arg;
+
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            return false;
+        }
+
+        // Check for common flags with '='
+        var eqIdx = arg.IndexOf('=');
+        if (eqIdx > 0)
+        {
+            var p = arg[..(eqIdx + 1)];
+            var s = arg[(eqIdx + 1)..];
+            if (p.Equals("--work=", StringComparison.OrdinalIgnoreCase) || p.Equals("-work=", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            if (Path.IsPathRooted(s) || s.StartsWith("~/", StringComparison.Ordinal) || s.StartsWith("~\\", StringComparison.Ordinal))
+            {
+                prefix = p;
+                pathPart = s;
+                return true;
+            }
+        }
+
+        // Check for flags like -P or -o followed immediately by path
+        if (arg.StartsWith("-P", StringComparison.Ordinal) && arg.Length > 2)
+        {
+            var s = arg[2..];
+            if (Path.IsPathRooted(s) || s.StartsWith("~/", StringComparison.Ordinal) || s.StartsWith("~\\", StringComparison.Ordinal))
+            {
+                prefix = "-P";
+                pathPart = s;
+                return true;
+            }
+        }
+        if (arg.StartsWith("-o", StringComparison.Ordinal) && arg.Length > 2)
+        {
+            var s = arg[2..];
+            if (Path.IsPathRooted(s) || s.StartsWith("~/", StringComparison.Ordinal) || s.StartsWith("~\\", StringComparison.Ordinal))
+            {
+                prefix = "-o";
+                pathPart = s;
+                return true;
+            }
+        }
+
+        // Check if the whole argument is absolute/rooted
+        if (Path.IsPathRooted(arg) || arg.StartsWith("~/", StringComparison.Ordinal) || arg.StartsWith("~\\", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return false;
     }
 }

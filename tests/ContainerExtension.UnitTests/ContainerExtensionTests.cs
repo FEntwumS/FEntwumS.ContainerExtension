@@ -1143,6 +1143,32 @@ public sealed class ContainerExtensionTests : IDisposable
     }
 
     [Fact]
+    public void BuildContainerParameters_PathsWithSpaces_DoesNotSplitPath()
+    {
+        var command = new ToolCommand
+        {
+            Executable = "ghdl",
+            ToolName = "test",
+            WorkingDirectory = "/Users/mtorun/Library/Mobile Documents/com~apple~CloudDocs/Downloads/_beispielprojekte/addressierungsbeispiel",
+            CommandArguments = new List<ICommandArgument>
+            {
+                new TestCommandArgument("--workdir=/Users/mtorun/Library/Mobile Documents/com~apple~CloudDocs/Downloads/_beispielprojekte/addressierungsbeispiel/build"),
+                new TestCommandArgument("/Users/mtorun/Library/Mobile Documents/com~apple~CloudDocs/Downloads/_beispielprojekte/addressierungsbeispiel/rtl/addressing.vhd")
+            }
+        };
+
+        var param = DockerCommandBuilder.BuildContainerParameters(
+            "test_image:latest",
+            command,
+            null!,
+            "1000", "1000",
+            (cmd, log) => { });
+
+        Assert.Contains("--workdir=/workspace/build", param.Cmd[2]);
+        Assert.Contains("/workspace/rtl/addressing.vhd", param.Cmd[2]);
+    }
+
+    [Fact]
     public void TokenizeExtraFlags_ParsesQuotedSegmentsCorrectly()
     {
         var method = typeof(DockerCommandBuilder).GetMethod("TokenizeExtraFlags", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
