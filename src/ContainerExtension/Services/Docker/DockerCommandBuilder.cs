@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using Docker.DotNet.Models;
 using OneWare.Essentials.Models;
 using OneWare.Essentials.Services;
@@ -275,6 +276,38 @@ internal static class DockerCommandBuilder
                 argsList.Any(arg => arg != null && (arg.Equals("-m", StringComparison.Ordinal) || arg.Equals("-e", StringComparison.Ordinal) || arg.Equals("-r", StringComparison.Ordinal))))
             {
                 isGhdlMakeOrElabOrRun = true;
+            }
+
+            if (isGhdlMakeOrElabOrRun)
+            {
+                bool hasWorkOption = false;
+                for (int j = 0; j < argsList.Count; j++)
+                {
+                    var arg = argsList[j];
+                    if (arg == null) continue;
+                    if (arg.Equals("--work", StringComparison.OrdinalIgnoreCase) || 
+                        arg.Equals("-work", StringComparison.OrdinalIgnoreCase) ||
+                        arg.StartsWith("--work=", StringComparison.OrdinalIgnoreCase) ||
+                        arg.StartsWith("-work=", StringComparison.OrdinalIgnoreCase))
+                    {
+                        hasWorkOption = true;
+                        break;
+                    }
+                }
+
+                if (!hasWorkOption)
+                {
+                    var lastArg = argsList.LastOrDefault(arg => arg != null && !arg.StartsWith('-'));
+                    if (lastArg != null)
+                    {
+                        var unitName = Path.GetFileNameWithoutExtension(lastArg);
+                        var libraryName = FindLibraryForUnit(workingDirFull, unitName);
+                        if (!string.IsNullOrWhiteSpace(libraryName))
+                        {
+                            argsList.Insert(1, $"--work={libraryName}");
+                        }
+                    }
+                }
             }
 
             var sbArgs = new StringBuilder();
@@ -1320,5 +1353,61 @@ internal static class DockerCommandBuilder
         }
 
         return false;
+    }
+
+    private static string? FindLibraryForUnit(string workingDir, string unitName)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(workingDir) || string.IsNullOrWhiteSpace(unitName))
+            {
+                return null;
+            }
+
+            var projFiles = Directory.GetFiles(workingDir, "*.fpgaproj");
+            if (projFiles.Length == 0)
+            {
+                return null;
+            }
+
+            var projFile = projFiles[0];
+            if (!File.Exists(projFile))
+            {
+                return null;
+            }
+
+            var content = File.ReadAllText(projFile);
+            using var document = JsonDocument.Parse(content);
+            var root = document.RootElement;
+
+            foreach (var property in root.EnumerateObject())
+            {
+                var propName = property.Name;
+                if (propName.StartsWith("GHDL-LIB_", StringComparison.OrdinalIgnoreCase))
+                {
+                    var libName = propName["GHDL-LIB_".Length..];
+                    if (property.Value.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var fileEl in property.Value.EnumerateArray())
+                        {
+                            var filePath = fileEl.GetString();
+                            if (filePath != null)
+                            {
+                                var fileName = Path.GetFileNameWithoutExtension(filePath);
+                                if (string.Equals(fileName, unitName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    return libName;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Ignore exceptions to remain robust
+        }
+        return null;
     }
 }

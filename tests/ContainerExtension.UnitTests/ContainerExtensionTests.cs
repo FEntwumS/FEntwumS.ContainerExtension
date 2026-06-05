@@ -1787,6 +1787,83 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.DoesNotContain("node.local", resultLog, StringComparison.Ordinal);
         Assert.Contains("[REDACTED_NET_ADDR]", resultLog, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void FindLibraryForUnit_SuccessfullyResolvesLibrary()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"ghdl_lib_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var projectJson = @"{
+  ""GHDL_Libraries"": [ ""neorv32"", ""iceduino"" ],
+  ""GHDL-LIB_neorv32"": [
+    ""rtl/core/neorv32_cpu.vhd"",
+    ""rtl/core/neorv32_top.vhd""
+  ],
+  ""GHDL-LIB_iceduino"": [
+    ""osflow/boards/iceduino/neorv32_iceduino_top.vhd""
+  ]
+}";
+            File.WriteAllText(Path.Combine(tempDir, "test.fpgaproj"), projectJson);
+
+            var type = typeof(DockerCommandBuilder);
+            var method = type.GetMethod("FindLibraryForUnit", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            Assert.NotNull(method);
+
+            var libNeorv32 = (string?)method.Invoke(null, new object[] { tempDir, "neorv32_top" });
+            Assert.Equal("neorv32", libNeorv32);
+
+            var libIceduino = (string?)method.Invoke(null, new object[] { tempDir, "neorv32_iceduino_top" });
+            Assert.Equal("iceduino", libIceduino);
+
+            var libNotFound = (string?)method.Invoke(null, new object[] { tempDir, "non_existent_entity" });
+            Assert.Null(libNotFound);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void BuildContainerParameters_GhdlMakeWithLibraryAutoDetection()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"ghdl_make_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var projectJson = @"{
+  ""GHDL-LIB_iceduino"": [
+    ""osflow/boards/iceduino/neorv32_iceduino_top.vhd""
+  ]
+}";
+            File.WriteAllText(Path.Combine(tempDir, "test.fpgaproj"), projectJson);
+
+            var command = new ToolCommand
+            {
+                Executable = "ghdl",
+                ToolName = "ghdl",
+                WorkingDirectory = tempDir,
+                CommandArguments = new List<ICommandArgument>
+                {
+                    new TestCommandArgument("-m"),
+                    new TestCommandArgument("--workdir=build"),
+                    new TestCommandArgument("neorv32_iceduino_top")
+                }
+            };
+
+            var param = DockerCommandBuilder.BuildContainerParameters(
+                "img", command, null!, null, null, (c, l) => { });
+
+            var shellCmd = param.Cmd![2];
+            Assert.Equal("ghdl -m --work=iceduino --workdir=/workspace/build neorv32_iceduino_top", shellCmd);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
 #pragma warning restore CA1305, CA1307, CA1031, CA1822, CS8019, CA1308
 }
 
