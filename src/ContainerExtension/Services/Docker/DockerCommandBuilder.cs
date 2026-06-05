@@ -287,45 +287,71 @@ internal static class DockerCommandBuilder
 
             if (isGhdlMakeOrElabOrRun)
             {
-                var lastArg = argsList.LastOrDefault(arg => arg != null && !arg.StartsWith('-'));
-                if (lastArg != null)
+                string? libraryName = null;
+                for (int idx = argsList.Count - 1; idx >= 0; idx--)
                 {
-                    var unitName = Path.GetFileNameWithoutExtension(lastArg);
-                    var libraryName = FindLibraryForUnit(workingDirFull, unitName);
-                    if (!string.IsNullOrWhiteSpace(libraryName))
+                    var candidate = argsList[idx];
+                    if (candidate == null || candidate.StartsWith('-')) continue;
+
+                    if (idx > 0)
                     {
-                        bool replaced = false;
-                        for (int j = 0; j < argsList.Count; j++)
+                        var prev = argsList[idx - 1];
+                        if (prev != null && (
+                            prev.Equals("-o", StringComparison.OrdinalIgnoreCase) ||
+                            prev.Equals("--out", StringComparison.OrdinalIgnoreCase) ||
+                            prev.Equals("--workdir", StringComparison.OrdinalIgnoreCase) ||
+                            prev.Equals("-P", StringComparison.OrdinalIgnoreCase) ||
+                            prev.Equals("--std", StringComparison.OrdinalIgnoreCase) ||
+                            prev.Equals("--work", StringComparison.OrdinalIgnoreCase) ||
+                            prev.Equals("-work", StringComparison.OrdinalIgnoreCase)
+                        ))
                         {
-                            var arg = argsList[j];
-                            if (arg == null) continue;
-
-                            if (arg.StartsWith("--work=", StringComparison.OrdinalIgnoreCase))
-                            {
-                                argsList[j] = $"--work={libraryName}";
-                                replaced = true;
-                                break;
-                            }
-                            else if (arg.StartsWith("-work=", StringComparison.OrdinalIgnoreCase))
-                            {
-                                argsList[j] = $"-work={libraryName}";
-                                replaced = true;
-                                break;
-                            }
-                            else if ((arg.Equals("--work", StringComparison.OrdinalIgnoreCase) || 
-                                      arg.Equals("-work", StringComparison.OrdinalIgnoreCase)) &&
-                                     j + 1 < argsList.Count)
-                            {
-                                argsList[j + 1] = libraryName;
-                                replaced = true;
-                                break;
-                            }
+                            continue;
                         }
+                    }
 
-                        if (!replaced)
+                    var unitName = Path.GetFileNameWithoutExtension(candidate);
+                    var lib = FindLibraryForUnit(workingDirFull, unitName);
+                    if (!string.IsNullOrWhiteSpace(lib))
+                    {
+                        libraryName = lib;
+                        break;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(libraryName))
+                {
+                    bool replaced = false;
+                    for (int j = 0; j < argsList.Count; j++)
+                    {
+                        var arg = argsList[j];
+                        if (arg == null) continue;
+
+                        if (arg.StartsWith("--work=", StringComparison.OrdinalIgnoreCase))
                         {
-                            argsList.Insert(1, $"--work={libraryName}");
+                            argsList[j] = $"--work={libraryName}";
+                            replaced = true;
+                            break;
                         }
+                        else if (arg.StartsWith("-work=", StringComparison.OrdinalIgnoreCase))
+                        {
+                            argsList[j] = $"-work={libraryName}";
+                            replaced = true;
+                            break;
+                        }
+                        else if ((arg.Equals("--work", StringComparison.OrdinalIgnoreCase) || 
+                                  arg.Equals("-work", StringComparison.OrdinalIgnoreCase)) &&
+                                 j + 1 < argsList.Count)
+                        {
+                            argsList[j + 1] = libraryName;
+                            replaced = true;
+                            break;
+                        }
+                    }
+
+                    if (!replaced)
+                    {
+                        argsList.Insert(1, $"--work={libraryName}");
                     }
                 }
             }
@@ -1413,7 +1439,8 @@ internal static class DockerCommandBuilder
                             var filePath = fileEl.GetString();
                             if (filePath != null)
                             {
-                                var fileName = Path.GetFileNameWithoutExtension(filePath);
+                                var normalizedPath = filePath.Replace('\\', '/');
+                                var fileName = Path.GetFileNameWithoutExtension(normalizedPath);
                                 if (string.Equals(fileName, unitName, StringComparison.OrdinalIgnoreCase))
                                 {
                                     return libName;

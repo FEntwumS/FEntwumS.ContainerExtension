@@ -1963,6 +1963,73 @@ public sealed class ContainerExtensionTests : IDisposable
             Directory.Delete(tempDir, true);
         }
     }
+
+    [Fact]
+    public void FindLibraryForUnit_NormalizesWindowsBackslashes()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"ghdl_backslash_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var projectJson = @"{
+  ""GHDL-LIB_neorv32"": [
+    ""rtl\\core\\neorv32_cpu.vhd""
+  ]
+}";
+            File.WriteAllText(Path.Combine(tempDir, "test.fpgaproj"), projectJson);
+
+            var type = typeof(DockerCommandBuilder);
+            var method = type.GetMethod("FindLibraryForUnit", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            Assert.NotNull(method);
+
+            var lib = (string?)method.Invoke(null, new object[] { tempDir, "neorv32_cpu" });
+            Assert.Equal("neorv32", lib);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void BuildContainerParameters_GhdlSynthWithTrailingOptions_CorrectlyResolvesUnitName()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"ghdl_trailing_opts_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var projectJson = @"{
+  ""GHDL-LIB_iceduino"": [
+    ""osflow/boards/iceduino/neorv32_iceduino_top.vhd""
+  ]
+}";
+            File.WriteAllText(Path.Combine(tempDir, "test.fpgaproj"), projectJson);
+
+            var command = new ToolCommand
+            {
+                Executable = "ghdl",
+                ToolName = "ghdl",
+                WorkingDirectory = tempDir,
+                CommandArguments = new List<ICommandArgument>
+                {
+                    new TestCommandArgument("--synth"),
+                    new TestCommandArgument("neorv32_iceduino_top"),
+                    new TestCommandArgument("-o"),
+                    new TestCommandArgument("output.v")
+                }
+            };
+
+            var param = DockerCommandBuilder.BuildContainerParameters(
+                "img", command, null!, null, null, (c, l) => { });
+
+            var shellCmd = param.Cmd![2];
+            Assert.Equal("ghdl --synth --work=iceduino neorv32_iceduino_top -o output.v", shellCmd);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
 #pragma warning restore CA1305, CA1307, CA1031, CA1822, CS8019, CA1308
 }
 
