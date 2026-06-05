@@ -2,7 +2,7 @@
 
 ## Describe your changes
 
-Please include a summary of the change and which issue is fixed. Please also include relevant motivation and context.
+Please include a summary of the change and which issue is fixed.
 
 ## Issue ticket number and link
 
@@ -16,10 +16,12 @@ Fixes #xxx
 - [ ] Documentation update
 - [ ] Security hardening / Infrastructure update
 
-## Verification & Hardening Checklist
+## Verification & Release Checklist
 
 - [ ] I have performed a self-review of my code.
 - [ ] I have verified that the code compiles with zero warnings (`dotnet build -c Release -warnaserror`).
+- [ ] I have verified that NuGet dependency audits pass without High/Critical alerts.
 - [ ] I have successfully run `dotnet test` locally and all tests pass.
-- [ ] I have ensured thread-safe lifecycle management and absence of memory/concurrency leaks.
-- [ ] I have ensured `Console.Write` leaks are absent in the production build.
+- [ ] I have ensured thread-safe lifecycle management (Mutex/Interlocked guards).
+- [ ] **Security:** If modifying Dockerfiles, I have ensured least-privilege execution (`USER oneware`).
+- [ ] **Security:** I have verified no sensitive credentials or daemon sockets are leaked in telemetry or volume mounts.

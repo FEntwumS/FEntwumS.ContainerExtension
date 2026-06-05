@@ -2,28 +2,30 @@
 
 ## Supported Versions
 
-| Version | Supported |
-| ------- | --------- |
-| 1.0.x   | ✅ Yes    |
+| Version | Supported | Verified |
+| ------- | --------- | ---------------------- |
+| 1.0.x   | ✅ Yes    | ✅ Yes                 |
+
+## Secure Infrastructure
+
+This project executes user-specified FPGA toolchains inside Docker/Podman containers and adheres to zero-trust principles:
+- **SLSA Level 3 Provenance** for all published artifacts and generated SBOMs.
+- **Deterministic Builds** ensuring verifiable and reproducible binary outputs.
+- **Non-root Container Execution** preventing namespace privilege escalation.
+- **Static Analysis** enforced via GitHub CodeQL and Trivy.
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in this project, please report it
-responsibly by emailing **<mtorun0x7cd@icloud.com>** instead of opening
-a public issue.
+If you discover a security vulnerability, please report it responsibly by emailing **<mtorun0x7cd@icloud.com>** instead of opening a public issue.
 
-You should receive an acknowledgement within **48 hours**. Critical issues
-affecting container isolation or credential exposure will be prioritised.
+You should receive an acknowledgement within **48 hours**. Critical issues affecting container isolation or credential exposure will be prioritized for immediate out-of-band patches.
 
-## Scope
+## Scope & Threat Model
 
-This project executes user-specified FPGA toolchains inside Docker containers.
-Security-relevant areas include:
+Security-relevant areas in-scope include:
+- **Container escape** — Any bypass of the Docker sandbox boundary via extension mounts or config.
+- **Credential leakage** — Exposure of host environment variables, SSH keys, or socket paths via telemetry or logs.
+- **Path traversal** — Workspace mount injection that accesses files outside the active project directory.
+- **Zombie Process Exhaustion** — Unhandled PIDs overloading host PID limits.
 
-- **Container escape** — Any bypass of the Docker sandbox boundary
-- **Credential leakage** — Exposure of host environment variables, SSH keys, or socket paths
-- **Path traversal** — Workspace mount injection that reads files outside the project directory
-- **Telemetry exfiltration** — Unintended transmission of execution logs to external endpoints
-
-Issues related to Docker daemon misconfiguration on the host are outside the
-scope of this project.
+Issues related to host-side Docker daemon misconfiguration (e.g., exposing unauthenticated TCP sockets) or inherent zero-days in the EDA tools themselves (e.g., buffer overflows in `yosys`) are outside the scope of this project, provided they do not facilitate a container escape.

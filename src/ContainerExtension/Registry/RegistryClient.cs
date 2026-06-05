@@ -1,139 +1,649 @@
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace FEntwumS.ContainerExtension.Registry;
 
-public static class RegistryClient
+public sealed class RegistryConnectionException : Exception
 {
-    private static readonly HttpClient _httpClient = CreateHttpClient();
+    public RegistryConnectionException(string message) : base(message) { }
+    public RegistryConnectionException(string message, Exception innerException) : base(message, innerException) { }
+}
 
-    private static HttpClient CreateHttpClient()
-    {
-        var handler = new SocketsHttpHandler
-        {
-            PooledConnectionLifetime = TimeSpan.FromMinutes(5), // Resolves DNS staleness
-            EnableMultipleHttp2Connections = true,
-            KeepAlivePingDelay = TimeSpan.FromSeconds(60),      // Prevents GHCR from silently dropping persistent TCP connections
-            KeepAlivePingTimeout = TimeSpan.FromSeconds(30)
-        };
-        var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("ContainerExtension/1.0");
-        return client;
-    }
+public static partial class RegistryClient
+{
+    [System.Text.RegularExpressions.GeneratedRegex(@"(token|bearer)\s*=\s*[a-zA-Z0-9_\-\.]+", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
+    private static partial System.Text.RegularExpressions.Regex SecretScrubRegex();
 
-    public static async Task<List<string>> FetchTagsAsync(string imageReference)
-    {
-        if (string.IsNullOrWhiteSpace(imageReference)) return [];
+    private static readonly string CachedUserName = Environment.UserName;
+    private static readonly string CachedUserProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-        try
-        {
-            var parts = ParseImageReference(imageReference);
+    private static readonly Lazy<HttpClient> HttpClientLazy = new(CreateHttpClient, LazyThreadSafetyMode.ExecutionAndPublication);
+    private static readonly FrozenSet<string> GhcrRegistries = new[] { "ghcr.io" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-            if (string.Equals(parts.Registry, "ghcr.io", StringComparison.OrdinalIgnoreCase))
-            {
-                return await FetchGhcrTagsAsync(parts.Namespace, parts.Repository).ConfigureAwait(false);
-            }
-            string ns = string.IsNullOrEmpty(parts.Namespace) ? "library" : parts.Namespace;
-            return await FetchDockerHubTagsAsync(ns, parts.Repository).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            global::ContainerExtension.ContainerTelemetry.TrackError("RegistryClient", "Global fetch trap triggered", ex);
-            return [];
-        }
-    }
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (System.Net.IPAddress[] ips, long cacheTimeTicks)> DnsCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Threading.Lock CacheEvictionLock = new();
 
-    private static (string Registry, string Namespace, string Repository) ParseImageReference(string imageReference)
-    {
-        string registry = "";
-        string ns = "";
-        string repo = imageReference;
+    private static readonly JsonSerializerOptions SerializerOptions = new()
+    {
+        TypeInfoResolver = RegistryJsonContext.Default
+    };
 
-        var parts = imageReference.Split('/');
+    private static HttpClient HttpClient
+    {
+        get
+        {
+            return HttpClientLazy.Value;
+        }
+    }
 
-        if (parts.Length == 3)
-        {
-            registry = parts[0];
-            ns = parts[1];
-            repo = parts[2].Split(':')[0];
-        }
-        else if (parts.Length == 2)
-        {
-            if (parts[0].Contains('.', StringComparison.Ordinal) || parts[0].Contains(':', StringComparison.Ordinal))
-            {
-                registry = parts[0];
-                repo = parts[1].Split(':')[0];
-            }
-            else
-            {
-                ns = parts[0];
-                repo = parts[1].Split(':')[0];
-            }
-        }
-        else if (parts.Length == 1)
-        {
-            repo = parts[0].Split(':')[0];
-        }
+    private static HttpClient CreateHttpClient()
+    {
+        var handler = new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            EnableMultipleHttp2Connections = true,
+            KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
+            AllowAutoRedirect = false,
+            MaxAutomaticRedirections = 0,
+            AutomaticDecompression = System.Net.DecompressionMethods.Brotli | System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate,
+            SslOptions = new System.Net.Security.SslClientAuthenticationOptions
+            {
+                EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13
+            }
+        };
+        var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("ContainerExtension/1.0");
+        client.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("br"));
+        client.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("gzip"));
+        return client;
+    }
 
-        return (registry, ns, repo);
-    }
+    private static async Task<System.Net.IPAddress[]> ResolveDnsAsync(string host, CancellationToken ct)
+    {
+        if (DnsCache.TryGetValue(host, out var cached) && (Environment.TickCount64 - cached.cacheTimeTicks) < 60_000)
+        {
+            return cached.ips;
+        }
+        var ips = await System.Net.Dns.GetHostAddressesAsync(host, ct).ConfigureAwait(false);
+        if (DnsCache.Count >= 50)
+        {
+            lock (CacheEvictionLock)
+            {
+                if (DnsCache.Count >= 50)
+                {
+                    DnsCache.Clear();
+                }
+            }
+        }
+        DnsCache[host] = (ips, Environment.TickCount64);
+        return ips;
+    }
 
-    private static async Task<List<string>> FetchDockerHubTagsAsync(string ns, string repo)
-    {
-        var url = $"https://hub.docker.com/v2/repositories/{ns}/{repo}/tags?page_size=20&ordering=last_updated";
-        using var response = await _httpClient.GetAsync(url).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+    private static bool IsValidRegistryIdentifier(string input)
+    {
+        if (string.IsNullOrEmpty(input))
+        {
+            return true;
+        }
+        if (input.Length > 255)
+        {
+            return false;
+        }
+        foreach (var c in input)
+        {
+            if (!char.IsAsciiLetterOrDigit(c) && c != '.' && c != '-' && c != '_' && c != '/')
+            {
+                return false;
+            }
+        }
+        
+        var span = input.AsSpan();
+        int start = 0;
+        while (start < span.Length)
+        {
+            var idx = span[start..].IndexOf('/');
+            var length = idx < 0 ? span.Length - start : idx;
+            var seg = span.Slice(start, length);
+            if (seg.IsEmpty || seg.Equals(".", StringComparison.Ordinal) || seg.Equals("..", StringComparison.Ordinal))
+            {
+                return false;
+            }
+            if (idx < 0) break;
+            start += length + 1;
+        }
+        return true;
+    }
 
-        using var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
-        var res = await JsonSerializer.DeserializeAsync(stream, RegistryJsonContext.Default.HubResponse).ConfigureAwait(false);
-        
-        return res?.Results?.Where(r => !string.IsNullOrEmpty(r.Name)).Select(r => r.Name!).ToList() ?? [];
-    }
+    private static async Task<HttpResponseMessage> SendWithRetryAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+        int maxAttempts = 3;
+        int delayMs = 1000;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            using var reqClone = await CloneHttpRequestMessageAsync(request).ConfigureAwait(false);
+            try
+            {
+                var response = await HttpClient.SendAsync(reqClone, ct).ConfigureAwait(false);
+                if (attempt < maxAttempts)
+                {
+                    if (response.StatusCode == (System.Net.HttpStatusCode)429)
+                    {
+                        int retryAfterSeconds = 2;
+                        if (response.Headers.RetryAfter != null)
+                        {
+                            if (response.Headers.RetryAfter.Delta.HasValue)
+                            {
+                                retryAfterSeconds = (int)response.Headers.RetryAfter.Delta.Value.TotalSeconds;
+                            }
+                            else if (response.Headers.RetryAfter.Date.HasValue)
+                            {
+                                retryAfterSeconds = (int)(response.Headers.RetryAfter.Date.Value.UtcDateTime - DateTime.UtcNow).TotalSeconds;
+                            }
+                        }
+                        response.Dispose();
+                        retryAfterSeconds = Math.Clamp(retryAfterSeconds, 1, 10);
+                        await Task.Delay(TimeSpan.FromSeconds(retryAfterSeconds), ct).ConfigureAwait(false);
+                        continue;
+                    }
 
-    private static async Task<List<string>> FetchGhcrTagsAsync(string ns, string repo)
-    {
-        var scopeRepo = string.IsNullOrEmpty(ns) ? repo : $"{ns}/{repo}";
-        var tokenUrl = $"https://ghcr.io/token?scope=repository:{scopeRepo}:pull";
-        using var tokenReq = new HttpRequestMessage(HttpMethod.Get, tokenUrl);
+                    if ((int)response.StatusCode >= 500 || response.StatusCode == System.Net.HttpStatusCode.RequestTimeout)
+                    {
+                        response.Dispose();
+                        await Task.Delay(delayMs, ct).ConfigureAwait(false);
+                        delayMs *= 2;
+                        continue;
+                    }
+                }
+                return response;
+            }
+            catch (Exception ex) when (attempt < maxAttempts && (ex is HttpRequestException || ex is TaskCanceledException || ex is System.Net.Sockets.SocketException))
+            {
+                await Task.Delay(delayMs, ct).ConfigureAwait(false);
+                delayMs *= 2;
+            }
+        }
+        throw new RegistryConnectionException("HTTP request failed after maximum retry attempts.");
+    }
 
-        using var tokenResponse = await _httpClient.SendAsync(tokenReq).ConfigureAwait(false);
-        tokenResponse.EnsureSuccessStatusCode();
+    private static async Task<HttpRequestMessage> CloneHttpRequestMessageAsync(HttpRequestMessage req)
+    {
+        var clone = new HttpRequestMessage(req.Method, req.RequestUri);
+        clone.Version = req.Version;
+        foreach (var header in req.Headers)
+        {
+            clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+        foreach (var prop in req.Options)
+        {
+            clone.Options.Set(new HttpRequestOptionsKey<object?>(prop.Key), prop.Value);
+        }
+        if (req.Content != null)
+        {
+            var ms = new MemoryStream();
+            await req.Content.CopyToAsync(ms).ConfigureAwait(false);
+            ms.Position = 0;
+            clone.Content = new StreamContent(ms);
+            foreach (var header in req.Content.Headers)
+            {
+                clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+        }
+        return clone;
+    }
 
-        using var tokenStream = await tokenResponse.Content.ReadAsStreamAsync().ConfigureAwait(false);
-        var tokenRes = await JsonSerializer.DeserializeAsync(tokenStream, RegistryJsonContext.Default.GhcrTokenResponse).ConfigureAwait(false);
-        if (string.IsNullOrEmpty(tokenRes?.Token)) return [];
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (List<string> tags, long cacheTimeTicks)> TagsCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly SemaphoreSlim ActiveFetchesLock = new(1, 1);
+    private static readonly Dictionary<string, Task<List<string>>> ActiveFetches = new(StringComparer.OrdinalIgnoreCase);
 
-        var token = tokenRes.Token;
+    public static async Task<List<string>> FetchTagsAsync(string imageReference, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(imageReference))
+        {
+            return [];
+        }
 
-        using var tagsReq = new HttpRequestMessage(HttpMethod.Get, $"https://ghcr.io/v2/{scopeRepo}/tags/list");
-        tagsReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        foreach (var c in imageReference)
+        {
+            if (!char.IsAscii(c) || char.IsControl(c))
+            {
+                return [];
+            }
+        }
 
-        using var tagsResponse = await _httpClient.SendAsync(tagsReq).ConfigureAwait(false);
-        tagsResponse.EnsureSuccessStatusCode();
+        if (TagsCache.TryGetValue(imageReference, out var cached))
+        {
+            var maxAgeMs = cached.tags.Count == 0 ? 10_000 : 60_000;
+            if ((Environment.TickCount64 - cached.cacheTimeTicks) < maxAgeMs)
+            {
+                return cached.tags;
+            }
+        }
 
-        using var tagsStream = await tagsResponse.Content.ReadAsStreamAsync().ConfigureAwait(false);
-        var tagsRes = await JsonSerializer.DeserializeAsync(tagsStream, RegistryJsonContext.Default.GhcrTagsResponse).ConfigureAwait(false);
-        
-        if (tagsRes?.Tags != null)
-        {
-            var tags = tagsRes.Tags.Where(t => !string.IsNullOrEmpty(t)).ToList();
-            tags.Reverse();
-            return [.. tags.Take(20)];
-        }
+        Task<List<string>> task;
+        await ActiveFetchesLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (ActiveFetches.TryGetValue(imageReference, out var existingTask))
+            {
+                task = existingTask;
+            }
+            else
+            {
+                string key = imageReference;
+                task = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var parts = ParseImageReference(key);
 
-        return [];
-    }
+                        if (parts.Registry.Contains("http:", StringComparison.OrdinalIgnoreCase) || 
+                            parts.Registry.Contains("http", StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new RegistryConnectionException("Non-SSL / HTTP registries are strictly prohibited.");
+                        }
+
+                        if (!IsValidRegistryIdentifier(parts.Namespace) || !IsValidRegistryIdentifier(parts.Repository) || !IsValidRegistryIdentifier(parts.Registry))
+                        {
+                            AddToCache(key, []);
+                            return [];
+                        }
+
+                        try
+                        {
+                            var hostToResolve = string.IsNullOrEmpty(parts.Registry) ? "hub.docker.com" : parts.Registry;
+                            _ = await ResolveDnsAsync(hostToResolve, cancellationToken).ConfigureAwait(false);
+                        }
+                        catch (Exception)
+                        {
+                            // Allow execution to fail downstream if DNS resolution fails completely
+                        }
+
+                        List<string> result;
+                        if (GhcrRegistries.Contains(parts.Registry))
+                        {
+                            result = await FetchGhcrTagsAsync(parts.Namespace, parts.Repository, cancellationToken).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            string ns = string.IsNullOrEmpty(parts.Namespace) ? "library" : parts.Namespace;
+                            result = await FetchDockerHubTagsAsync(ns, parts.Repository, cancellationToken).ConfigureAwait(false);
+                        }
+
+                        AddToCache(key, result);
+                        return result;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        AddToCache(key, []);
+                        return [];
+                    }
+                    catch (TimeoutException ex)
+                    {
+                        AddToCache(key, []);
+                        var scrubbedMsg = ScrubSecrets(ex.Message);
+                        global::ContainerExtension.ContainerTelemetry.TrackError("RegistryClient", $"HTTP request timed out: {scrubbedMsg}", ex);
+                        return [];
+                    }
+                    catch (JsonException ex)
+                    {
+                        AddToCache(key, []);
+                        var scrubbedMsg = ScrubSecrets(ex.Message);
+                        global::ContainerExtension.ContainerTelemetry.TrackError("RegistryClient", $"JSON deserialization failed: {scrubbedMsg}", ex);
+                        return [];
+                    }
+                    catch (HttpRequestException ex)
+                    {
+                        AddToCache(key, []);
+                        if (ex.StatusCode != System.Net.HttpStatusCode.NotFound && ex.StatusCode != System.Net.HttpStatusCode.Unauthorized)
+                        {
+                            var scrubbedMsg = ScrubSecrets(ex.Message);
+                            global::ContainerExtension.ContainerTelemetry.TrackError("RegistryClient", $"HTTP request failed: {scrubbedMsg}", null);
+                        }
+                        return [];
+                    }
+                    catch (Exception ex) when (ex is not OutOfMemoryException)
+                    {
+                        AddToCache(key, []);
+                        var scrubbedMsg = ScrubSecrets(ex.Message);
+                        var scrubbedEx = new RegistryConnectionException(scrubbedMsg, ex);
+                        global::ContainerExtension.ContainerTelemetry.TrackError("RegistryClient", "Global fetch trap triggered", scrubbedEx);
+                        return [];
+                    }
+                    finally
+                    {
+                        await ActiveFetchesLock.WaitAsync().ConfigureAwait(false);
+                        try
+                        {
+                            ActiveFetches.Remove(key);
+                        }
+                        finally
+                        {
+                            ActiveFetchesLock.Release();
+                        }
+                    }
+                });
+
+                ActiveFetches[imageReference] = task;
+            }
+        }
+        finally
+        {
+            ActiveFetchesLock.Release();
+        }
+
+        return cancellationToken.CanBeCanceled ? await task.WaitAsync(cancellationToken).ConfigureAwait(false) : await task.ConfigureAwait(false);
+    }
+
+    private static void AddToCache(string key, List<string> tags)
+    {
+        lock (CacheEvictionLock)
+        {
+            TagsCache[key] = (tags, Environment.TickCount64);
+
+            if (TagsCache.Count > 100)
+            {
+                var currentTicks = Environment.TickCount64;
+                var keysToRemove = new List<string>();
+                foreach (var kvp in TagsCache)
+                {
+                    if ((currentTicks - kvp.Value.cacheTimeTicks) >= 60_000)
+                    {
+                        keysToRemove.Add(kvp.Key);
+                    }
+                }
+                foreach (var k in keysToRemove)
+                {
+                    TagsCache.TryRemove(k, out _);
+                }
+
+                if (TagsCache.Count > 100)
+                {
+                    var oldest = TagsCache.OrderBy(kvp => kvp.Value.cacheTimeTicks).Take(TagsCache.Count - 100).Select(kvp => kvp.Key).ToList();
+                    foreach (var k in oldest)
+                    {
+                        TagsCache.TryRemove(k, out _);
+                    }
+                }
+            }
+        }
+    }
+
+    private static string GetCachedString(ReadOnlySpan<char> span)
+    {
+        if (span.IsEmpty) return string.Empty;
+        if (span.Equals("library", StringComparison.OrdinalIgnoreCase)) return "library";
+        if (span.Equals("ghcr.io", StringComparison.OrdinalIgnoreCase)) return "ghcr.io";
+        return span.ToString();
+    }
+
+    private static (string Registry, string Namespace, string Repository) ParseImageReference(string imageReference)
+    {
+        if (string.IsNullOrWhiteSpace(imageReference))
+        {
+            return ("", "", "");
+        }
+
+        var cleanImage = imageReference.AsSpan().Trim();
+        var shaIdx = cleanImage.IndexOf('@');
+        if (shaIdx >= 0)
+        {
+            cleanImage = cleanImage[..shaIdx];
+        }
+        else
+        {
+            var lastSlashIdx = cleanImage.LastIndexOf('/');
+            var lastColonIdx = cleanImage.LastIndexOf(':');
+            if (lastColonIdx >= 0 && lastColonIdx > lastSlashIdx)
+            {
+                cleanImage = cleanImage[..lastColonIdx];
+            }
+        }
+
+        if (cleanImage.IsEmpty)
+        {
+            return ("", "", "");
+        }
+
+        var firstSlash = cleanImage.IndexOf('/');
+        ReadOnlySpan<char> registrySpan = default;
+        ReadOnlySpan<char> pathSpan = cleanImage;
+
+        if (firstSlash >= 0)
+        {
+            var firstSegment = cleanImage[..firstSlash];
+            if (firstSegment.Contains('.') || firstSegment.Contains(':') || firstSegment.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+            {
+                registrySpan = firstSegment;
+                pathSpan = cleanImage[(firstSlash + 1)..];
+            }
+        }
+
+        if (pathSpan.IsEmpty)
+        {
+            return (registrySpan.ToString(), "", "");
+        }
+
+        var lastSlash = pathSpan.LastIndexOf('/');
+        ReadOnlySpan<char> nsSpan = default;
+        ReadOnlySpan<char> repoSpan = pathSpan;
+
+        if (lastSlash >= 0)
+        {
+            nsSpan = pathSpan[..lastSlash];
+            repoSpan = pathSpan[(lastSlash + 1)..];
+        }
+
+        return (GetCachedString(registrySpan), GetCachedString(nsSpan), GetCachedString(repoSpan));
+    }
+
+    private static bool IsAllLowercase(string str)
+    {
+        if (string.IsNullOrEmpty(str)) return true;
+        return !str.AsSpan().ContainsAnyInRange('A', 'Z');
+    }
+
+    private static async Task<List<string>> FetchDockerHubTagsAsync(string ns, string repo, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(ns) || string.IsNullOrEmpty(repo))
+        {
+            return [];
+        }
+        var nsLower = IsAllLowercase(ns) ? ns : ns.ToLowerInvariant();
+        var repoLower = IsAllLowercase(repo) ? repo : repo.ToLowerInvariant();
+        var encodedNs = Uri.EscapeDataString(nsLower);
+        var encodedRepo = Uri.EscapeDataString(repoLower);
+        var url = $"https://hub.docker.com/v2/repositories/{encodedNs}/{encodedRepo}/tags?page_size=20&ordering=last_updated";
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        using var response = await SendWithRetryAsync(request, cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+
+        var contentType = response.Content.Headers.ContentType?.MediaType;
+        if (contentType == null || !contentType.Contains("json", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new RegistryConnectionException("Invalid registry response: expected JSON media type.");
+        }
+
+        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        HubResponse? res;
+        try
+        {
+            res = await JsonSerializer.DeserializeAsync(stream, typeof(HubResponse), SerializerOptions, cancellationToken).ConfigureAwait(false) as HubResponse;
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+
+        var results = res?.Results;
+        if (results == null) return [];
+        var list = new List<string>(results.Count);
+        foreach (var r in results)
+        {
+            if (!string.IsNullOrEmpty(r.Name))
+            {
+                list.Add(r.Name);
+            }
+        }
+        return list;
+    }
+
+    private static async Task<List<string>> FetchGhcrTagsAsync(string ns, string repo, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(repo))
+        {
+            return [];
+        }
+        var nsLower = IsAllLowercase(ns) ? ns : ns.ToLowerInvariant();
+        var repoLower = IsAllLowercase(repo) ? repo : repo.ToLowerInvariant();
+        var escapedNs = string.IsNullOrEmpty(nsLower) ? "" : Uri.EscapeDataString(nsLower);
+        var escapedRepo = Uri.EscapeDataString(repoLower);
+        var scopeRepoEscaped = string.IsNullOrEmpty(escapedNs) ? escapedRepo : $"{escapedNs}/{escapedRepo}";
+
+        var tokenUrl = $"https://ghcr.io/token?scope=repository:{scopeRepoEscaped}:pull";
+        using var tokenReq = new HttpRequestMessage(HttpMethod.Get, tokenUrl);
+
+        using var tokenTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        tokenTimeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+
+        using var tokenResponse = await SendWithRetryAsync(tokenReq, tokenTimeoutCts.Token).ConfigureAwait(false);
+        tokenResponse.EnsureSuccessStatusCode();
+
+        var tokenContentType = tokenResponse.Content.Headers.ContentType?.MediaType;
+        if (tokenContentType == null || !tokenContentType.Contains("json", StringComparison.OrdinalIgnoreCase))
+        {
+            return [];
+        }
+
+        using var tokenStream = await tokenResponse.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        GhcrTokenResponse? tokenRes;
+        try
+        {
+            tokenRes = await JsonSerializer.DeserializeAsync(tokenStream, typeof(GhcrTokenResponse), SerializerOptions, cancellationToken).ConfigureAwait(false) as GhcrTokenResponse;
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+
+        if (string.IsNullOrEmpty(tokenRes?.Token))
+        {
+            return [];
+        }
+
+        var rawToken = tokenRes.Token;
+        string token;
+        bool hasControl = false;
+        foreach (var c in rawToken)
+        {
+            if (char.IsControl(c))
+            {
+                hasControl = true;
+                break;
+            }
+        }
+        if (!hasControl)
+        {
+            token = rawToken;
+        }
+        else
+        {
+            var sb = new System.Text.StringBuilder(rawToken.Length);
+            foreach (var c in rawToken)
+            {
+                if (!char.IsControl(c))
+                {
+                    sb.Append(c);
+                }
+            }
+            token = sb.ToString();
+        }
+
+        using var tagsReq = new HttpRequestMessage(HttpMethod.Get, $"https://ghcr.io/v2/{scopeRepoEscaped}/tags/list");
+        tagsReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        tagsReq.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.docker.distribution.manifest.v2+json"));
+
+        using var tagsResponse = await SendWithRetryAsync(tagsReq, cancellationToken).ConfigureAwait(false);
+        tagsResponse.EnsureSuccessStatusCode();
+
+        var tagsContentType = tagsResponse.Content.Headers.ContentType?.MediaType;
+        if (tagsContentType == null || !tagsContentType.Contains("json", StringComparison.OrdinalIgnoreCase))
+        {
+            return [];
+        }
+
+        using var tagsStream = await tagsResponse.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        GhcrTagsResponse? tagsRes;
+        try
+        {
+            tagsRes = await JsonSerializer.DeserializeAsync(tagsStream, typeof(GhcrTagsResponse), SerializerOptions, cancellationToken).ConfigureAwait(false) as GhcrTagsResponse;
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+
+        if (tagsRes?.Tags != null)
+        {
+            var rawTags = tagsRes.Tags;
+            var list = new List<string>(Math.Min(20, rawTags.Count));
+            for (int i = rawTags.Count - 1; i >= 0 && list.Count < 20; i--)
+            {
+                var t = rawTags[i];
+                if (!string.IsNullOrEmpty(t))
+                {
+                    list.Add(t);
+                }
+            }
+            return list;
+        }
+
+        return [];
+    }
+
+    private static string ScrubSecrets(string input)
+    {
+        if (string.IsNullOrEmpty(input))
+        {
+            return input;
+        }
+        if (input.Contains("token=", StringComparison.OrdinalIgnoreCase) || input.Contains("bearer", StringComparison.OrdinalIgnoreCase))
+        {
+            input = SecretScrubRegex().Replace(input, "$1=***");
+        }
+        var user = CachedUserName;
+        if (!string.IsNullOrWhiteSpace(user) && input.Contains(user, StringComparison.OrdinalIgnoreCase))
+        {
+            input = input.Replace(user, "***", StringComparison.OrdinalIgnoreCase);
+        }
+        var home = CachedUserProfile;
+        if (!string.IsNullOrWhiteSpace(home) && input.Contains(home, StringComparison.OrdinalIgnoreCase))
+        {
+            input = input.Replace(home, "~", StringComparison.OrdinalIgnoreCase);
+        }
+        return input;
+    }
 }
 
 internal class HubResponse { [JsonPropertyName("results")] public List<HubTag>? Results { get; set; } }
 internal class HubTag { [JsonPropertyName("name")] public string? Name { get; set; } }
 internal class GhcrTagsResponse { [JsonPropertyName("tags")] public List<string>? Tags { get; set; } }
-internal class GhcrTokenResponse { [JsonPropertyName("token")] public string? Token { get; set; } }
+internal class GhcrTokenResponse 
+{ 
+    [JsonPropertyName("token")] public string? Token { get; set; } 
+    [JsonPropertyName("expires_in")] public int? ExpiresIn { get; set; }
+    [JsonPropertyName("issued_at")] public string? IssuedAt { get; set; }
+}
 
 [JsonSerializable(typeof(HubResponse))]
 [JsonSerializable(typeof(GhcrTagsResponse))]

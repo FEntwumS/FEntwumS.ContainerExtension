@@ -1,21 +1,27 @@
 # =============================================================================
-# FEntwumS.ContainerExtension — .gitignore
+# .gitignore — ContainerExtension
 # =============================================================================
 
-# ── OS Artifacts ──────────────────────────────────────────────────────────────
+# ── Security & Credentials ──────────────────────────────────────────────────────
+*.pem
+*.key
+*.cer
+*.crt
+*.p12
+*.pfx
+secrets.json
+.env
+.env.*
+!.env.example
+docker_auth.json
 
-# macOS
+# ── OS Artifacts ─────────────────────────────────────────────────────────────
 .DS_Store
-
-# Windows
 Thumbs.db
 Desktop.ini
-
-# Linux
 *~
 
 # ── IDEs & Editors ───────────────────────────────────────────────────────────
-
 .idea/
 .vscode/*
 !.vscode/settings.json
@@ -29,12 +35,9 @@ Desktop.ini
 *.DotSettings.user
 riderModule.iml
 /_ReSharper.Caches/
-
-# AI Assistant Metadata
 .gemini/
 
 # ── .NET Build & Tooling ─────────────────────────────────────────────────────
-
 bin/
 obj/
 publish/
@@ -43,55 +46,45 @@ publish_new/
 /packages/
 native_tools/
 *.nupkg
-
-# NuGet restore lock files
 project.assets.json
 *.nuget.props
 *.nuget.targets
 *.nuget.g.props
 *.nuget.g.targets
 
-# .NET Local Tooling (sandbox-safe isolation directories)
+# .NET Local Tooling
 .dotnet_cli_home/
 .dotnet_home/
 .nuget_packages/
 .nuget_scratch/
 .tmp/
-
-# .NET runtime/SDK caches that may appear inside the repo tree
 Library/
 
-# ── DocFX (Generated Documentation) ─────────────────────────────────────────
+# ── Quality & Security Scans ────────────────────────────────────────────────────
+*.sarif
+TestResults/
+coverage/
+trivy-results.json
+sbom.spdx.json
 
+# ── DocFX (Generated Documentation) ──────────────────────────────────────────
 _site/
 api/*.yml
 api/.manifest
 
-# ── Python (Benchmarking Suite) ──────────────────────────────────────────────
-
+# ── Python & Benchmarking ────────────────────────────────────────────────────
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
 .venv/
 venv/
-
-# ── Benchmarking ─────────────────────────────────────────────────────────────
-
-# Compiled C# benchmark harness binary
 harness_bin/
-
-# Temporary simulation data from evaluation runs
 *_verification*.txt
 final_*.txt
 
-# ── Docker / Container ───────────────────────────────────────────────────────
-
-# Local Docker override files (may contain custom socket paths or env vars)
-.env
-
-# ── Scratch / Generated ──────────────────────────────────────────────────────
-full_source_bundle.md
-
 # ── Logs & Debugging ─────────────────────────────────────────────────────────
-build_errors.log
+full_source_bundle.md
+*.log
+
+# ── Local Headless Testing ───────────────────────────────────────────────────
+local_test*.sh
+local_tests/

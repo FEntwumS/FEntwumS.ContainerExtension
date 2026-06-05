@@ -11,5 +11,6 @@
     "**/.DS_Store": true,
     "**/bin": true,
     "**/obj": true
-  }
+  },
+  "hadolint.requireComments": true
 }

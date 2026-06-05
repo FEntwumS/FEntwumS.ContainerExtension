@@ -15,224 +15,1247 @@ namespace ContainerExtension.Services.Docker;
 
 internal static class DockerCommandBuilder
 {
-    private const string ContainerWorkDir = "/workspace";
-    private static readonly char[] ArgSplitChars = ['=', ' '];
-    
-    // High-performance, zero-allocation SIMD scanner for Shell special characters and spaces
-    internal static readonly SearchValues<char> ShellSpecialChars = SearchValues.Create(";&|<>*?[]{}()$\\'\"#~`! \t\n\r");
+    private static long _containerCounter = 0;
+    private const string ContainerWorkDir = "/workspace";
+    internal static readonly SearchValues<char> ShellSpecialChars = SearchValues.Create(";&|<>*?[]{}()$\\'\"#~`! \t\n\r");
+    private static readonly SearchValues<char> DangerousEnvKeyChars = SearchValues.Create("&|;`$()<>\n\r\\ \t");
+    private static readonly Dictionary<string, (List<string>? vars, DateTime lastWrite)> EnvCache = new(StringComparer.Ordinal);
+    private static readonly System.Threading.Lock EnvCacheLock = new();
 
-    /// <summary>Extremely fast zero-allocation strict container name sanitizer. No regex timeout vulnerabilities.</summary>
-    private static string SanitizeContainerName(string input)
-    {
-        if (string.IsNullOrWhiteSpace(input)) return string.Empty;
-        var sb = new StringBuilder(input.Length);
-        foreach (char c in input)
-        {
-            if (char.IsLetterOrDigit(c) || c == '.' || c == '_' || c == '-')
-                sb.Append(c);
-        }
-        return sb.ToString();
-    }
+    private static bool ToolRequiresWriteAccess(ToolCommand command)
+    {
+        var exe = command.Executable ?? command.ToolName ?? "";
+        if (exe.Contains("openfpgaloader", StringComparison.OrdinalIgnoreCase) ||
+            exe.Contains("iceprog", StringComparison.OrdinalIgnoreCase) ||
+            exe.Contains("icesprog", StringComparison.OrdinalIgnoreCase) ||
+            exe.Contains("openocd", StringComparison.OrdinalIgnoreCase) ||
+            exe.Contains("dfu-util", StringComparison.OrdinalIgnoreCase) ||
+            exe.Contains("ujprog", StringComparison.OrdinalIgnoreCase) ||
+            exe.Contains("gtkwave", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        if (exe.Contains("yosys", StringComparison.OrdinalIgnoreCase) ||
+            exe.Contains("ghdl", StringComparison.OrdinalIgnoreCase) ||
+            exe.Contains("nvc", StringComparison.OrdinalIgnoreCase) ||
+            exe.Contains("iverilog", StringComparison.OrdinalIgnoreCase) ||
+            exe.Contains("verilator", StringComparison.OrdinalIgnoreCase) ||
+            exe.Contains("apicula", StringComparison.OrdinalIgnoreCase) ||
+            exe.Contains("nextpnr", StringComparison.OrdinalIgnoreCase) ||
+            exe.Contains("pack", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        if (command.Arguments != null)
+        {
+            foreach (var arg in command.Arguments)
+            {
+                if (arg == null) continue;
 
-    public static CreateContainerParameters BuildContainerParameters(
-        string image,
-        ToolCommand command,
-        ISettingsService settingsService,
-        string? uid,
-        string? gid,
-        Action<ToolCommand, string> sdkLog)
-    {
-        var executablePath = (command.Executable ?? command.ToolName).Replace("\r", "").Replace('\\', '/');
-        var executable = Path.GetFileName(executablePath);
-        var workingDirFull = Path.GetFullPath(command.WorkingDirectory);
-        var rawPrefix = settingsService.SafeGetSetting(ContainerExtensionModule.ContainerNamePrefixSetting, "containerextension-");
+                // Check for shell output redirection (e.g. > or >>)
+                if (arg.Contains('>') || arg.Contains(">>"))
+                {
+                    return true;
+                }
 
-        // Compute strict bounds suffix to prevent prefix bleed (e.g. matching /project2 against /project)
-        var workingDirBound = workingDirFull;
-        if (!workingDirBound.EndsWith(Path.DirectorySeparatorChar) && !workingDirBound.EndsWith(Path.AltDirectorySeparatorChar))
-            workingDirBound += Path.DirectorySeparatorChar;
+                // Check for write/output flags
+                if (arg.Equals("-o", StringComparison.Ordinal) || arg.StartsWith("-o=", StringComparison.Ordinal) || arg.StartsWith("-o ", StringComparison.Ordinal) ||
+                    arg.Equals("-w", StringComparison.Ordinal) || arg.StartsWith("-w=", StringComparison.Ordinal) || arg.StartsWith("-w ", StringComparison.Ordinal) ||
+                    arg.Equals("-a", StringComparison.Ordinal) || arg.StartsWith("-a=", StringComparison.Ordinal) || arg.StartsWith("-a ", StringComparison.Ordinal) ||
+                    arg.Equals("-e", StringComparison.Ordinal) || arg.StartsWith("-e=", StringComparison.Ordinal) || arg.StartsWith("-e ", StringComparison.Ordinal) ||
+                    arg.Equals("-r", StringComparison.Ordinal) || arg.StartsWith("-r=", StringComparison.Ordinal) || arg.StartsWith("-r ", StringComparison.Ordinal) ||
+                    arg.Equals("--output", StringComparison.Ordinal) || arg.StartsWith("--output=", StringComparison.Ordinal) ||
+                    arg.Equals("--write", StringComparison.Ordinal) || arg.StartsWith("--write=", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 
-        if (command.Arguments != null)
-        {
-            foreach (var arg in command.Arguments)
-            {
-                try
-                {
-                    var parts = arg.Split(ArgSplitChars, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length == 0) continue;
+    private static string SanitizeLabel(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return string.Empty;
+        bool isClean = true;
+        foreach (var c in input)
+        {
+            if (!(char.IsLetterOrDigit(c) || c == '.' || c == '-' || c == '_' || c == '='))
+            {
+                isClean = false;
+                break;
+            }
+        }
+        if (isClean) return input;
 
-                    var potentialPath = parts[^1].Trim('"', '\'', '\r', '\n', ' ');
+        var sb = new StringBuilder(input.Length);
+        foreach (var c in input)
+        {
+            if (char.IsLetterOrDigit(c) || c == '.' || c == '-' || c == '_' || c == '=')
+            {
+                sb.Append(c);
+            }
+        }
+        return sb.ToString();
+    }
 
-                    // Fast reject: must contain a path struct separator
-                    if (potentialPath.Contains('/') || potentialPath.Contains('\\'))
-                    {
-                        var dir = (potentialPath.EndsWith('/') || potentialPath.EndsWith('\\'))
-                            ? potentialPath
-                            : Path.GetDirectoryName(potentialPath);
+    private static string SanitizeContainerName(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return string.Empty;
+        }
+        bool isClean = true;
+        foreach (char c in input)
+        {
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-'))
+            {
+                isClean = false;
+                break;
+            }
+        }
+        if (isClean) return input;
 
-                        if (!string.IsNullOrWhiteSpace(dir))
-                        {
-                            var absoluteDir = Path.GetFullPath(Path.Combine(workingDirFull, dir));
+        var sb = new StringBuilder(input.Length);
+        foreach (char c in input)
+        {
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-')
+            {
+                sb.Append(c);
+            }
+        }
+        return sb.ToString();
+    }
 
-                            var absBound = absoluteDir;
-                            if (!absBound.EndsWith(Path.DirectorySeparatorChar) && !absBound.EndsWith(Path.AltDirectorySeparatorChar))
-                                absBound += Path.DirectorySeparatorChar;
+    public static CreateContainerParameters BuildContainerParameters(
+      string image,
+      ToolCommand command,
+      ISettingsService? settingsService,
+      string? uid,
+      string? gid,
+      Action<ToolCommand, string> sdkLog)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(image);
+        ArgumentNullException.ThrowIfNull(command);
+        sdkLog ??= (_, _) => { };
 
-                            // Security check: rigorously verify that the determined path physically lives within the workspace
-                            var osAwareComparison = OperatingSystem.IsLinux() 
-                                ? StringComparison.Ordinal 
-                                : StringComparison.OrdinalIgnoreCase;
-                                
-                            if (absBound.StartsWith(workingDirBound, osAwareComparison) && !Directory.Exists(absoluteDir))
-                            {
-                                Directory.CreateDirectory(absoluteDir);
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
-                {
-                    ContainerTelemetry.TrackError("DockerCommandBuilder", "Path validation failed", ex);
-                }
-            }
-        }
+        var rawExePath = command.Executable ?? command.ToolName ?? "container-run";
+        var executablePath = NormalizeSeparators(rawExePath);
+        var executable = Path.GetFileName(executablePath);
+        var resolvedWorkingDir = string.IsNullOrWhiteSpace(command.WorkingDirectory) ? Directory.GetCurrentDirectory() : command.WorkingDirectory;
+        var workingDirFull = Path.GetFullPath(resolvedWorkingDir);
+        workingDirFull = ResolvePhysicalPath(workingDirFull);
+        if (!Path.IsPathRooted(workingDirFull))
+        {
+            throw new InvalidOperationException("Resolved mount path is not absolute.");
+        }
+        var workingDirCanonical = GetCanonicalPath(workingDirFull);
+        var rawPrefix = settingsService.SafeGetSetting(ContainerExtensionModule.ContainerNamePrefixSetting, "containerextension-");
 
-        var fullCmdString = executable;
-        if (command.Arguments != null && command.Arguments.Count > 0)
-        {
-            var argsStr = string.Join(" ", command.Arguments.Select(a =>
-            {
-                var processed = a.Replace("\r", "").Replace('\\', '/');
-                
-                // Extremely fast boundary and invalid char check utilizing vectorization
-                if (processed.AsSpan().ContainsAny(ShellSpecialChars))
-                {
-                    return $"\"{processed.Replace("\"", "\\\"")}\"";
-                }
-                return processed;
-            }));
-            fullCmdString += " " + argsStr;
-        }
-        var fullCmd = new List<string> { "sh", "-c", fullCmdString };
+        // Compute strict bounds suffix to prevent prefix bleed (e.g. matching /project2 against /project)
+        var workingDirBound = workingDirFull;
+        if (!workingDirBound.EndsWith(Path.DirectorySeparatorChar) && !workingDirBound.EndsWith(Path.AltDirectorySeparatorChar))
+        {
+            workingDirBound += Path.DirectorySeparatorChar;
+        }
 
-        var autoRemove = settingsService.SafeGetSetting(ContainerExtensionModule.AutoRemoveSetting, true);
+        if (command.Arguments != null && command.Arguments.Count > 0)
+        {
+            foreach (var arg in command.Arguments)
+            {
+                if (arg == null)
+                {
+                    continue;
+                }
+                if (string.IsNullOrWhiteSpace(arg))
+                {
+                    continue;
+                }
+                if (arg.Length > 2048)
+                {
+                    throw new ArgumentException("Command argument exceeds maximum allowed length of 2048 characters.", nameof(command));
+                }
+                try
+                {
+                    ReadOnlySpan<char> argSpan = arg.AsSpan();
+                    var segments = new List<string>(arg.Length / 10 + 2);
+                    int start = 0;
+                    bool inDoubleQuotes = false;
+                    bool inSingleQuotes = false;
+                    bool escaped = false;
+                    for (int idx = 0; idx < argSpan.Length; idx++)
+                    {
+                        char c = argSpan[idx];
+                        if (escaped)
+                        {
+                            escaped = false;
+                        }
+                        else if (c == '\\')
+                        {
+                            escaped = true;
+                        }
+                        else if (c == '"' && !inSingleQuotes)
+                        {
+                            inDoubleQuotes = !inDoubleQuotes;
+                        }
+                        else if (c == '\'' && !inDoubleQuotes)
+                        {
+                            inSingleQuotes = !inSingleQuotes;
+                        }
+                        else if ((c == '=' || c == ' ') && !inDoubleQuotes && !inSingleQuotes)
+                        {
+                            if (idx > start)
+                            {
+                                segments.Add(argSpan[start..idx].ToString());
+                            }
+                            start = idx + 1;
+                        }
+                    }
+                    if (argSpan.Length > start)
+                    {
+                        segments.Add(argSpan[start..].ToString());
+                    }
 
-        string? containerName = null;
-        if (!string.IsNullOrWhiteSpace(rawPrefix))
-        {
-            var sanitized = SanitizeContainerName(rawPrefix);
-            if (sanitized.Length > 0)
-            {
-                var safeToolName = SanitizeContainerName(command.ToolName ?? "tool");
-                containerName = $"{sanitized.TrimEnd('-')}-{safeToolName}-{DateTime.Now:HHmmssfff}-{Guid.NewGuid().ToString("N")[..4]}";
-            }
-        }
+                    foreach (var rawSeg in segments)
+                    {
+                        var segment = rawSeg.Trim('"', '\'', '\r', '\n', ' ');
+                        if (string.IsNullOrEmpty(segment) || segment.StartsWith('-'))
+                        {
+                            continue;
+                        }
 
-        var createParams = new CreateContainerParameters
-        {
-            Image = image,
-            Name = containerName,
-            Cmd = fullCmd,
-            WorkingDir = ContainerWorkDir,
-            HostConfig = new HostConfig
-            {
-                Binds = [$"{workingDirFull}:{ContainerWorkDir}"],
-                AutoRemove = autoRemove,
-                NetworkMode = settingsService.SafeGetSetting(ContainerExtensionModule.NetworkModeSetting, "bridge"),
-                Init = true
-            }
-        };
+                        if (segment.Contains('/') || segment.Contains('\\'))
+                        {
+                            var potentialPath = segment;
+                            var dir = (potentialPath.EndsWith('/') || potentialPath.EndsWith('\\'))
+                              ? potentialPath
+                              : Path.GetDirectoryName(potentialPath);
 
-        if (OperatingSystem.IsLinux() && !string.IsNullOrEmpty(uid) && !string.IsNullOrEmpty(gid))
-        {
-            createParams.User = $"{uid}:{gid}";
-        }
+                            if (!string.IsNullOrWhiteSpace(dir))
+                            {
+                                var absoluteDir = Path.GetFullPath(Path.Combine(workingDirFull, dir));
+                                var physicalDir = ResolvePhysicalPath(absoluteDir);
+                                var absBound = physicalDir;
+                                if (!absBound.EndsWith(Path.DirectorySeparatorChar) && !absBound.EndsWith(Path.AltDirectorySeparatorChar))
+                                    absBound += Path.DirectorySeparatorChar;
 
-        var envVars = ParseEnvFile(workingDirFull);
-        if (envVars != null)
-        {
-            createParams.Env = envVars;
-            sdkLog(command, $"[Docker SDK] Injecting {envVars.Count} environment variable(s) from .env file.");
-        }
+                                var osAwareComparison = OperatingSystem.IsLinux()
+                                    ? StringComparison.Ordinal
+                                    : StringComparison.OrdinalIgnoreCase;
 
-        var memMb = settingsService.SafeGetSetting<double>(ContainerExtensionModule.MemoryLimitSetting, 0);
-        var hostMemMb = ContainerExtensionModule.GetHostMemoryMB();
-        if (memMb > 0)
-        {
-            memMb = Math.Min(memMb, hostMemMb);
-            var memBytes = (long)(memMb * 1024 * 1024);
-            createParams.HostConfig.Memory = memBytes;
-            createParams.HostConfig.MemorySwap = memBytes;
-        }
+                                if (absBound.StartsWith(workingDirBound, osAwareComparison) && !Directory.Exists(absoluteDir))
+                                {
+                                    try
+                                    {
+                                        Directory.CreateDirectory(absoluteDir);
+                                    }
+                                    catch (Exception ex) when (ex is not OutOfMemoryException)
+                                    {
+                                        ContainerTelemetry.TrackError("DockerCommandBuilder", $"Workspace dir creation failed for '{absoluteDir}'", ex);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    ContainerTelemetry.TrackError("DockerCommandBuilder", $"Workspace path scanner failed for '{arg}'", ex);
+                }
+            }
+        }
 
-        var cpuCores = settingsService.SafeGetSetting<double>(ContainerExtensionModule.CpuLimitSetting, 0);
-        var hostCores = (double)Environment.ProcessorCount;
-        if (cpuCores > 0)
-        {
-            cpuCores = Math.Min(cpuCores, hostCores);
-            createParams.HostConfig.NanoCPUs = (long)(cpuCores * 1_000_000_000);
-        }
+        var fullCmdString = executable;
+        if (command.Arguments != null && command.Arguments.Count > 0)
+        {
+            var argsList = command.Arguments.ToList();
+            bool isGhdlMakeOrElabOrRun = false;
+            var rawExe = command.Executable ?? command.ToolName ?? "";
+            if (rawExe.Contains("ghdl", StringComparison.OrdinalIgnoreCase) &&
+                argsList.Any(arg => arg != null && (arg.Equals("-m", StringComparison.Ordinal) || arg.Equals("-e", StringComparison.Ordinal) || arg.Equals("-r", StringComparison.Ordinal))))
+            {
+                isGhdlMakeOrElabOrRun = true;
+            }
 
-        var extraFlags = settingsService.SafeGetSetting(ContainerExtensionModule.ExtraFlagsSetting, "");
-        if (!string.IsNullOrWhiteSpace(extraFlags))
-        {
-            createParams.Labels ??= new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var flag in extraFlags.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                var eqIdx = flag.IndexOf('=');
-                if (eqIdx > 0)
-                    createParams.Labels[flag[..eqIdx]] = flag[(eqIdx + 1)..];
-                else
-                    createParams.Labels[flag] = "true";
-            }
-            sdkLog(command, $"[Docker SDK] Injecting {createParams.Labels.Count} extra label(s) from Extra Container Labels.");
-        }
+            var sbArgs = new StringBuilder();
+            for (int i = 0; i < argsList.Count; i++)
+            {
+                var a = argsList[i];
+                if (a == null) continue;
+                if (sbArgs.Length > 0)
+                {
+                    sbArgs.Append(' ');
+                }
 
-        return createParams;
-    }
+                // Check if the previous argument was --work or -work (indicating this argument is a library name)
+                bool isWorkValue = false;
+                if (i > 0)
+                {
+                    var prev = argsList[i - 1];
+                    if (prev != null && (prev.Equals("--work", StringComparison.OrdinalIgnoreCase) || prev.Equals("-work", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        isWorkValue = true;
+                    }
+                }
 
-    internal static List<string>? ParseEnvFile(string workingDir)
-    {
-        var envPath = Path.Combine(workingDir, ".env");
-        if (!File.Exists(envPath)) return null;
+                string mapped;
+                if (isWorkValue)
+                {
+                    var normalized = a.Replace('\\', '/');
+                    var libName = Path.GetFileName(normalized.TrimEnd('/'));
+                    mapped = string.IsNullOrWhiteSpace(libName) ? "work" : libName;
+                }
+                else if (isGhdlMakeOrElabOrRun && (a.EndsWith(".vhd", StringComparison.OrdinalIgnoreCase) || a.EndsWith(".vhdl", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var normalized = a.Replace('\\', '/');
+                    var baseName = Path.GetFileNameWithoutExtension(normalized);
+                    mapped = string.IsNullOrWhiteSpace(baseName) ? a : baseName;
+                }
+                else if (a.Contains(' ') || a.Contains(';') || a.Contains(','))
+                {
+                    mapped = MapCommandScriptPaths(a, workingDirFull, workingDirCanonical);
+                }
+                else
+                {
+                    mapped = ShouldMapArgument(a) ? MapPathToContainer(a, workingDirFull, workingDirCanonical) : a;
+                }
 
-        var envVars = new List<string>();
-        
-        using var stream = new FileStream(envPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using var reader = new StreamReader(stream, new System.Text.UTF8Encoding(false));
-        string? line;
-        
-        while ((line = reader.ReadLine()) != null)
-        {
-            var trimmed = line.AsSpan().Trim();
-            if (trimmed.IsEmpty || trimmed[0] == '#') continue;
+                var processed = NormalizeSeparators(mapped);
 
-            if (trimmed.StartsWith("export ".AsSpan(), StringComparison.Ordinal))
-                trimmed = trimmed[7..].TrimStart();
+                if (processed.AsSpan().ContainsAny(ShellSpecialChars))
+                {
+                    var escaped = processed
+                        .Replace("\\", "\\\\", StringComparison.Ordinal)
+                        .Replace("\"", "\\\"", StringComparison.Ordinal)
+                        .Replace("$", "\\$", StringComparison.Ordinal)
+                        .Replace("`", "\\`", StringComparison.Ordinal);
+                    sbArgs.Append('"').Append(escaped).Append('"');
+                }
+                else
+                {
+                    sbArgs.Append(processed);
+                }
+            }
+            fullCmdString += " " + sbArgs.ToString();
+        }
+        var fullCmd = new List<string> { "sh", "-c", fullCmdString };
 
-            var eqIdx = trimmed.IndexOf('=');
-            if (eqIdx < 0) continue;
+        var counter = Interlocked.Increment(ref _containerCounter);
+        var containerName = $"{SanitizeContainerName(rawPrefix)}{SanitizeContainerName(executable)}-{DateTime.Now:HHmmssfff}-{counter}-{Guid.NewGuid().ToString("N")[..8]}";
 
-            var key = trimmed[..eqIdx];
-            var valueSpan = trimmed[(eqIdx + 1)..];
+        var user = string.IsNullOrEmpty(uid) || string.IsNullOrEmpty(gid) || OperatingSystem.IsWindows()
+          ? null
+          : $"{uid}:{gid}";
 
-            if (valueSpan.Length > 0 && valueSpan[0] != '"' && valueSpan[0] != '\'')
-            {
-                var commentIdx = valueSpan.IndexOf(" #".AsSpan(), StringComparison.Ordinal);
-                if (commentIdx >= 0)
-                    valueSpan = valueSpan[..commentIdx];
-            }
-            valueSpan = valueSpan.Trim();
+        var autoRemove = settingsService.SafeGetSetting(ContainerExtensionModule.AutoRemoveSetting, true);
+        var networkMode = settingsService.SafeGetSetting(ContainerExtensionModule.NetworkModeSetting, "bridge");
 
-            if (valueSpan.Length >= 2 &&
-                ((valueSpan[0] == '"' && valueSpan[^1] == '"') ||
-                 (valueSpan[0] == '\'' && valueSpan[^1] == '\'')))
-            {
-                valueSpan = valueSpan[1..^1];
-            }
+        var bindSuffix = ToolRequiresWriteAccess(command) ? "" : ":ro";
 
-            envVars.Add($"{key.ToString()}={valueSpan.ToString()}");
-        }
-        return envVars.Count > 0 ? envVars : null;
-    }
+        var createParams = new CreateContainerParameters
+        {
+            Image = image,
+            Name = containerName,
+            Cmd = fullCmd,
+            User = user,
+            WorkingDir = ContainerWorkDir,
+            HostConfig = new HostConfig
+            {
+                AutoRemove = autoRemove,
+                NetworkMode = networkMode,
+                Init = true,
+                CapDrop = new List<string> { "ALL" },
+                Binds = new List<string>(4) { $"{workingDirFull}:{ContainerWorkDir}{bindSuffix}" }
+            }
+        };
+
+        var envVars = ParseEnvFile(workingDirFull);
+        var envCount = (envVars?.Count ?? 0) + (command.EnvironmentVariables?.Count ?? 0);
+        var envList = new List<string>(envCount);
+        if (envVars != null)
+        {
+            envList.AddRange(envVars);
+        }
+        if (command.EnvironmentVariables != null && command.EnvironmentVariables.Count > 0)
+        {
+            foreach (var kvp in command.EnvironmentVariables)
+            {
+                envList.Add($"{kvp.Key}={kvp.Value}");
+            }
+        }
+
+        if (envList.Count > 500)
+        {
+            envList.RemoveRange(500, envList.Count - 500);
+        }
+
+        if (envList.Count > 0)
+        {
+            createParams.Env = envList;
+            sdkLog(command, $"[Docker SDK] Injecting {envList.Count} environment variable(s).");
+        }
+
+        var memMb = settingsService.SafeGetSetting<double>(ContainerExtensionModule.MemoryLimitSetting, 0);
+        if (memMb > 0 && !double.IsNaN(memMb) && !double.IsInfinity(memMb))
+        {
+            const double maxMb = 8 * 1024 * 1024.0; // 8 TB max
+            var boundedMb = Math.Clamp(memMb, 0, maxMb);
+            createParams.HostConfig.Memory = (long)(boundedMb * 1024 * 1024);
+            createParams.HostConfig.MemorySwap = createParams.HostConfig.Memory;
+        }
+
+        var cpuCores = settingsService.SafeGetSetting<double>(ContainerExtensionModule.CpuLimitSetting, 0);
+        var hostCores = (double)Environment.ProcessorCount;
+        if (cpuCores > 0 && !double.IsNaN(cpuCores) && !double.IsInfinity(cpuCores))
+        {
+            var boundedCpus = Math.Clamp(cpuCores, 0, hostCores);
+            createParams.HostConfig.NanoCPUs = (long)(boundedCpus * 1_000_000_000);
+        }
+
+        var extraFlags = settingsService.SafeGetSetting(ContainerExtensionModule.ExtraFlagsSetting, "");
+        if (!string.IsNullOrWhiteSpace(extraFlags))
+        {
+            createParams.Labels ??= new Dictionary<string, string>(StringComparer.Ordinal);
+            createParams.HostConfig.PortBindings ??= new Dictionary<string, IList<PortBinding>>(StringComparer.OrdinalIgnoreCase);
+            createParams.ExposedPorts ??= new Dictionary<string, EmptyStruct>(StringComparer.OrdinalIgnoreCase);
+
+            var flags = TokenizeExtraFlags(extraFlags);
+            int i = 0;
+            while (i < flags.Count)
+            {
+                var flag = flags[i];
+                if ((string.Equals(flag, "-p", StringComparison.Ordinal) || string.Equals(flag, "--publish", StringComparison.Ordinal)) && i + 1 < flags.Count)
+                {
+                    var portMappingStr = flags[i + 1];
+                    i += 2;
+
+                    var parts = portMappingStr.Split(':');
+                    string hostIp = "";
+                    string hostPart = "";
+                    string guestPart = "";
+
+                    if (parts.Length == 1)
+                    {
+                        guestPart = parts[0];
+                    }
+                    else if (parts.Length == 2)
+                    {
+                        if (parts[0].Contains('.', StringComparison.Ordinal))
+                        {
+                            hostIp = parts[0];
+                            guestPart = parts[1];
+                        }
+                        else
+                        {
+                            hostPart = parts[0];
+                            guestPart = parts[1];
+                        }
+                    }
+                    else if (parts.Length == 3)
+                    {
+                        hostIp = parts[0];
+                        hostPart = parts[1];
+                        guestPart = parts[2];
+                    }
+
+                    if (!string.IsNullOrEmpty(guestPart))
+                    {
+                        var proto = "tcp";
+                        var protoIdx = guestPart.IndexOf('/');
+                        if (protoIdx >= 0)
+                        {
+                            if (protoIdx + 1 < guestPart.Length)
+                            {
+                                var parsedProto = guestPart[(protoIdx + 1)..].ToLowerInvariant();
+                                if (!string.IsNullOrEmpty(parsedProto))
+                                {
+                                    proto = parsedProto;
+                                }
+                            }
+                            guestPart = guestPart[..protoIdx];
+                        }
+
+                        var hostDash = hostPart.IndexOf('-');
+                        var guestDash = guestPart.IndexOf('-');
+
+                        if (hostDash >= 0 && guestDash >= 0)
+                        {
+                            if (int.TryParse(hostPart[..hostDash], out var hostStart) &&
+                                int.TryParse(hostPart[(hostDash + 1)..], out var hostEnd) &&
+                                int.TryParse(guestPart[..guestDash], out var guestStart) &&
+                                int.TryParse(guestPart[(guestDash + 1)..], out var guestEnd))
+                            {
+                                var rangeCount = Math.Min(hostEnd - hostStart, guestEnd - guestStart);
+                                for (int r = 0; r <= rangeCount; r++)
+                                {
+                                    var hp = (hostStart + r).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                                    var gp = (guestStart + r).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                                    var key = $"{gp}/{proto}";
+                                    createParams.ExposedPorts[key] = default;
+                                    var binding = new PortBinding { HostPort = hp };
+                                    if (!string.IsNullOrEmpty(hostIp))
+                                    {
+                                        binding.HostIP = hostIp;
+                                    }
+                                    else
+                                    {
+                                        binding.HostIP = "127.0.0.1";
+                                    }
+                                    if (createParams.HostConfig.PortBindings.TryGetValue(key, out var list))
+                                    {
+                                        list.Add(binding);
+                                    }
+                                    else
+                                    {
+                                        createParams.HostConfig.PortBindings[key] = new List<PortBinding> { binding };
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            var key = $"{guestPart}/{proto}";
+                            createParams.ExposedPorts[key] = default;
+                            var binding = new PortBinding { HostPort = hostPart };
+                            if (!string.IsNullOrEmpty(hostIp))
+                            {
+                                binding.HostIP = hostIp;
+                            }
+                            else
+                            {
+                                binding.HostIP = "127.0.0.1";
+                            }
+                            if (createParams.HostConfig.PortBindings.TryGetValue(key, out var list))
+                            {
+                                list.Add(binding);
+                            }
+                            else
+                            {
+                                createParams.HostConfig.PortBindings[key] = new List<PortBinding> { binding };
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    i++;
+                    var eqIdx = flag.IndexOf('=');
+                    if (eqIdx > 0)
+                    {
+                        var key = SanitizeLabel(flag[..eqIdx].Trim('"', '\''));
+                        var val = SanitizeLabel(flag[(eqIdx + 1)..].Trim('"', '\''));
+                        if (!string.IsNullOrEmpty(key))
+                        {
+                            createParams.Labels[key] = val;
+                        }
+                    }
+                    else
+                    {
+                        var key = SanitizeLabel(flag.Trim('"', '\''));
+                        if (!string.IsNullOrEmpty(key))
+                        {
+                            createParams.Labels[key] = "true";
+                        }
+                    }
+                }
+            }
+            sdkLog(command, $"[Docker SDK] Injecting extra label(s) and port mapping(s) from Extra Container Labels.");
+        }
+
+        if (command.ExposedPorts != null && command.ExposedPorts.Count > 0)
+        {
+            createParams.ExposedPorts ??= new Dictionary<string, EmptyStruct>(StringComparer.OrdinalIgnoreCase);
+            foreach (var port in command.ExposedPorts)
+            {
+                var proto = string.IsNullOrEmpty(port.Protocol) ? "tcp" : port.Protocol.ToLowerInvariant();
+                var key = $"{port.Number}/{proto}";
+                createParams.ExposedPorts[key] = default;
+            }
+            sdkLog(command, $"[Docker SDK] Exposing {command.ExposedPorts.Count} port(s) inside container.");
+        }
+
+        if (command.PortMappings != null && command.PortMappings.Count > 0)
+        {
+            createParams.HostConfig.PortBindings ??= new Dictionary<string, IList<PortBinding>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var mapping in command.PortMappings)
+            {
+                if (mapping.Guest == null || mapping.Host == null)
+                {
+                    continue;
+                }
+                var proto = string.IsNullOrEmpty(mapping.Guest.Protocol) ? "tcp" : mapping.Guest.Protocol.ToLowerInvariant();
+                var key = $"{mapping.Guest.Number}/{proto}";
+                var hostPortStr = mapping.Host.Number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (createParams.HostConfig.PortBindings.TryGetValue(key, out var list))
+                {
+                    if (!list.Any(b => { return string.Equals(b.HostPort, hostPortStr, StringComparison.Ordinal); }))
+                    {
+                        list.Add(new PortBinding { HostPort = hostPortStr, HostIP = "127.0.0.1" });
+                    }
+                }
+                else
+                {
+                    createParams.HostConfig.PortBindings[key] = new List<PortBinding>
+                    {
+                        new PortBinding { HostPort = hostPortStr, HostIP = "127.0.0.1" }
+                    };
+                }
+            }
+            sdkLog(command, $"[Docker SDK] Configured {command.PortMappings.Count} port mapping(s).");
+        }
+
+        return createParams;
+    }
+
+    internal static List<string>? ParseEnvFile(string workingDir)
+    {
+        var envPath = Path.Combine(workingDir, ".env");
+        try
+        {
+            DateTime currentWriteTime;
+            try
+            {
+                currentWriteTime = File.GetLastWriteTimeUtc(envPath);
+            }
+            catch (Exception)
+            {
+                currentWriteTime = DateTime.MinValue;
+            }
+
+            lock (EnvCacheLock)
+            {
+                if (EnvCache.TryGetValue(envPath, out var cached) && cached.lastWrite == currentWriteTime)
+                {
+                    return cached.vars;
+                }
+            }
+
+            if (currentWriteTime == DateTime.MinValue || !File.Exists(envPath))
+            {
+                lock (EnvCacheLock)
+                {
+                    EnvCache[envPath] = (null, currentWriteTime);
+                    if (EnvCache.Count > 100)
+                    {
+                        var keysToRemove = EnvCache.OrderBy(kvp => { return kvp.Value.lastWrite; }).Take(10).Select(kvp => { return kvp.Key; }).ToList();
+                        foreach (var k in keysToRemove)
+                        {
+                            EnvCache.Remove(k);
+                        }
+                    }
+                }
+                return null;
+            }
+
+            var envVars = new List<string>();
+            var content = File.ReadAllText(envPath, Encoding.UTF8);
+            var lines = content.Split('\n');
+
+            int i = 0;
+            while (i < lines.Length)
+            {
+                var lineSpan = lines[i].AsSpan().Trim();
+                i++;
+                if (lineSpan.IsEmpty || lineSpan[0] == '#')
+                {
+                    continue;
+                }
+
+                if (lineSpan.StartsWith("export ", StringComparison.Ordinal))
+                {
+                    lineSpan = lineSpan[7..].TrimStart();
+                }
+
+                var eqIdx = lineSpan.IndexOf('=');
+                if (eqIdx <= 0)
+                {
+                    continue;
+                }
+
+                var key = lineSpan[..eqIdx].Trim().ToString();
+                if (key.AsSpan().ContainsAny(DangerousEnvKeyChars))
+                {
+                    continue;
+                }
+                var value = lineSpan[(eqIdx + 1)..].Trim().ToString();
+
+                // Check if quotes are balanced on the same line
+                bool inDoubleQuotes = false;
+                bool inSingleQuotes = false;
+                for (int charIdx = 0; charIdx < value.Length; charIdx++)
+                {
+                    char c = value[charIdx];
+                    if (c == '"' && !inSingleQuotes)
+                    {
+                        int backslashCount = 0;
+                        int prevIdx = charIdx - 1;
+                        while (prevIdx >= 0 && value[prevIdx] == '\\')
+                        {
+                            backslashCount++;
+                            prevIdx--;
+                        }
+                        if (backslashCount % 2 == 0)
+                        {
+                            inDoubleQuotes = !inDoubleQuotes;
+                        }
+                    }
+                    else if (c == '\'' && !inDoubleQuotes)
+                    {
+                        int backslashCount = 0;
+                        int prevIdx = charIdx - 1;
+                        while (prevIdx >= 0 && value[prevIdx] == '\\')
+                        {
+                            backslashCount++;
+                            prevIdx--;
+                        }
+                        if (backslashCount % 2 == 0)
+                        {
+                            inSingleQuotes = !inSingleQuotes;
+                        }
+                    }
+                }
+
+                // If quotes are not balanced, we have a multi-line value
+                if ((inDoubleQuotes || inSingleQuotes) && value.Length > 0)
+                {
+                    char quoteChar = inDoubleQuotes ? '"' : '\'';
+                    var sbVal = new StringBuilder(value);
+                    while (i < lines.Length)
+                    {
+                        var nextLine = lines[i];
+                        i++;
+                        sbVal.Append('\n').Append(nextLine);
+
+                        var nextLineSpan = nextLine.AsSpan();
+                        bool quoteClosed = false;
+                        for (int k = 0; k < nextLineSpan.Length; k++)
+                        {
+                            if (nextLineSpan[k] == quoteChar)
+                            {
+                                int backslashCount = 0;
+                                int prevIdx = k - 1;
+                                while (prevIdx >= 0 && nextLineSpan[prevIdx] == '\\')
+                                {
+                                    backslashCount++;
+                                    prevIdx--;
+                                }
+                                if (backslashCount % 2 == 0)
+                                {
+                                    quoteClosed = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (quoteClosed)
+                        {
+                            break;
+                        }
+                    }
+                    value = sbVal.ToString();
+                }
+
+                // Strip inline comments
+                int commentIdx = -1;
+                inDoubleQuotes = false;
+                inSingleQuotes = false;
+                for (int charIdx = 0; charIdx < value.Length; charIdx++)
+                {
+                    char c = value[charIdx];
+                    if (c == '"' && !inSingleQuotes)
+                    {
+                        int backslashCount = 0;
+                        int prevIdx = charIdx - 1;
+                        while (prevIdx >= 0 && value[prevIdx] == '\\')
+                        {
+                            backslashCount++;
+                            prevIdx--;
+                        }
+                        if (backslashCount % 2 == 0)
+                        {
+                            inDoubleQuotes = !inDoubleQuotes;
+                        }
+                    }
+                    else if (c == '\'' && !inDoubleQuotes)
+                    {
+                        int backslashCount = 0;
+                        int prevIdx = charIdx - 1;
+                        while (prevIdx >= 0 && value[prevIdx] == '\\')
+                        {
+                            backslashCount++;
+                            prevIdx--;
+                        }
+                        if (backslashCount % 2 == 0)
+                        {
+                            inSingleQuotes = !inSingleQuotes;
+                        }
+                    }
+                    else if (c == '#' && !inDoubleQuotes && !inSingleQuotes)
+                    {
+                        bool isHexColor = false;
+                        if (charIdx + 6 < value.Length)
+                        {
+                            bool isHex6 = true;
+                            for (int k = 1; k <= 6; k++)
+                            {
+                                if (!char.IsAsciiHexDigit(value[charIdx + k]))
+                                {
+                                    isHex6 = false;
+                                    break;
+                                }
+                            }
+                            if (isHex6 && (charIdx + 7 == value.Length || !char.IsLetterOrDigit(value[charIdx + 7])))
+                            {
+                                isHexColor = true;
+                            }
+                        }
+                        if (!isHexColor && charIdx + 3 < value.Length)
+                        {
+                            bool isHex3 = true;
+                            for (int k = 1; k <= 3; k++)
+                            {
+                                if (!char.IsAsciiHexDigit(value[charIdx + k]))
+                                {
+                                    isHex3 = false;
+                                    break;
+                                }
+                            }
+                            if (isHex3 && (charIdx + 4 == value.Length || !char.IsLetterOrDigit(value[charIdx + 4])))
+                            {
+                                isHexColor = true;
+                            }
+                        }
+
+                        bool isInsideUrl = false;
+                        int colonSlashIdx = value.AsSpan(0, charIdx).LastIndexOf("://", StringComparison.Ordinal);
+                        if (colonSlashIdx >= 0)
+                        {
+                            isInsideUrl = true;
+                            for (int k = colonSlashIdx + 3; k < charIdx; k++)
+                            {
+                                if (char.IsWhiteSpace(value[k]))
+                                {
+                                    isInsideUrl = false;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!isHexColor && !isInsideUrl)
+                        {
+                            commentIdx = charIdx;
+                            break;
+                        }
+                    }
+                }
+
+                if (commentIdx >= 0)
+                {
+                    value = value[..commentIdx].Trim();
+                }
+
+                // Strip outer quotes
+                if (value.Length >= 2 &&
+                    ((value[0] == '"' && value[^1] == '"') ||
+                     (value[0] == '\'' && value[^1] == '\'')))
+                {
+                    value = value[1..^1];
+                }
+
+                envVars.Add($"{key}={value}");
+            }
+
+            lock (EnvCacheLock)
+            {
+                EnvCache[envPath] = (envVars, currentWriteTime);
+                if (EnvCache.Count > 100)
+                {
+                    var keysToRemove = EnvCache.OrderBy(kvp => { return kvp.Value.lastWrite; }).Take(10).Select(kvp => { return kvp.Key; }).ToList();
+                    foreach (var k in keysToRemove)
+                    {
+                        EnvCache.Remove(k);
+                    }
+                }
+            }
+            return envVars.Count > 0 ? envVars : null;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            ContainerTelemetry.TrackError("DockerCommandBuilder", "ParseEnvFile failed", ex);
+        }
+
+        return null;
+    }
+
+    private static string ResolvePhysicalPath(string path)
+    {
+        try
+        {
+            if (!Path.IsPathRooted(path))
+            {
+                path = Path.GetFullPath(path);
+            }
+            if (Directory.Exists(path))
+            {
+                var di = new DirectoryInfo(path);
+                var target = di.ResolveLinkTarget(returnFinalTarget: true);
+                if (target != null)
+                {
+                    return target.FullName;
+                }
+            }
+            else if (File.Exists(path))
+            {
+                var fi = new FileInfo(path);
+                var target = fi.ResolveLinkTarget(returnFinalTarget: true);
+                if (target != null)
+                {
+                    return target.FullName;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Fallback to original path if resolving target fails
+        }
+        return path;
+    }
+
+    public static bool ShouldMapArgument(string arg)
+    {
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            return false;
+        }
+        var span = arg.AsSpan();
+        if (span.Contains("://".AsSpan(), StringComparison.Ordinal))
+        {
+            return false;
+        }
+        if (span.StartsWith("--workdir=".AsSpan(), StringComparison.Ordinal) || span.StartsWith("-P".AsSpan(), StringComparison.Ordinal))
+        {
+            return true;
+        }
+        if (Path.IsPathRooted(span) || span.ContainsAny('/', '\\'))
+        {
+            return true;
+        }
+        return false;
+    }
+
+    public static string MapPathToContainer(string path, string workingDirFull)
+    {
+        return MapPathToContainer(path, workingDirFull, GetCanonicalPath(workingDirFull));
+    }
+
+    public static string MapPathToContainer(string path, string workingDirFull, string workingDirCanonical)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return path;
+        }
+
+        try
+        {
+            var eqIdx = path.IndexOf('=');
+            if (eqIdx > 0)
+            {
+                var prefix = path[..(eqIdx + 1)];
+                var suffix = path[(eqIdx + 1)..];
+                if (!string.IsNullOrWhiteSpace(suffix) && (suffix.Contains('/') || suffix.Contains('\\') || Path.IsPathRooted(suffix) || prefix.Equals("--workdir=", StringComparison.Ordinal)))
+                {
+                    // Special case for GHDL work library path passed to --work=
+                    if (prefix.Equals("--work=", StringComparison.OrdinalIgnoreCase) || prefix.Equals("-work=", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var normalized = suffix.Replace('\\', '/');
+                        var libName = Path.GetFileName(normalized.TrimEnd('/'));
+                        if (string.IsNullOrWhiteSpace(libName))
+                        {
+                            libName = "work";
+                        }
+                        return prefix + libName;
+                    }
+
+                    var mappedSuffix = MapPathToContainerInternal(suffix, workingDirCanonical);
+                    return prefix + mappedSuffix;
+                }
+            }
+
+            if (path.StartsWith("-P", StringComparison.Ordinal) && path.Length > 2)
+            {
+                var suffix = path[2..];
+                if (!string.IsNullOrWhiteSpace(suffix))
+                {
+                    var mappedSuffix = MapPathToContainerInternal(suffix, workingDirCanonical);
+                    return "-P" + mappedSuffix;
+                }
+            }
+
+            return MapPathToContainerInternal(path, workingDirCanonical);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return $"{ContainerWorkDir}/invalid_escaped_path";
+        }
+    }
+
+    private static string GetCanonicalPath(string path)
+    {
+        try
+        {
+            var resolved = Path.GetFullPath(path);
+            var info = new System.IO.DirectoryInfo(resolved);
+            if (info.Exists)
+            {
+                var target = info.LinkTarget;
+                if (!string.IsNullOrEmpty(target))
+                {
+                    return info.ResolveLinkTarget(true)?.FullName ?? info.FullName;
+                }
+            }
+            var fileInfo = new System.IO.FileInfo(resolved);
+            if (fileInfo.Exists)
+            {
+                var target = fileInfo.LinkTarget;
+                if (!string.IsNullOrEmpty(target))
+                {
+                    return fileInfo.ResolveLinkTarget(true)?.FullName ?? fileInfo.FullName;
+                }
+            }
+            return resolved;
+        }
+        catch
+        {
+            return Path.GetFullPath(path);
+        }
+    }
+
+    private static string MapPathToContainerInternal(string path, string workingDirCanonical)
+    {
+        var resolvedWorkingDir = workingDirCanonical;
+        var workingDirNormalized = resolvedWorkingDir;
+        if (!workingDirNormalized.EndsWith(Path.DirectorySeparatorChar) && !workingDirNormalized.EndsWith(Path.AltDirectorySeparatorChar))
+        {
+            workingDirNormalized += Path.DirectorySeparatorChar;
+        }
+
+        var osComparison = (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()) ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+        if ((path.StartsWith(ContainerWorkDir + "/", StringComparison.Ordinal) || path.Equals(ContainerWorkDir, StringComparison.Ordinal))
+            && !path.StartsWith(workingDirNormalized, osComparison)
+            && !path.Equals(resolvedWorkingDir, osComparison))
+        {
+            return path;
+        }
+
+        var fullPath = GetCanonicalPath(Path.IsPathRooted(path) ? path : Path.Combine(resolvedWorkingDir, path));
+
+        if (fullPath.StartsWith(workingDirNormalized, osComparison))
+        {
+            var relativePath = fullPath[workingDirNormalized.Length..].Replace('\\', '/');
+            return $"{ContainerWorkDir}/{relativePath}";
+        }
+        if (fullPath.Equals(resolvedWorkingDir, osComparison))
+        {
+            return ContainerWorkDir;
+        }
+
+        // Prevent directory traversal outside workspace
+        if (Path.IsPathRooted(path) && !path.Contains("..") &&
+            (string.Equals(path, "/dev/null", StringComparison.Ordinal) ||
+             string.Equals(path, "/dev/zero", StringComparison.Ordinal) ||
+             string.Equals(path, "/dev/urandom", StringComparison.Ordinal) ||
+             path.StartsWith("/bin/", StringComparison.Ordinal) ||
+             path.StartsWith("/usr/bin/", StringComparison.Ordinal) ||
+             path.StartsWith("/lib/", StringComparison.Ordinal) ||
+             path.StartsWith("/lib64/", StringComparison.Ordinal)))
+        {
+            return path.Replace('\\', '/');
+        }
+        return $"{ContainerWorkDir}/invalid_escaped_path";
+    }
+
+    private static List<string> TokenizeExtraFlags(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return new List<string>(0);
+        var result = new List<string>(input.Length / 10 + 1);
+
+        var sb = new StringBuilder(input.Length);
+        bool inDoubleQuotes = false;
+        bool inSingleQuotes = false;
+        bool escaped = false;
+
+        for (int i = 0; i < input.Length; i++)
+        {
+            char c = input[i];
+            if (escaped)
+            {
+                sb.Append(c);
+                escaped = false;
+            }
+            else if (c == '\\')
+            {
+                if (i + 1 < input.Length)
+                {
+                    char next = input[i + 1];
+                    if (char.IsWhiteSpace(next) || next == '"' || next == '\'' || next == '\\')
+                    {
+                        escaped = true;
+                        continue;
+                    }
+                }
+                sb.Append(c);
+            }
+            else if (c == '"' && !inSingleQuotes)
+            {
+                inDoubleQuotes = !inDoubleQuotes;
+            }
+            else if (c == '\'' && !inDoubleQuotes)
+            {
+                inSingleQuotes = !inSingleQuotes;
+            }
+            else if (char.IsWhiteSpace(c) && !inDoubleQuotes && !inSingleQuotes)
+            {
+                if (sb.Length > 0)
+                {
+                    result.Add(sb.ToString());
+                    sb.Clear();
+                }
+            }
+            else
+            {
+                sb.Append(c);
+            }
+        }
+        if (sb.Length > 0)
+        {
+            result.Add(sb.ToString());
+        }
+        if (inDoubleQuotes || inSingleQuotes)
+        {
+            ContainerTelemetry.TrackError("DockerCommandBuilder", "Mismatched quotes detected in extra flags configuration.", null);
+        }
+        return result;
+    }
+
+    private static string NormalizeSeparators(string val)
+    {
+        if (string.IsNullOrEmpty(val)) return val;
+        var hasCr = val.Contains('\r');
+        var hasBackslash = val.Contains('\\');
+        if (!hasCr && !hasBackslash) return val;
+        var result = val;
+        if (hasCr) result = result.Replace("\r", "", StringComparison.Ordinal);
+        if (hasBackslash) result = result.Replace('\\', '/');
+        return result;
+    }
+
+    internal static string MapCommandScriptPaths(string script, string workingDirFull, string workingDirCanonical)
+    {
+        if (string.IsNullOrWhiteSpace(script)) return script;
+
+        var trimmedScript = script;
+        var leadingQuotes = new List<char>();
+        var trailingQuotes = new List<char>();
+
+        while (trimmedScript.Length >= 2)
+        {
+            if (trimmedScript.StartsWith('"') && trimmedScript.EndsWith('"'))
+            {
+                leadingQuotes.Add('"');
+                trailingQuotes.Add('"');
+                trimmedScript = trimmedScript[1..^1];
+            }
+            else if (trimmedScript.StartsWith('\'') && trimmedScript.EndsWith('\''))
+            {
+                leadingQuotes.Add('\'');
+                trailingQuotes.Add('\'');
+                trimmedScript = trimmedScript[1..^1];
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(trimmedScript)) return script;
+
+        var sb = new StringBuilder();
+        var span = trimmedScript.AsSpan();
+        int start = 0;
+        bool inDoubleQuotes = false;
+        bool inSingleQuotes = false;
+        bool escaped = false;
+
+        for (int idx = 0; idx < span.Length; idx++)
+        {
+            char c = span[idx];
+            if (escaped)
+            {
+                escaped = false;
+            }
+            else if (c == '\\')
+            {
+                escaped = true;
+            }
+            else if (c == '"' && !inSingleQuotes)
+            {
+                inDoubleQuotes = !inDoubleQuotes;
+            }
+            else if (c == '\'' && !inDoubleQuotes)
+            {
+                inSingleQuotes = !inSingleQuotes;
+            }
+            else if ((c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '=' || c == ';' || c == ',') && !inDoubleQuotes && !inSingleQuotes)
+            {
+                if (idx > start)
+                {
+                    var part = span[start..idx].ToString();
+                    sb.Append(MapSingleScriptSegment(part, workingDirFull, workingDirCanonical));
+                }
+                sb.Append(c);
+                start = idx + 1;
+            }
+        }
+        if (span.Length > start)
+        {
+            var part = span[start..].ToString();
+            sb.Append(MapSingleScriptSegment(part, workingDirFull, workingDirCanonical));
+        }
+
+        var result = sb.ToString();
+        if (leadingQuotes.Count > 0)
+        {
+            var finalSb = new StringBuilder(result.Length + leadingQuotes.Count * 2);
+            for (int i = 0; i < leadingQuotes.Count; i++)
+            {
+                finalSb.Append(leadingQuotes[i]);
+            }
+            finalSb.Append(result);
+            for (int i = trailingQuotes.Count - 1; i >= 0; i--)
+            {
+                finalSb.Append(trailingQuotes[i]);
+            }
+            return finalSb.ToString();
+        }
+        return result;
+    }
+
+    private static string MapSingleScriptSegment(string segment, string workingDirFull, string workingDirCanonical)
+    {
+        if (string.IsNullOrWhiteSpace(segment)) return segment;
+
+        var trimmed = segment.Trim('"', '\'', ';', ',');
+        if (ShouldMapArgument(trimmed))
+        {
+            var mapped = MapPathToContainer(trimmed, workingDirFull, workingDirCanonical);
+            var idx = segment.IndexOf(trimmed, StringComparison.Ordinal);
+            if (idx >= 0)
+            {
+                var prefix = segment[..idx];
+                var suffix = segment[(prefix.Length + trimmed.Length)..];
+                return prefix + mapped + suffix;
+            }
+        }
+        return segment;
+    }
 }

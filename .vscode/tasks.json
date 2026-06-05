@@ -19,7 +19,7 @@
             }
         },
         {
-            "label": "Build (Release/Defense-Ready)",
+            "label": "Build (Release)",
             "command": "dotnet",
             "type": "process",
             "args": [
@@ -47,6 +47,16 @@
                 "kind": "test",
                 "isDefault": true
             }
+        },
+        {
+            "label": "Security: Trivy Scan Dockerfile",
+            "command": "trivy",
+            "type": "process",
+            "args": [
+                "config",
+                "${workspaceFolder}/docker/oss-cad-suite/"
+            ],
+            "problemMatcher": []
         },
         {
             "label": "Clean",

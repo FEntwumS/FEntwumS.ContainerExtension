@@ -1,6 +1,5 @@
 # =============================================================================
-# Git Attributes — FEntwumS.ContainerExtension
-# Enforces consistent line endings and diff/merge strategies across platforms.
+# Git Attributes — Line Endings & Export Rules
 # =============================================================================
 
 # ── Default ──────────────────────────────────────────────────────────────────
@@ -28,11 +27,21 @@
 
 # ── Shell / Config ───────────────────────────────────────────────────────────
 *.sh        text eol=lf
-Dockerfile  text
+Dockerfile  text eol=lf
 .editorconfig text
 .gitignore  text
 .gitmodules text
-.env        text
+.env        text merge=ours
+
+# ── Security & Auditing ──────────────────────────────────────────────────────
+*.sarif     text
+*.spdx.json text
+
+# ── Export Ignores (Exclude from release zip) ────────────────────────────────
+.github/    export-ignore
+tests/      export-ignore
+docs/       export-ignore
+.gitignore  export-ignore
 
 # ── Binary / Media (never touch line endings) ────────────────────────────────
 *.png       binary
@@ -48,11 +57,12 @@ Dockerfile  text
 *.zip       binary
 *.gz        binary
 *.tar       binary
+*.pem       binary
+*.key       binary
 
 # ── GitHub Linguist Overrides ────────────────────────────────────────────────
-# Exclude submodules and generated docs from language statistics
-tests/benchmarking_suite/neorv32/**  linguist-vendored
-tests/benchmarking_suite/picorv32/** linguist-vendored
+tests/benchmarking_suite/neorv32/**          linguist-vendored
+tests/benchmarking_suite/picorv32/**         linguist-vendored
 docker/oss-cad-suite/oss-cad-suite-build/**  linguist-vendored
-**/api/**                      linguist-generated
-**/_site/**                    linguist-generated
+**/api/**                                    linguist-generated
+**/_site/**                                  linguist-generated

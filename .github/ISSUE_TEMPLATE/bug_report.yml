@@ -6,7 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to fill out this bug report! Please provide as much detail as possible to help us resolve the issue efficiently.
+        Thanks for taking the time to fill out this bug report! 
+        **Security Notice:** If this issue involves a security vulnerability (e.g., container escape, credential leakage, network exfiltration), please refer to our [SECURITY.md](../SECURITY.md) and report it privately.
   - type: textarea
     id: description
     attributes:
@@ -19,36 +20,28 @@ body:
     attributes:
       label: To Reproduce
       description: Steps to reproduce the behavior.
-      value: |
-        1. Go to '...'
-        2. Click on '....'
-        3. Scroll down to '....'
-        4. See error
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
       label: Expected behavior
-      description: A clear and concise description of what you expected to happen.
     validations:
       required: true
   - type: input
     id: os
     attributes:
-      label: OS
-      description: What operating system are you using?
-      placeholder: e.g. Windows 11, macOS ARM, Ubuntu 24.04
+      label: Host Environment
+      placeholder: e.g. Windows 11 23H2, macOS ARM Sonoma, Ubuntu 24.04 LTS
     validations:
       required: true
   - type: dropdown
     id: daemon
     attributes:
-      label: Docker Daemon
-      description: What container daemon are you using?
+      label: Container Engine
       options:
         - Docker Desktop
-        - Podman
+        - Podman (Rootless)
         - Colima
         - Rancher Desktop
         - OrbStack
@@ -58,12 +51,12 @@ body:
   - type: input
     id: version
     attributes:
-      label: OneWare Studio Version
-      placeholder: e.g. 1.2.0
+      label: OneWare Studio / Extension Version
+      placeholder: e.g. Studio 1.2.0 / Extension 1.0.0
     validations:
       required: true
   - type: textarea
     id: additional
     attributes:
-      label: Additional context
-      description: Add any other context about the problem, or logs, here.
+      label: Execution Telemetry & Security Context
+      description: Paste relevant `jsonl` logs or screenshots here. Ensure no sensitive tokens are included.
