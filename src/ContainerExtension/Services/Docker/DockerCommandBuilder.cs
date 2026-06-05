@@ -280,29 +280,42 @@ internal static class DockerCommandBuilder
 
             if (isGhdlMakeOrElabOrRun)
             {
-                bool hasWorkOption = false;
-                for (int j = 0; j < argsList.Count; j++)
+                var lastArg = argsList.LastOrDefault(arg => arg != null && !arg.StartsWith('-'));
+                if (lastArg != null)
                 {
-                    var arg = argsList[j];
-                    if (arg == null) continue;
-                    if (arg.Equals("--work", StringComparison.OrdinalIgnoreCase) || 
-                        arg.Equals("-work", StringComparison.OrdinalIgnoreCase) ||
-                        arg.StartsWith("--work=", StringComparison.OrdinalIgnoreCase) ||
-                        arg.StartsWith("-work=", StringComparison.OrdinalIgnoreCase))
+                    var unitName = Path.GetFileNameWithoutExtension(lastArg);
+                    var libraryName = FindLibraryForUnit(workingDirFull, unitName);
+                    if (!string.IsNullOrWhiteSpace(libraryName))
                     {
-                        hasWorkOption = true;
-                        break;
-                    }
-                }
+                        bool replaced = false;
+                        for (int j = 0; j < argsList.Count; j++)
+                        {
+                            var arg = argsList[j];
+                            if (arg == null) continue;
 
-                if (!hasWorkOption)
-                {
-                    var lastArg = argsList.LastOrDefault(arg => arg != null && !arg.StartsWith('-'));
-                    if (lastArg != null)
-                    {
-                        var unitName = Path.GetFileNameWithoutExtension(lastArg);
-                        var libraryName = FindLibraryForUnit(workingDirFull, unitName);
-                        if (!string.IsNullOrWhiteSpace(libraryName))
+                            if (arg.StartsWith("--work=", StringComparison.OrdinalIgnoreCase))
+                            {
+                                argsList[j] = $"--work={libraryName}";
+                                replaced = true;
+                                break;
+                            }
+                            else if (arg.StartsWith("-work=", StringComparison.OrdinalIgnoreCase))
+                            {
+                                argsList[j] = $"-work={libraryName}";
+                                replaced = true;
+                                break;
+                            }
+                            else if ((arg.Equals("--work", StringComparison.OrdinalIgnoreCase) || 
+                                      arg.Equals("-work", StringComparison.OrdinalIgnoreCase)) &&
+                                     j + 1 < argsList.Count)
+                            {
+                                argsList[j + 1] = libraryName;
+                                replaced = true;
+                                break;
+                            }
+                        }
+
+                        if (!replaced)
                         {
                             argsList.Insert(1, $"--work={libraryName}");
                         }
