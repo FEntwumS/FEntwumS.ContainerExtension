@@ -1016,6 +1016,31 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             }
         }
 
+        // If no candidate is active/live, see if any candidate file exists on disk
+        // We check in reverse order to prefer specific runtimes (orbstack, colima, podman) over generic defaults.
+        for (int i = candidates.Length - 1; i >= 0; i--)
+        {
+            var (path, name) = candidates[i];
+            if (File.Exists(path))
+            {
+                return (new Uri($"unix://{path}"), name);
+            }
+        }
+
+        // If files are deleted when offline, check if the parent directories exist (specific to user home)
+        for (int i = candidates.Length - 1; i >= 0; i--)
+        {
+            var (path, name) = candidates[i];
+            if (path.Contains(home, StringComparison.Ordinal))
+            {
+                var dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                {
+                    return (new Uri($"unix://{path}"), name);
+                }
+            }
+        }
+
         return (new Uri("unix:///var/run/docker.sock"), "docker (default)");
     }
 

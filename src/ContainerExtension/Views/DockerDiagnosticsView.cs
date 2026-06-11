@@ -767,6 +767,11 @@ public partial class DockerDiagnosticsView : UserControl
                 containers = await containersTask.ConfigureAwait(false);
                 images = await imagesTask.ConfigureAwait(false);
 
+                if (info == null)
+                {
+                    throw new DockerExecutionException("Docker/OrbStack daemon is unreachable.");
+                }
+
                 // Compute disk usage from the already-fetched image list (avoids duplicate API call)
                 var diskUsage = DockerExecutionStrategy.ComputeDiskUsage(images);
 
