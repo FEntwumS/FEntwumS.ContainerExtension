@@ -61,7 +61,7 @@ jobs:
           directory: ./publish
 
       - name: Generate SLSA Build Provenance
-        uses: actions/attest-build-provenance@520d128f165991a6c774bcb264f323e3d70747f4 # v1.4.3
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v1.4.3
         with:
           subject-path: ContainerExtension_${{steps.get-version.outputs.version}}_all.zip
 
