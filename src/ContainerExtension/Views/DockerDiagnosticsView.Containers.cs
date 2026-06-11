@@ -550,6 +550,7 @@ public partial class DockerDiagnosticsView
             {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "LogsCommand", ex);
                 _openLogWindows.TryRemove(logContainerId, out _);
+                ShowTemporaryError($"Failed to load logs for container '{GetContainerDisplayName(logContainerId)}'", ex);
             }
         });
 
@@ -577,9 +578,11 @@ public partial class DockerDiagnosticsView
 
             if (btn == null || panel == null) return;
 
+            var displayName = GetContainerDisplayName(containerId);
             var prevTip = ToolTip.GetTip(btn);
             try
             {
+                ShowTemporaryStatus($"Stopping container '{displayName}'...");
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     panel.IsEnabled = false;
@@ -593,10 +596,12 @@ public partial class DockerDiagnosticsView
 
                 await _strategy.StopContainerAsync(containerId);
                 await RefreshAllAsync();
+                ShowTemporaryStatus($"Container '{displayName}' stopped successfully.");
             }
             catch (Exception ex)
             {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Action_StopContainer", ex);
+                ShowTemporaryError($"Failed to stop container '{displayName}'", ex);
                 await Dispatcher.UIThread.InvokeAsync(async () =>
                 {
                     if (!_hasAttached) return;
@@ -635,9 +640,11 @@ public partial class DockerDiagnosticsView
 
             if (btn == null || panel == null) return;
 
+            var displayName = GetContainerDisplayName(containerId);
             var prevTip = ToolTip.GetTip(btn);
             try
             {
+                ShowTemporaryStatus($"Starting container '{displayName}'...");
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     panel.IsEnabled = false;
@@ -651,10 +658,12 @@ public partial class DockerDiagnosticsView
 
                 await _strategy.StartContainerAsync(containerId);
                 await RefreshAllAsync();
+                ShowTemporaryStatus($"Container '{displayName}' started successfully.");
             }
             catch (Exception ex)
             {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Action_StartContainer", ex);
+                ShowTemporaryError($"Failed to start container '{displayName}'", ex);
                 await Dispatcher.UIThread.InvokeAsync(async () =>
                 {
                     if (!_hasAttached) return;
@@ -693,9 +702,11 @@ public partial class DockerDiagnosticsView
 
             if (btn == null || panel == null) return;
 
+            var displayName = GetContainerDisplayName(containerId);
             var prevTip = ToolTip.GetTip(btn);
             try
             {
+                ShowTemporaryStatus($"Removing container '{displayName}'...");
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     panel.IsEnabled = false;
@@ -709,10 +720,12 @@ public partial class DockerDiagnosticsView
 
                 await _strategy.RemoveContainerAsync(containerId);
                 await RefreshAllAsync();
+                ShowTemporaryStatus($"Container '{displayName}' removed successfully.");
             }
             catch (Exception ex)
             {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Action_RemoveContainer", ex);
+                ShowTemporaryError($"Failed to remove container '{displayName}'", ex);
                 await Dispatcher.UIThread.InvokeAsync(async () =>
                 {
                     if (!_hasAttached) return;
@@ -731,17 +744,39 @@ public partial class DockerDiagnosticsView
         {
             if (string.IsNullOrEmpty(containerId)) return;
             if (IsDebounced($"restart_{containerId}", 1000)) return;
+            var displayName = GetContainerDisplayName(containerId);
             try
             {
+                ShowTemporaryStatus($"Restarting container '{displayName}'...");
                 await _strategy.Client.Containers.RestartContainerAsync(containerId, new ContainerRestartParameters { WaitBeforeKillSeconds = 5 });
                 await RefreshAllAsync();
+                ShowTemporaryStatus($"Container '{displayName}' restarted successfully.");
             }
             catch (Exception ex)
             {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Context_RestartContainer", ex);
+                ShowTemporaryError($"Failed to restart container '{displayName}'", ex);
             }
         });
     }
+
+    private string GetContainerDisplayName(string containerId)
+    {
+        lock (_cachedDataLock)
+        {
+            var c = _cachedContainers?.FirstOrDefault(x => string.Equals(x.ID, containerId, StringComparison.Ordinal));
+            if (c != null)
+            {
+                var name = c.Names?.FirstOrDefault()?.TrimStart('/');
+                if (!string.IsNullOrEmpty(name))
+                {
+                    return $"{name} ({containerId.ShortId()})";
+                }
+            }
+        }
+        return containerId.ShortId() ?? containerId;
+    }
+
 
     // -- Debouncer and Stats Cache State (F14, F15) ----------------------
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _lastActionTimes = new(StringComparer.Ordinal);
