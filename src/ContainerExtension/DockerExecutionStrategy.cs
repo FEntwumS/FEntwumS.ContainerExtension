@@ -888,6 +888,10 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             }
             return false;
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (UnauthorizedAccessException ex)
         {
             errorMessage = $"Access Denied: Current user does not have permission to write to socket '{path}'. {ex.Message}";
@@ -917,9 +921,9 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 {
                     fullPath = Path.GetFullPath(hostPath);
                 }
-                catch
+                catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
-                    fullPath = hostPath;
+                    throw new DockerExecutionException($"Invalid mount path: '{hostPath}'. Details: {ex.Message}", ex);
                 }
 
                 string[] blockedPaths;
@@ -1742,7 +1746,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
 
         if (imageDigest != null)
         {
-            var shortDigest = imageDigest.Length > 19 ? imageDigest.Substring(7, 12) : imageDigest;
+            var shortDigest = imageDigest.ShortId();
             SdkLog(command, $"[Docker SDK] Resolved digest: {shortDigest}...");
         }
 

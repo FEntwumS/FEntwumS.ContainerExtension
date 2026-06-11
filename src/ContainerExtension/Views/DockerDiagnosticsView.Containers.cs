@@ -163,11 +163,7 @@ public partial class DockerDiagnosticsView
                         {
                             if (!string.IsNullOrEmpty(il))
                             {
-                                var esc = System.Security.SecurityElement.Escape(il);
-                                if (esc != null)
-                                {
-                                    logLines.Add(esc);
-                                }
+                                logLines.Add(il);
                             }
                         }
                     }
@@ -447,8 +443,7 @@ public partial class DockerDiagnosticsView
                             await foreach (var logLine in _strategy.StreamContainerLogsAsync(logContainerId, cts.Token).ConfigureAwait(false))
                             {
                                 var alignedLine = AlignLogTimestamp(logLine);
-                                var escapedLine = System.Security.SecurityElement.Escape(alignedLine);
-                                batch.Add(escapedLine ?? string.Empty);
+                                batch.Add(alignedLine ?? string.Empty);
 
                                 if (batch.Count >= 50 || (Environment.TickCount64 - lastBatchTime) > 100)
                                 {

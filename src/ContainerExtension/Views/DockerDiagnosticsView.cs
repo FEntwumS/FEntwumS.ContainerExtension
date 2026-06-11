@@ -597,6 +597,12 @@ public partial class DockerDiagnosticsView : UserControl
                 return;
             }
 
+            if (Volatile.Read(ref _isRefreshingFlag) == 1)
+            {
+                _countdownText.Text = "Refreshing...";
+                return;
+            }
+
             _secondsUntilRefresh--;
             if (_secondsUntilRefresh <= 0)
             {
@@ -604,8 +610,7 @@ public partial class DockerDiagnosticsView : UserControl
                 _countdownText.Text = "Refreshing...";
                 _ = RefreshAllSafeAsync();
             }
-
-            if (_refreshCts != null && !_refreshCts.IsCancellationRequested)
+            else if (_refreshCts != null && !_refreshCts.IsCancellationRequested)
             {
                 _countdownText.Text = $"| next in {_secondsUntilRefresh}s";
             }

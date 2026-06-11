@@ -77,6 +77,7 @@ public static partial class ContainerTelemetry
         _cachedLineCount = -1;
         _cachedErrorLineCount = -1;
         Volatile.Write(ref _cachedStats, null);
+        Volatile.Write(ref _telemetryDirVerified, false);
     }
 
     private sealed class CachedStats(
@@ -103,6 +104,8 @@ public static partial class ContainerTelemetry
     private static int _cachedErrorLineCount = -1;
     private static CachedStats? _cachedStats;
     private static int _isShutdown = 0;
+    private static bool _telemetryDirVerified;
+    private static readonly System.Threading.Lock VerificationLock = new();
 
     private static readonly ReaderWriterLockSlim RwLock = new();
     private static Lazy<Mutex?> ProcessMutexLazy = new(CreateProcessMutex, LazyThreadSafetyMode.ExecutionAndPublication);
@@ -210,108 +213,122 @@ public static partial class ContainerTelemetry
 
     private static void EnsureDirectoryAndFileSecure(string dir, string filepath)
     {
-        var resolvedDir = Path.GetFullPath(dir);
-        var resolvedFile = Path.GetFullPath(filepath);
-
-        var rootDir = Path.GetPathRoot(resolvedDir);
-        if (string.Equals(resolvedDir, rootDir, StringComparison.OrdinalIgnoreCase))
+        if (Volatile.Read(ref _telemetryDirVerified))
         {
-            throw new ArgumentException("Root directory path is strictly prohibited for telemetry configurations.", nameof(dir));
+            return;
         }
 
-        if (!IsTestEnvironment)
+        lock (VerificationLock)
         {
-            bool isTempFallback = IsSubpath(resolvedDir, CachedResolvedTempBase);
-
-            if (!isTempFallback)
-            {
-                if (!IsSubpath(resolvedDir, CachedResolvedBaseDir))
-                {
-                    throw new ArgumentException("Telemetry directory must resolve to a subpath of the user profile .oneware directory.", nameof(dir));
-                }
-                if (!IsSubpath(resolvedFile, CachedResolvedBaseDir))
-                {
-                    throw new ArgumentException("Telemetry file path must resolve to a subpath of the user profile .oneware directory.", nameof(filepath));
-                }
-            }
-        }
-
-        try
-        {
-            Directory.CreateDirectory(resolvedDir);
-            var probePath = Path.Combine(resolvedDir, ".write_probe_" + Guid.NewGuid().ToString("N"));
-            File.WriteAllText(probePath, "probe");
-            File.Delete(probePath);
-        }
-        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-        {
-            var fallbackDir = Path.Combine(Path.GetTempPath(), "OneWare", "ContainerExtension");
-            try
-            {
-                Directory.CreateDirectory(fallbackDir);
-                _telemetryDir = fallbackDir;
-                _telemetryPath = Path.Combine(_telemetryDir, "container_telemetry.jsonl");
-                _errorTelemetryPath = Path.Combine(_telemetryDir, "container_errors.jsonl");
-                resolvedDir = _telemetryDir;
-                resolvedFile = string.Equals(filepath, _errorTelemetryPath, StringComparison.Ordinal) ? _errorTelemetryPath : _telemetryPath;
-                Directory.CreateDirectory(resolvedDir);
-            }
-            catch
+            if (_telemetryDirVerified)
             {
                 return;
             }
-        }
 
-        try
-        {
-            if (!OperatingSystem.IsWindows())
+            var resolvedDir = Path.GetFullPath(dir);
+            var resolvedFile = Path.GetFullPath(filepath);
+
+            var rootDir = Path.GetPathRoot(resolvedDir);
+            if (string.Equals(resolvedDir, rootDir, StringComparison.OrdinalIgnoreCase))
             {
+                throw new ArgumentException("Root directory path is strictly prohibited for telemetry configurations.", nameof(dir));
+            }
+
+            if (!IsTestEnvironment)
+            {
+                bool isTempFallback = IsSubpath(resolvedDir, CachedResolvedTempBase);
+
+                if (!isTempFallback)
+                {
+                    if (!IsSubpath(resolvedDir, CachedResolvedBaseDir))
+                    {
+                        throw new ArgumentException("Telemetry directory must resolve to a subpath of the user profile .oneware directory.", nameof(dir));
+                    }
+                    if (!IsSubpath(resolvedFile, CachedResolvedBaseDir))
+                    {
+                        throw new ArgumentException("Telemetry file path must resolve to a subpath of the user profile .oneware directory.", nameof(filepath));
+                    }
+                }
+            }
+
+            try
+            {
+                Directory.CreateDirectory(resolvedDir);
+                var probePath = Path.Combine(resolvedDir, ".write_probe_" + Guid.NewGuid().ToString("N"));
+                File.WriteAllText(probePath, "probe");
+                File.Delete(probePath);
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                var fallbackDir = Path.Combine(Path.GetTempPath(), "OneWare", "ContainerExtension");
                 try
                 {
-                    File.SetUnixFileMode(resolvedDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                    Directory.CreateDirectory(fallbackDir);
+                    _telemetryDir = fallbackDir;
+                    _telemetryPath = Path.Combine(_telemetryDir, "container_telemetry.jsonl");
+                    _errorTelemetryPath = Path.Combine(_telemetryDir, "container_errors.jsonl");
+                    resolvedDir = _telemetryDir;
+                    resolvedFile = string.Equals(filepath, _errorTelemetryPath, StringComparison.Ordinal) ? _errorTelemetryPath : _telemetryPath;
+                    Directory.CreateDirectory(resolvedDir);
                 }
-                catch (UnauthorizedAccessException)
+                catch
                 {
-                    // Best-effort
-                }
-                if (File.Exists(resolvedFile))
-                {
-                    try
-                    {
-                        File.SetUnixFileMode(resolvedFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-                    }
-                    catch (UnauthorizedAccessException)
-                    {
-                        // Best-effort
-                    }
+                    return;
                 }
             }
-            else
+
+            try
             {
-                if (File.Exists(resolvedFile))
+                if (!OperatingSystem.IsWindows())
                 {
                     try
                     {
-                        File.Encrypt(resolvedFile);
+                        File.SetUnixFileMode(resolvedDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
                     }
                     catch (UnauthorizedAccessException)
                     {
                         // Best-effort
                     }
-                    catch
+                    if (File.Exists(resolvedFile))
                     {
-                        // Best-effort encryption on Windows
+                        try
+                        {
+                            File.SetUnixFileMode(resolvedFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                        }
+                        catch (UnauthorizedAccessException)
+                        {
+                            // Best-effort
+                        }
                     }
                 }
+                else
+                {
+                    if (File.Exists(resolvedFile))
+                    {
+                        try
+                        {
+                            File.Encrypt(resolvedFile);
+                        }
+                        catch (UnauthorizedAccessException)
+                        {
+                            // Best-effort
+                        }
+                        catch
+                        {
+                            // Best-effort encryption on Windows
+                        }
+                    }
+                }
+                Volatile.Write(ref _telemetryDirVerified, true);
             }
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // Best-effort
-        }
-        catch (Exception)
-        {
-            // Best-effort directory and file permission enforcement
+            catch (UnauthorizedAccessException)
+            {
+                // Best-effort
+            }
+            catch (Exception)
+            {
+                // Best-effort directory and file permission enforcement
+            }
         }
     }
 
