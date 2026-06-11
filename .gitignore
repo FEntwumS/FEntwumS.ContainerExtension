@@ -71,8 +71,9 @@ StrykerOutput/
 
 # -- DocFX (Generated Documentation) ------------------------------------------
 _site/
-api/*.yml
-api/.manifest
+docs/api/*.yml
+docs/api/.manifest
+docs/api/toc.yml
 
 # -- Python & Benchmarking ----------------------------------------------------
 __pycache__/

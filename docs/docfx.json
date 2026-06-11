@@ -4,9 +4,9 @@
             "src": [
                 {
                     "files": [
-                        "../src/ContainerExtension/ContainerExtension.csproj"
+                        "ContainerExtension.csproj"
                     ],
-                    "src": "."
+                    "src": "../src/ContainerExtension"
                 }
             ],
             "dest": "api",
