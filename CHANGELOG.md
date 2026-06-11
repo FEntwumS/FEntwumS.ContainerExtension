@@ -4,6 +4,16 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-06-12
+
+### Added
+- **Temporary Status Banner Integration**: Integrated start, stop, restart, remove, and logs loading states for containers directly into the dashboard temporary status banner.
+- **Docker Daemon Connection Notifications**: Tracks and displays notification banners when the daemon goes offline or comes back online, with change-detection guardrails to prevent spam.
+
+### Fixed
+- **Container Extension Correctness (10 Bugs)**: Resolved infinite loop at EOF in telemetry, thread-safety deadlocks in file owner queries, indefinite caching of faulted connection state, regex credentials leakage scrubbing, restored ViewModels DI service location fallback, and unobserved log-streaming exceptions.
+- **Offline Startup & Socket Probing**: Throws correct exceptions when the daemon is offline on load to activate the dashboard offline state. Probes candidates in reverse order and prefers matching existing user-space socket directories (e.g. OrbStack or Colima) over `/var/run/docker.sock` to enable seamless reconnection after starting a closed daemon.
+
 ## [1.0.1] - 2026-06-12
 
 ### Added
