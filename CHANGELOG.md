@@ -4,6 +4,13 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-06-12
+
+### Added
+- **Workflow & Dependabot Bumps**: Upgraded GitHub action runners to Ubuntu 26.04 and bumped all action versions (checkout@v6, setup-dotnet@v5, cache@v5, codeql@v4, release-action@v1.21.0) to their latest secure major releases.
+- **Dependency Upgrades**: Upgraded core .NET dependencies including `Microsoft.Extensions.DependencyInjection` (to `10.0.9`), `System.IO.Pipelines` (to `10.0.9`), and code quality analyzers (`SonarAnalyzer.CSharp` to `10.27`, `Meziantou.Analyzer` to `3.0`, `Microsoft.CodeAnalysis.NetAnalyzers` to `10.0`).
+- **DocFX API Documentation**: Resolved DocFX relative project path mapping warnings, added API index landing page, and cleared all documentation compilation warnings.
+
 ## [1.0.0] - 2026-06-12
 
 ### Added
