@@ -13,6 +13,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.Input;
 using OneWare.Essentials.Services;
+using OneWare.Essentials.Models;
 using Avalonia.Threading;
 using Avalonia.Automation;
 using Avalonia.Platform.Storage;
@@ -51,6 +52,10 @@ public partial class DockerDiagnosticsView : UserControl
     private readonly WrapPanel _quickActionsRow;
     private readonly ISettingsService _settingsService;
     private readonly TextBox _searchBox;
+    private readonly IServiceProvider _serviceProvider;
+    private string? _temporaryStatus;
+    private readonly Border _statusBanner;
+    private readonly TextBlock _statusBannerText;
 
     // Tracks open container log windows to prevent duplicate spawning
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Window> _openLogWindows = new(StringComparer.Ordinal);
@@ -96,6 +101,7 @@ public partial class DockerDiagnosticsView : UserControl
     public DockerDiagnosticsView(IServiceProvider serviceProvider, DockerExecutionStrategy strategy)
     {
         _strategy = strategy;
+        _serviceProvider = serviceProvider;
         _terminalService = serviceProvider.Resolve<ITerminalManagerService>();
         InitializeContainerCommands();
 
@@ -268,6 +274,44 @@ public partial class DockerDiagnosticsView : UserControl
         _toolchainContent.Children.Add(CreateLoadingText("Loading available versions..."));
         var toolchainSection = CreateCard("Toolchain Environment", _toolchainContent);
 
+        _statusBannerText = new TextBlock
+        {
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = FontColor
+        };
+
+        var closeBannerBtn = new Button
+        {
+            Content = "×",
+            Padding = new Thickness(6, 2),
+            Background = null,
+            BorderBrush = null,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        var bannerGrid = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,Auto")
+        };
+        Grid.SetColumn(_statusBannerText, 0);
+        Grid.SetColumn(closeBannerBtn, 1);
+        bannerGrid.Children.Add(_statusBannerText);
+        bannerGrid.Children.Add(closeBannerBtn);
+
+        _statusBanner = new Border
+        {
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(12, 8),
+            IsVisible = false,
+            Child = bannerGrid,
+            Margin = new Thickness(0, 4, 0, 4)
+        };
+
+        closeBannerBtn.Command = new RelayCommand(() => _statusBanner.IsVisible = false);
+
         // -- Layout ------------------------------------------------------
         var mainPanel = new StackPanel
         {
@@ -276,6 +320,7 @@ public partial class DockerDiagnosticsView : UserControl
             Children =
             {
                 header,
+                _statusBanner,
                 _searchBox,
                 _quickActionsRow,
                 statusSection,
@@ -1215,23 +1260,41 @@ public partial class DockerDiagnosticsView : UserControl
         SetOfflineContent(_imagesContent);
     }
 
-    private void ShowTemporaryError(string titlePrefix, Exception ex)
+    private void ShowTemporaryStatus(string message, bool isError = false)
     {
-        var msg = $"{titlePrefix}: {ex.Message}";
-        Dispatcher.UIThread.Post(() => _headerTitle.Text = msg);
+        Dispatcher.UIThread.Post(() =>
+        {
+            _statusBannerText.Text = message;
+            _statusBanner.Background = isError
+                ? new SolidColorBrush(Color.FromArgb(30, 244, 67, 54))  // Subtle red for error
+                : new SolidColorBrush(Color.FromArgb(30, 36, 150, 237)); // Subtle blue for info
+            _statusBanner.BorderBrush = isError
+                ? new SolidColorBrush(Color.FromArgb(80, 244, 67, 54))
+                : new SolidColorBrush(Color.FromArgb(80, 36, 150, 237));
+            _statusBanner.IsVisible = true;
+            _temporaryStatus = message;
+        });
 
         var weakSelf = new WeakReference<DockerDiagnosticsView>(this);
-        _ = System.Threading.Tasks.Task.Delay(5000).ContinueWith(_ =>
+        _ = System.Threading.Tasks.Task.Delay(6000).ContinueWith(_ =>
         {
             if (weakSelf.TryGetTarget(out var self))
             {
                 Dispatcher.UIThread.Post(() =>
                 {
-                    if (self._headerTitle.Text != null && self._headerTitle.Text.StartsWith(titlePrefix, System.StringComparison.Ordinal))
-                        self.UpdateHeaderBadge(self._cachedContainers.Count);
+                    if (self._temporaryStatus == message)
+                    {
+                        self._temporaryStatus = null;
+                        self._statusBanner.IsVisible = false;
+                    }
                 });
             }
         }, System.Threading.Tasks.TaskScheduler.Default);
+    }
+
+    private void ShowTemporaryError(string titlePrefix, Exception ex)
+    {
+        ShowTemporaryStatus($"{titlePrefix}: {ex.Message}", isError: true);
     }
 
     private WrapPanel BuildQuickActionsRow()
@@ -1365,6 +1428,73 @@ public partial class DockerDiagnosticsView : UserControl
                 ShowTemporaryError("⚠️ Copy failed", ex);
             }
         }, "Copy an equivalent 'docker run' command to the clipboard for manual debugging"));
+
+        actionsRow.Children.Add(CreateActionButton("All to Docker", async () =>
+        {
+            try
+            {
+                var toolService = _serviceProvider.Resolve<IToolService>();
+                if (toolService == null) throw new InvalidOperationException("IToolService is not registered.");
+
+                var allTools = toolService.GetAllTools();
+                var strategyKey = _strategy.GetStrategyKey();
+                int updatedCount = 0;
+
+                foreach (var tool in allTools)
+                {
+                    if (_settingsService.HasSetting(tool.Key) &&
+                        _settingsService.GetSetting(tool.Key) is ComboBoxSetting comboSetting &&
+                        comboSetting.Options.Any(opt => opt is string str && string.Equals(str, strategyKey, StringComparison.Ordinal)))
+                    {
+                        _settingsService.SetSettingValue(tool.Key, strategyKey);
+                        updatedCount++;
+                    }
+                }
+
+                ShowTemporaryStatus($"{ContainerExtensionModule.DashboardTitle} — Configured {updatedCount} tools to Docker");
+                _ = RefreshAllAsync();
+            }
+            catch (Exception ex)
+            {
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_AllToDocker", ex);
+                ShowTemporaryError("⚠️ Action failed", ex);
+            }
+        }, "Switch the execution strategy of all supported FPGA tools to Docker"));
+
+        actionsRow.Children.Add(CreateActionButton("All to Native", async () =>
+        {
+            try
+            {
+                var toolService = _serviceProvider.Resolve<IToolService>();
+                if (toolService == null) throw new InvalidOperationException("IToolService is not registered.");
+
+                var allTools = toolService.GetAllTools();
+                var strategyKey = _strategy.GetStrategyKey();
+                int updatedCount = 0;
+
+                foreach (var tool in allTools)
+                {
+                    if (_settingsService.HasSetting(tool.Key) &&
+                        _settingsService.GetSetting(tool.Key) is ComboBoxSetting comboSetting)
+                    {
+                        var defaultOption = comboSetting.Options.FirstOrDefault(opt => opt is string str && !string.Equals(str, strategyKey, StringComparison.Ordinal)) as string;
+                        if (defaultOption != null)
+                        {
+                            _settingsService.SetSettingValue(tool.Key, defaultOption);
+                            updatedCount++;
+                        }
+                    }
+                }
+
+                ShowTemporaryStatus($"{ContainerExtensionModule.DashboardTitle} — Reset {updatedCount} tools to Native");
+                _ = RefreshAllAsync();
+            }
+            catch (Exception ex)
+            {
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_AllToNative", ex);
+                ShowTemporaryError("⚠️ Action failed", ex);
+            }
+        }, "Reset the execution strategy of all tools to their default native execution"));
 
         return actionsRow;
     }
