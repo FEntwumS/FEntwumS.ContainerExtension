@@ -2,10 +2,10 @@
 # Git Attributes — Line Endings & Export Rules
 # =============================================================================
 
-# ── Default ──────────────────────────────────────────────────────────────────
+# -- Default ------------------------------------------------------------------
 * text=auto eol=lf
 
-# ── Source Code ──────────────────────────────────────────────────────────────
+# -- Source Code --------------------------------------------------------------
 *.cs        text diff=csharp
 *.py        text diff=python
 *.xml       text
@@ -18,32 +18,33 @@
 *.css       text
 *.html      text diff=html
 
-# ── .NET Project Files ───────────────────────────────────────────────────────
-*.csproj    text
-*.slnx      text
-*.props     text
-*.targets   text
-*.sln       text
+# -- .NET Project Files -------------------------------------------------------
+*.csproj    text eol=lf
+*.slnx      text eol=lf
+*.props     text eol=lf
+*.targets   text eol=lf
+*.sln       text eol=lf
 
-# ── Shell / Config ───────────────────────────────────────────────────────────
+# -- Shell / Config -----------------------------------------------------------
 *.sh        text eol=lf
 Dockerfile  text eol=lf
-.editorconfig text
-.gitignore  text
-.gitmodules text
-.env        text merge=ours
+.editorconfig text eol=lf
+.dockerignore text eol=lf
+.gitignore  text eol=lf
+.gitmodules text eol=lf
+.env        text merge=ours eol=lf
 
-# ── Security & Auditing ──────────────────────────────────────────────────────
+# -- Security & Auditing ------------------------------------------------------
 *.sarif     text
 *.spdx.json text
 
-# ── Export Ignores (Exclude from release zip) ────────────────────────────────
+# -- Export Ignores (Exclude from release zip) --------------------------------
 .github/    export-ignore
 tests/      export-ignore
 docs/       export-ignore
 .gitignore  export-ignore
 
-# ── Binary / Media (never touch line endings) ────────────────────────────────
+# -- Binary / Media (never touch line endings) --------------------------------
 *.png       binary
 *.jpg       binary
 *.jpeg      binary
@@ -60,7 +61,7 @@ docs/       export-ignore
 *.pem       binary
 *.key       binary
 
-# ── GitHub Linguist Overrides ────────────────────────────────────────────────
+# -- GitHub Linguist Overrides ------------------------------------------------
 tests/benchmarking_suite/neorv32/**          linguist-vendored
 tests/benchmarking_suite/picorv32/**         linguist-vendored
 docker/oss-cad-suite/oss-cad-suite-build/**  linguist-vendored

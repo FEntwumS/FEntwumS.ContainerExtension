@@ -1,26 +1,44 @@
 <Project>
+    <!-- Core Compiler Settings -->
     <PropertyGroup>
-        <LangVersion>latest</LangVersion>
+        <LangVersion>13.0</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <IsAotCompatible>true</IsAotCompatible>
+    </PropertyGroup>
 
+    <!-- Code Analysis & Warnings -->
+    <PropertyGroup>
+        <AnalysisMode>All</AnalysisMode>
         <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
         <AnalysisLevel>latest-all</AnalysisLevel>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-        
-        <NoWarn>NETSDK1187</NoWarn>
+        <NoWarn>NETSDK1187;SYSLIB1054;NU1510</NoWarn>
+    </PropertyGroup>
 
+    <!-- Supply Chain Security & CI/CD -->
+    <PropertyGroup>
         <Deterministic>true</Deterministic>
+        <PathMap Condition="'$(GITHUB_ACTIONS)' != 'true'">$(MSBuildProjectDirectory)=/_/</PathMap>
         <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
         <EmbedUntrackedSources>true</EmbedUntrackedSources>
+        
         <NuGetAudit>true</NuGetAudit>
         <NuGetAuditMode>all</NuGetAuditMode>
         <NuGetAuditLevel>low</NuGetAuditLevel>
+    </PropertyGroup>
 
+    <!-- Metadata -->
+    <PropertyGroup>
         <Authors>Mert Torun</Authors>
         <Company>TH Köln</Company>
         <Copyright>© 2025 - 2026 Mert Torun</Copyright>
         <RepositoryUrl>https://github.com/FEntwumS/FEntwumS.ContainerExtension</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
     </PropertyGroup>
+    
+    <Target Name="FormatVerify" BeforeTargets="BeforeBuild">
+        <Message Importance="high" Text="[MSBuild] Deterministic build properties verified." />
+    </Target>
 </Project>

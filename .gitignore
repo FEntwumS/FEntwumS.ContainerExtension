@@ -2,7 +2,7 @@
 # .gitignore — ContainerExtension
 # =============================================================================
 
-# ── Security & Credentials ──────────────────────────────────────────────────────
+# -- Security & Credentials ------------------------------------------------------
 *.pem
 *.key
 *.cer
@@ -15,13 +15,13 @@ secrets.json
 !.env.example
 docker_auth.json
 
-# ── OS Artifacts ─────────────────────────────────────────────────────────────
+# -- OS Artifacts -------------------------------------------------------------
 .DS_Store
 Thumbs.db
 Desktop.ini
 *~
 
-# ── IDEs & Editors ───────────────────────────────────────────────────────────
+# -- IDEs & Editors -----------------------------------------------------------
 .idea/
 .vscode/*
 !.vscode/settings.json
@@ -37,7 +37,7 @@ riderModule.iml
 /_ReSharper.Caches/
 .gemini/
 
-# ── .NET Build & Tooling ─────────────────────────────────────────────────────
+# -- .NET Build & Tooling -----------------------------------------------------
 bin/
 obj/
 publish/
@@ -60,19 +60,21 @@ project.assets.json
 .tmp/
 Library/
 
-# ── Quality & Security Scans ────────────────────────────────────────────────────
+# -- Quality & Security Scans ----------------------------------------------------
 *.sarif
 TestResults/
 coverage/
 trivy-results.json
 sbom.spdx.json
+StrykerOutput/
 
-# ── DocFX (Generated Documentation) ──────────────────────────────────────────
+
+# -- DocFX (Generated Documentation) ------------------------------------------
 _site/
 api/*.yml
 api/.manifest
 
-# ── Python & Benchmarking ────────────────────────────────────────────────────
+# -- Python & Benchmarking ----------------------------------------------------
 __pycache__/
 *.py[cod]
 .venv/
@@ -81,10 +83,19 @@ harness_bin/
 *_verification*.txt
 final_*.txt
 
-# ── Logs & Debugging ─────────────────────────────────────────────────────────
+# -- Logs & Debugging ---------------------------------------------------------
 full_source_bundle.md
 *.log
 
-# ── Local Headless Testing ───────────────────────────────────────────────────
+# -- Local Headless Testing ---------------------------------------------------
 local_test*.sh
-local_tests/
+
+# -- Avalonia UI Previewer & Caches --------------------------------------------
+.avalonia/
+preview/
+*.preview.html
+.avalonia-preview/
+artifacts/preview/
+*.designer.cs
+*.ide/
+

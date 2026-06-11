@@ -8,17 +8,31 @@ using Docker.DotNet.Models;
 
 namespace ContainerExtension.Services.Docker;
 
+/// <summary>
+/// Handles container queries, process metrics, and lifecycle commands (start, stop, remove, restart).
+/// Implements caching mechanisms to prevent UI-triggered SDK flooding.
+/// </summary>
 public sealed class DockerContainerManager
 {
+    private static readonly System.Diagnostics.ActivitySource ContainerActivitySource = new("OneWare.ContainerExtension.Container");
     private static readonly System.Buffers.SearchValues<char> InvalidContainerNameChars =
         System.Buffers.SearchValues.Create(";&|`$\0\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\v\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f\u007f");
 
     private readonly DockerClient _client;
     private readonly SemaphoreSlim _listSemaphore = new(1, 1);
-    
+
     private IList<ContainerListResponse>? _cachedContainers;
     private long _containersCacheExpiration;
     private readonly System.Threading.Lock _containersCacheLock = new();
+
+    private void InvalidateCache()
+    {
+        lock (_containersCacheLock)
+        {
+            _cachedContainers = null;
+            _containersCacheExpiration = 0;
+        }
+    }
 
     private sealed class ContainerLock
     {
@@ -48,6 +62,7 @@ public sealed class DockerContainerManager
 
     public async Task<IList<ContainerListResponse>> ListContainersAsync(CancellationToken ct = default)
     {
+        using var activity = ContainerActivitySource.StartActivity("DockerContainerManager.ListContainers");
         lock (_containersCacheLock)
         {
             if (_cachedContainers != null && Environment.TickCount64 < _containersCacheExpiration)
@@ -76,6 +91,10 @@ public sealed class DockerContainerManager
                 _containersCacheExpiration = Environment.TickCount64 + 500;
             }
             return containers;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -149,6 +168,10 @@ public sealed class DockerContainerManager
         {
             // Already stopped or not found, consider success
         }
+        finally
+        {
+            InvalidateCache();
+        }
     }
 
     public async Task StartContainerAsync(string containerId, CancellationToken ct = default)
@@ -166,9 +189,11 @@ public sealed class DockerContainerManager
             containerLock.RefCount++;
         }
 
+        bool acquired = false;
         try
         {
             await containerLock.Semaphore.WaitAsync(ct).ConfigureAwait(false);
+            acquired = true;
             try
             {
                 await _client.Containers.StartContainerAsync(
@@ -185,7 +210,10 @@ public sealed class DockerContainerManager
         }
         finally
         {
-            containerLock.Semaphore.Release();
+            if (acquired)
+            {
+                containerLock.Semaphore.Release();
+            }
             lock (_semaphoresLock)
             {
                 containerLock.RefCount--;
@@ -194,6 +222,7 @@ public sealed class DockerContainerManager
                     removed.Semaphore.Dispose();
                 }
             }
+            InvalidateCache();
         }
     }
 
@@ -212,6 +241,10 @@ public sealed class DockerContainerManager
         catch (DockerApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
             // Already removed, consider success
+        }
+        finally
+        {
+            InvalidateCache();
         }
     }
 
@@ -273,8 +306,8 @@ public sealed class DockerContainerManager
         }
         finally
         {
-            System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
-            System.Buffers.ArrayPool<char>.Shared.Return(charBuf);
+            System.Buffers.ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+            System.Buffers.ArrayPool<char>.Shared.Return(charBuf, clearArray: true);
         }
     }
 
@@ -399,8 +432,8 @@ public sealed class DockerContainerManager
         }
         finally
         {
-            System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
-            System.Buffers.ArrayPool<char>.Shared.Return(charBuf);
+            System.Buffers.ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+            System.Buffers.ArrayPool<char>.Shared.Return(charBuf, clearArray: true);
             if (acquired)
             {
                 containerLock.Semaphore.Release();

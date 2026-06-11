@@ -42,12 +42,19 @@ internal static class SettingsExtensions
         {
             return id;
         }
-        var cleanId = id.Trim();
-        if (cleanId.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+        var span = id.AsSpan().Trim();
+        bool changed = span.Length != id.Length;
+        if (span.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
         {
-            cleanId = cleanId.Substring(7);
+            span = span.Slice(7);
+            changed = true;
         }
-        return cleanId.Length > 12 ? cleanId[..12] : cleanId;
+        if (span.Length > 12)
+        {
+            span = span.Slice(0, 12);
+            changed = true;
+        }
+        return changed ? span.ToString() : id;
     }
 }
 

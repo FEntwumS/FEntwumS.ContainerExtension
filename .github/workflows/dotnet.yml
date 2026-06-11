@@ -19,29 +19,30 @@ jobs:
   build-test-scan:
     runs-on: ubuntu-latest
     name: Build, Test & Scan
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       with:
         submodules: recursive
         fetch-depth: 0
 
     - name: Setup .NET SDK
-      uses: actions/setup-dotnet@v4
+      uses: actions/setup-dotnet@39582172f897db67f6229396b75e31f030f57573 # v4.2.0
       with:
         dotnet-version: '10.0.x'
 
     - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
+      uses: github/codeql-action/init@b56ba49b26e50535fa1e7f7db0f4db7b427ef03b # v3.28.10
       with:
         languages: csharp
 
     - name: Cache NuGet packages
-      uses: actions/cache@v4
+      uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
       with:
         path: ~/.nuget/packages
-        key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/Directory.Build.props') }}
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/global.json', '**/Directory.Packages.props', '**/Directory.Build.props', '**/*.csproj') }}
         restore-keys: ${{ runner.os }}-nuget-
 
     - name: Restore dependencies
@@ -59,6 +60,6 @@ jobs:
       run: dotnet test OneWare.ContainerExtension.slnx --no-build --verbosity normal -warnaserror -c Release
 
     - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
+      uses: github/codeql-action/analyze@b56ba49b26e50535fa1e7f7db0f4db7b427ef03b # v3.28.10
       with:
         category: "/language:csharp"

@@ -23,9 +23,9 @@ public partial class DockerDiagnosticsView
     private static readonly string CachedDesktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
     private static readonly string[] MetricUnits = { "B", "KB", "MB", "GB", "TB" };
 
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
     //  Formatting Helpers
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
 
     /// <summary>Truncates a string to <paramref name="maxLen"/> characters, appending "..." if needed.</summary>
     private static string Truncate(string? s, int maxLen) =>
@@ -78,9 +78,9 @@ public partial class DockerDiagnosticsView
         return string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{diff.Days / 365}y ago");
     }
 
-    // ════════════════════════════════════════════════════════════════════
+    // ====================================================================
     //  Cross-platform launch helpers
-    // ════════════════════════════════════════════════════════════════════
+    // ====================================================================
 
     /// <summary>
     /// Opens a file or URL with the system's default application.

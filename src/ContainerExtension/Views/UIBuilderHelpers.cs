@@ -16,7 +16,7 @@ namespace ContainerExtension.Views;
 /// </summary>
 public static class UIBuilderHelpers
 {
-    // ── Color Palette ───────────────────────────────────────────────────
+    // -- Color Palette ---------------------------------------------------
     private static T GetResource<T>(string key, T defaultValue)
     {
         if (Application.Current != null && Application.Current.TryGetResource(key, out var res) && res is T val)
@@ -26,13 +26,13 @@ public static class UIBuilderHelpers
         return defaultValue;
     }
 
-    private static readonly SolidColorBrush DefaultFontColor = new(Color.Parse("#E0E0E0"));
-    private static readonly SolidColorBrush DefaultMutedColor = new(Color.Parse("#B0B0B0"));
-    private static readonly SolidColorBrush DefaultAccentColor = new(Color.Parse(ContainerExtensionModule.DockerBlueHex));
-    private static readonly SolidColorBrush DefaultGreenColor = new(Color.Parse("#4CAF50"));
-    private static readonly SolidColorBrush DefaultRedColor = new(Color.Parse("#FF6B6B"));
-    private static readonly SolidColorBrush DefaultYellowColor = new(Color.Parse("#FFD54F"));
-    private static readonly SolidColorBrush DefaultCardBg = new(Color.Parse("#1A2496ED"));
+    private static readonly Avalonia.Media.Immutable.ImmutableSolidColorBrush DefaultFontColor = new((uint)Color.Parse("#E0E0E0").ToUInt32());
+    private static readonly Avalonia.Media.Immutable.ImmutableSolidColorBrush DefaultMutedColor = new((uint)Color.Parse("#B0B0B0").ToUInt32());
+    private static readonly Avalonia.Media.Immutable.ImmutableSolidColorBrush DefaultAccentColor = new((uint)Color.Parse(ContainerExtensionModule.DockerBlueHex).ToUInt32());
+    private static readonly Avalonia.Media.Immutable.ImmutableSolidColorBrush DefaultGreenColor = new((uint)Color.Parse("#4CAF50").ToUInt32());
+    private static readonly Avalonia.Media.Immutable.ImmutableSolidColorBrush DefaultRedColor = new((uint)Color.Parse("#FF6B6B").ToUInt32());
+    private static readonly Avalonia.Media.Immutable.ImmutableSolidColorBrush DefaultYellowColor = new((uint)Color.Parse("#FFD54F").ToUInt32());
+    private static readonly Avalonia.Media.Immutable.ImmutableSolidColorBrush DefaultCardBg = new((uint)Color.Parse("#1A2496ED").ToUInt32());
 
     private static IBrush? _cachedFontColor;
     private static IBrush? _cachedMutedColor;
@@ -67,7 +67,7 @@ public static class UIBuilderHelpers
     public const double RowHeaderFontSize = 12;
     public const double RowFontSize = 11;
     public const double SmallFontSize = 10;
-    
+
     public static readonly Thickness CardPadding = new(12, 8);
     public static readonly CornerRadius CardCornerRadius = new(6);
     public static readonly Thickness RowMargin = new(0, 1);
@@ -77,9 +77,9 @@ public static class UIBuilderHelpers
 
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Button, System.Runtime.CompilerServices.StrongBox<int>> CopyButtonCounters = new();
 
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
     //  UI Helpers
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
 
     public static Border CreateCard(string title, Control content, bool defaultExpanded = true)
     {
@@ -271,7 +271,7 @@ public static class UIBuilderHelpers
         grid.Children.Add(valueBlock);
     }
 
-    /// <summary>Resets a button's content text after a delay (e.g. "Copied!" → "Copy").</summary>
+    /// <summary>Resets a button's content text after a delay (e.g. "Copied!" -> "Copy").</summary>
     public static async Task ResetButtonTextAsync(Button btn, string originalText, int delayMs)
     {
         var box = CopyButtonCounters.GetOrCreateValue(btn);

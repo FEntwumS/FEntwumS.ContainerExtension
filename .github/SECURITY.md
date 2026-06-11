@@ -4,7 +4,7 @@
 
 | Version | Supported | Verified |
 | ------- | --------- | ---------------------- |
-| 1.0.x   | ✅ Yes    | ✅ Yes                 |
+| 1.0.x   | Yes       | Yes                    |
 
 ## Secure Infrastructure
 
@@ -23,9 +23,9 @@ You should receive an acknowledgement within **48 hours**. Critical issues affec
 ## Scope & Threat Model
 
 Security-relevant areas in-scope include:
-- **Container escape** — Any bypass of the Docker sandbox boundary via extension mounts or config.
-- **Credential leakage** — Exposure of host environment variables, SSH keys, or socket paths via telemetry or logs.
-- **Path traversal** — Workspace mount injection that accesses files outside the active project directory.
-- **Zombie Process Exhaustion** — Unhandled PIDs overloading host PID limits.
+- **Container escape** - Any bypass of the Docker sandbox boundary via extension mounts or config.
+- **Credential leakage** - Exposure of host environment variables, SSH keys, or socket paths via telemetry or logs.
+- **Path traversal** - Workspace mount injection that accesses files outside the active project directory.
+- **Zombie Process Exhaustion** - Unhandled PIDs overloading host PID limits.
 
 Issues related to host-side Docker daemon misconfiguration (e.g., exposing unauthenticated TCP sockets) or inherent zero-days in the EDA tools themselves (e.g., buffer overflows in `yosys`) are outside the scope of this project, provided they do not facilitate a container escape.

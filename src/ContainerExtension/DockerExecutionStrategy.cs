@@ -17,6 +17,9 @@ using OneWare.Essentials.Services;
 using OneWare.Essentials.ToolEngine;
 using ContainerExtension.Services.Docker;
 
+using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
+
 namespace ContainerExtension;
 
 public sealed class DockerExecutionException : Exception
@@ -25,11 +28,22 @@ public sealed class DockerExecutionException : Exception
     public DockerExecutionException(string message, Exception innerException) : base(message, innerException) { }
 }
 
-public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposable
+/// <summary>
+/// Core engine responsible for redirecting OneWare tool execution commands into isolated Docker containers.
+/// Handles runtime daemon connection, telemetry tracing, volume mounting, and pipeline I/O streaming.
+/// </summary>
+public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, IDisposable
 {
     private const string ToolKey = "DockerExecutionStrategy";
     private const string ContainerWorkDir = "/workspace";
-    private static readonly System.Text.RegularExpressions.Regex UriCredentialsRegex = new(@"(?<=://)[^/\s@]+:[^/\s@]+(?=@)", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static readonly System.Diagnostics.ActivitySource DockerActivitySource = new("OneWare.ContainerExtension");
+
+    [GeneratedRegex(@"(?<=://)[^/\s@]+:[^/\s@]+(?=@)", RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex UriCredentialsRegex();
+
+    [GeneratedRegex(@"^[a-zA-Z0-9][-a-zA-Z0-9.]*(?::\d{1,5})?$", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex HostOnlyRegex();
 
     private static readonly SearchValues<char> ShellSpecialAndWhitespaceChars = SearchValues.Create(";&|<>*?[]{}()$\\'\"#~`! \t\n\r\v\f");
     private static readonly SearchValues<char> DisallowedPathChars = SearchValues.Create(";&|<>*?[]{}()$\\'\"#~`!\t\n\r");
@@ -37,101 +51,28 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
     private string? _cachedRuntimePath;
     private readonly Uri _daemonUri;
 
-    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool GetNamedPipeServerProcessId(Microsoft.Win32.SafeHandles.SafePipeHandle Pipe, out uint ServerProcessId);
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetNamedPipeServerProcessId(Microsoft.Win32.SafeHandles.SafePipeHandle Pipe, out uint ServerProcessId);
 
-    [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
-    private static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool OpenProcessToken(Microsoft.Win32.SafeHandles.SafeProcessHandle ProcessHandle, uint DesiredAccess, out Microsoft.Win32.SafeHandles.SafeAccessTokenHandle TokenHandle);
 
-    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    private static partial Microsoft.Win32.SafeHandles.SafeProcessHandle OpenProcess(uint dwDesiredAccess, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle, uint dwProcessId);
 
-    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool CloseHandle(IntPtr hObject);
+    [LibraryImport("libc", EntryPoint = "geteuid")]
+    private static partial uint geteuid();
 
-    [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "geteuid")]
-    private static extern uint geteuid();
-
-    [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "getegid")]
-    private static extern uint getegid();
-
-    [ThreadStatic]
-    private static StringBuilder? _threadLocalErrorBuilder;
-    internal static StringBuilder GetThreadLocalErrorBuilder()
-    {
-        _threadLocalErrorBuilder ??= new StringBuilder(1024);
-        _threadLocalErrorBuilder.Clear();
-        return _threadLocalErrorBuilder;
-    }
+    [LibraryImport("libc", EntryPoint = "getegid")]
+    private static partial uint getegid();
 
     public static readonly string OSArchitecture = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString();
 
     private readonly ReaderWriterLockSlim _strategyLock = new();
 
-    internal static string? TranslateWslPath(string path, CancellationToken ct = default)
-    {
-        if (!OperatingSystem.IsWindows()) return null;
-        Process? p = null;
-        try
-        {
-            p = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "wsl.exe",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                }
-            };
-            p.StartInfo.ArgumentList.Add("wslpath");
-            p.StartInfo.ArgumentList.Add("-u");
-            p.StartInfo.ArgumentList.Add(path);
-            p.Start();
-            var readTask = p.StandardOutput.ReadToEndAsync(ct);
-            if (p.WaitForExit(1000))
-            {
-                readTask.Wait(500, ct);
-                if (readTask.IsCompletedSuccessfully)
-                {
-                    return readTask.Result.Trim();
-                }
-            }
-            else
-            {
-                p.Kill();
-                p.WaitForExit(500);
-            }
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            ContainerTelemetry.TrackError("DockerExecutionStrategy", "WSL path translation failed", ex);
-        }
-        finally
-        {
-            if (p != null)
-            {
-                try
-                {
-                    if (!p.HasExited)
-                    {
-                        p.Kill();
-                        p.WaitForExit(500);
-                    }
-                }
-                catch { /* Ignore */ }
-                try
-                {
-                    p.Dispose();
-                }
-                catch { /* Ignore */ }
-            }
-        }
-        return null;
-    }
-
-    private static bool IsProcessAdminOrSystem(uint pid)
+    private static bool IsProcessTrusted(uint pid)
     {
         if (!OperatingSystem.IsWindows()) return true;
         const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
@@ -139,44 +80,42 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
 
         try
         {
-            var hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-            if (hProcess != IntPtr.Zero)
+            using var hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            if (hProcess == null || hProcess.IsInvalid)
             {
-                try
+                var err = System.Runtime.InteropServices.Marshal.GetLastPInvokeError();
+                if (err == 5) return true; // ERROR_ACCESS_DENIED implies higher privilege (e.g. SYSTEM)
+                return false;
+            }
+
+            if (OpenProcessToken(hProcess, TOKEN_QUERY, out var hToken))
+            {
+                using (hToken)
                 {
-                    if (OpenProcessToken(hProcess, TOKEN_QUERY, out var hToken))
-                    {
-                        try
-                        {
-                            using var identity = new System.Security.Principal.WindowsIdentity(hToken);
-                            var principal = new System.Security.Principal.WindowsPrincipal(identity);
-                            bool isAdmin = principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
-                            bool isSystem = identity.IsSystem;
-                            return isAdmin || isSystem;
-                        }
-                        finally
-                        {
-                            CloseHandle(hToken);
-                        }
-                    }
+#pragma warning disable S3869
+                    using var identity = new System.Security.Principal.WindowsIdentity(hToken.DangerousGetHandle());
+#pragma warning restore S3869
+                    var principal = new System.Security.Principal.WindowsPrincipal(identity);
+                    bool isAdmin = principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+                    bool isSystem = identity.IsSystem;
+                    using var currentIdentity = System.Security.Principal.WindowsIdentity.GetCurrent();
+                    bool isCurrentUser = identity.User != null && currentIdentity.User != null && identity.User.Equals(currentIdentity.User);
+                    return isAdmin || isSystem || isCurrentUser;
                 }
-                catch (PlatformNotSupportedException)
-                {
-                    return true; // Fail-open / fallback if identity queries are not supported
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
-                {
-                    ContainerTelemetry.TrackError("DockerExecutionStrategy", $"IsProcessAdminOrSystem failed for pid {pid}", ex);
-                }
-                finally
-                {
-                    CloseHandle(hProcess);
-                }
+            }
+            else
+            {
+                var err = System.Runtime.InteropServices.Marshal.GetLastPInvokeError();
+                if (err == 5) return true; // ERROR_ACCESS_DENIED
             }
         }
         catch (PlatformNotSupportedException)
         {
-            return true;
+            return true; // Fail-open / fallback if identity queries are not supported
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            ContainerTelemetry.TrackError("DockerExecutionStrategy", $"IsProcessTrusted failed for pid {pid}", ex);
         }
         return false;
     }
@@ -233,14 +172,14 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                                          name.Contains("win-sshproxy", StringComparison.OrdinalIgnoreCase) ||
                                          name.Contains("System", StringComparison.OrdinalIgnoreCase) ||
                                          name.Contains("svchost", StringComparison.OrdinalIgnoreCase)) &&
-                                        IsProcessAdminOrSystem(pid))
+                                        IsProcessTrusted(pid))
                                     {
                                         return true;
                                     }
                                 }
                                 catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5 || ex.Message.Contains("Access is denied", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    return IsProcessAdminOrSystem(pid);
+                                    return IsProcessTrusted(pid);
                                 }
                                 catch (PlatformNotSupportedException)
                                 {
@@ -346,8 +285,8 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
     {
         if (IsLogEnabled(minRank))
         {
-            var line = _currentShowTimestamps.Value 
-                ? string.Create(CultureInfo.InvariantCulture, $"[{DateTime.Now:HH:mm:ss.fff}] {message}") 
+            var line = _currentShowTimestamps.Value
+                ? string.Create(CultureInfo.InvariantCulture, $"[{DateTime.Now:HH:mm:ss.fff}] {message}")
                 : message;
             SafeInvoke(() => { (command.OutputHandler ?? command.ErrorHandler)?.Invoke(line); });
         }
@@ -392,7 +331,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 if (uri.Scheme.Equals("ssh", StringComparison.OrdinalIgnoreCase))
                 {
                     var hostOnly = uri.Host;
-                    if (string.IsNullOrEmpty(hostOnly) || !System.Text.RegularExpressions.Regex.IsMatch(hostOnly, @"^[a-zA-Z0-9][-a-zA-Z0-9.]*(?::\d{1,5})?$", System.Text.RegularExpressions.RegexOptions.Compiled))
+                    if (string.IsNullOrEmpty(hostOnly) || !HostOnlyRegex().IsMatch(hostOnly))
                     {
                         throw new UriFormatException("Insecure or invalid SSH tunnel hostname.");
                     }
@@ -512,15 +451,27 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         using var config = new DockerClientConfiguration(uri);
         // Negotiate Docker API Version
         System.Version apiVersion = new System.Version(1, 44);
+        var tempClient = config.CreateClient();
+        var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        Task? vTask = null;
         try
         {
-            using var tempClient = config.CreateClient();
-            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
-            var vTask = tempClient.System.GetVersionAsync(cts.Token);
-            if (vTask.Wait(TimeSpan.FromMilliseconds(500)) && vTask.IsCompletedSuccessfully)
+            var apiTask = Task.Run(async () =>
             {
-                var v = vTask.Result;
-                var apiVerStr = v.APIVersion;
+                try
+                {
+                    return await tempClient.System.GetVersionAsync(cts.Token).ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    return null;
+                }
+            });
+            vTask = apiTask;
+            if (apiTask.Wait(TimeSpan.FromMilliseconds(500)) && apiTask.IsCompletedSuccessfully)
+            {
+                var v = apiTask.Result;
+                var apiVerStr = v?.APIVersion;
                 if (!string.IsNullOrEmpty(apiVerStr))
                 {
                     int endIdx = 0;
@@ -537,6 +488,18 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
             }
             else
             {
+                try
+                {
+                    cts.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // If already disposed, safe to ignore
+                }
+                catch (AggregateException)
+                {
+                    // Catch cancellation callback exceptions, safe to ignore
+                }
                 apiVersion = new System.Version(1, 45);
             }
         }
@@ -552,6 +515,22 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 ContainerTelemetry.TrackError("DockerExecutionStrategy", "API version negotiation failed, falling back to 1.45", ex);
             }
             apiVersion = new System.Version(1, 45);
+        }
+        finally
+        {
+            if (vTask != null)
+            {
+                _ = vTask.ContinueWith(t =>
+                {
+                    tempClient.Dispose();
+                    cts.Dispose();
+                }, TaskScheduler.Default);
+            }
+            else
+            {
+                tempClient.Dispose();
+                cts.Dispose();
+            }
         }
         _client = config.CreateClient(apiVersion);
 
@@ -588,9 +567,9 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
             {
                 _cachedRuntimePath = "docker";
             }
-            else if (p.AsSpan().ContainsAny(DisallowedPathChars))
+            else if (p.StartsWith('-') || p.AsSpan().ContainsAny(DisallowedPathChars))
             {
-                throw new DockerExecutionException("Disallowed characters detected in container runtime path.");
+                throw new DockerExecutionException("Disallowed characters or format detected in container runtime path.");
             }
             else
             {
@@ -824,16 +803,21 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
     private static bool IsSensitiveEnvironmentVariable(string key)
     {
         if (string.IsNullOrEmpty(key)) return false;
-        return key.Contains("KEY", StringComparison.OrdinalIgnoreCase) ||
-               key.Contains("SECRET", StringComparison.OrdinalIgnoreCase) ||
-               key.Contains("PASSWORD", StringComparison.OrdinalIgnoreCase) ||
-               key.Contains("TOKEN", StringComparison.OrdinalIgnoreCase) ||
-               key.Contains("PASS", StringComparison.OrdinalIgnoreCase) ||
-               key.Contains("AUTH", StringComparison.OrdinalIgnoreCase) ||
-               key.Contains("CRED", StringComparison.OrdinalIgnoreCase) ||
-               key.Contains("CERT", StringComparison.OrdinalIgnoreCase) ||
-               key.Contains("PRIVATE", StringComparison.OrdinalIgnoreCase) ||
-               key.Contains("SSH_AUTH_SOCK", StringComparison.OrdinalIgnoreCase);
+        ReadOnlySpan<char> span = key.AsSpan();
+        Span<char> upper = key.Length <= 128 ? stackalloc char[key.Length] : new char[key.Length];
+        span.ToUpperInvariant(upper);
+
+        ReadOnlySpan<char> rUpper = upper;
+        return rUpper.IndexOf("KEY".AsSpan(), StringComparison.Ordinal) >= 0 ||
+               rUpper.IndexOf("SECRET".AsSpan(), StringComparison.Ordinal) >= 0 ||
+               rUpper.IndexOf("PASSWORD".AsSpan(), StringComparison.Ordinal) >= 0 ||
+               rUpper.IndexOf("TOKEN".AsSpan(), StringComparison.Ordinal) >= 0 ||
+               rUpper.IndexOf("PASS".AsSpan(), StringComparison.Ordinal) >= 0 ||
+               rUpper.IndexOf("AUTH".AsSpan(), StringComparison.Ordinal) >= 0 ||
+               rUpper.IndexOf("CRED".AsSpan(), StringComparison.Ordinal) >= 0 ||
+               rUpper.IndexOf("CERT".AsSpan(), StringComparison.Ordinal) >= 0 ||
+               rUpper.IndexOf("PRIVATE".AsSpan(), StringComparison.Ordinal) >= 0 ||
+               rUpper.IndexOf("SSH_AUTH_SOCK".AsSpan(), StringComparison.Ordinal) >= 0;
     }
 
     private static bool IsUnixSocketLiveAndWritable(string path, out string? errorMessage, CancellationToken ct = default)
@@ -878,22 +862,22 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
             var nativeCode = ex.NativeErrorCode;
             var socketCode = ex.SocketErrorCode;
 
-            if (socketCode == System.Net.Sockets.SocketError.AccessDenied || 
-                nativeCode == 13 || 
-                nativeCode == 1 || 
+            if (socketCode == System.Net.Sockets.SocketError.AccessDenied ||
+                nativeCode == 13 ||
+                nativeCode == 1 ||
                 nativeCode == 10013)
             {
                 errorMessage = $"Access Denied: Current user does not have permission to access socket '{path}'. Ensure correct group membership (e.g. 'docker').";
             }
-            else if (socketCode == System.Net.Sockets.SocketError.ConnectionRefused || 
-                     nativeCode == 111 || 
-                     nativeCode == 61 || 
+            else if (socketCode == System.Net.Sockets.SocketError.ConnectionRefused ||
+                     nativeCode == 111 ||
+                     nativeCode == 61 ||
                      nativeCode == 10061)
             {
                 errorMessage = $"Connection Refused: Socket '{path}' is not active. Ensure the Docker/Podman daemon is running.";
             }
             else if (socketCode == System.Net.Sockets.SocketError.AddressNotAvailable ||
-                     nativeCode == 2 || 
+                     nativeCode == 2 ||
                      nativeCode == 10049)
             {
                 errorMessage = $"Socket not found or unavailable at '{path}'.";
@@ -1072,12 +1056,10 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
 
                 ct.ThrowIfCancellationRequested();
                 p.Start();
-                var outputTask = Task.Run(() => { return p.StandardOutput.ReadToEnd(); }, ct);
-                var errorTask = Task.Run(() => { return p.StandardError.ReadToEnd(); }, ct);
                 if (p.WaitForExit(1000))
                 {
-                    var output = outputTask.GetAwaiter().GetResult().Trim();
-                    _ = errorTask.GetAwaiter().GetResult();
+                    var output = p.StandardOutput.ReadToEnd().Trim();
+                    _ = p.StandardError.ReadToEnd();
                     if (p.ExitCode != 0)
                     {
                         OwnerCache[path] = null;
@@ -1097,15 +1079,6 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                     {
                         p.Kill();
                         p.WaitForExit(500);
-                    }
-                    catch
-                    {
-                        // Ignore
-                    }
-                    try
-                    {
-                        outputTask.Wait(100, ct);
-                        errorTask.Wait(100, ct);
                     }
                     catch
                     {
@@ -1318,7 +1291,16 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 try
                 {
                     p.Kill();
-                    await p.WaitForExitAsync(ct).ConfigureAwait(false);
+                    await p.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Ignore
+                }
+                try
+                {
+                    await readOutTask.ConfigureAwait(false);
+                    await readErrTask.ConfigureAwait(false);
                 }
                 catch
                 {
@@ -1344,7 +1326,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                     if (!p.HasExited)
                     {
                         p.Kill();
-                        await p.WaitForExitAsync(ct).ConfigureAwait(false);
+                        await p.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
                     }
                 }
                 catch
@@ -1450,9 +1432,8 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
             return;
         }
 
-        var channel = Channel.CreateBounded<string>(new BoundedChannelOptions(100)
+        var channel = Channel.CreateUnbounded<(string id, bool shouldRemove)>(new UnboundedChannelOptions
         {
-            FullMode = BoundedChannelFullMode.Wait,
             SingleWriter = true,
             SingleReader = false
         });
@@ -1470,12 +1451,15 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
             workers[i] = Task.Run(async () =>
             {
                 var reader = channel.Reader;
-                await foreach (var id in reader.ReadAllAsync().ConfigureAwait(false))
+                await foreach (var item in reader.ReadAllAsync().ConfigureAwait(false))
                 {
                     try
                     {
-                        await _staticClientForCleanup.Containers.StopContainerAsync(id, new ContainerStopParameters { WaitBeforeKillSeconds = 2 }).ConfigureAwait(false);
-                        await _staticClientForCleanup.Containers.RemoveContainerAsync(id, new ContainerRemoveParameters { Force = true }).ConfigureAwait(false);
+                        await _staticClientForCleanup.Containers.StopContainerAsync(item.id, new ContainerStopParameters { WaitBeforeKillSeconds = 2 }).ConfigureAwait(false);
+                        if (item.shouldRemove)
+                        {
+                            await _staticClientForCleanup.Containers.RemoveContainerAsync(item.id, new ContainerRemoveParameters { Force = true }).ConfigureAwait(false);
+                        }
                     }
                     catch
                     {
@@ -1489,9 +1473,9 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         var keys = ActiveContainers.Keys;
         foreach (var key in keys)
         {
-            if (ActiveContainers.TryRemove(key, out var shouldAutoRemove) && shouldAutoRemove)
+            if (ActiveContainers.TryRemove(key, out var shouldAutoRemove))
             {
-                writer.TryWrite(key);
+                writer.TryWrite((key, shouldAutoRemove));
             }
         }
         writer.Complete();
@@ -1994,8 +1978,17 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         return (exitCode, finalOutput, wasCancelled, profile);
     }
 
+    /// <summary>
+    /// Translates a host tool command into an ephemeral container execution payload.
+    /// Manages pulling images, configuring container properties, executing the command, and streaming results.
+    /// </summary>
+    /// <param name="command">The tool command payload to execute.</param>
+    /// <returns>A tuple indicating success status and any buffered output if captured.</returns>
     public async Task<(bool success, string output)> ExecuteAsync(ToolCommand command)
     {
+        using var activity = DockerActivitySource.StartActivity("DockerExecutionStrategy.Execute");
+        activity?.SetTag("tool.name", command.ToolName);
+        activity?.SetTag("tool.executable", command.Executable);
         ThrowIfDisposed();
 
         if (IsTargetingEmptyGhdlLibrary(command))
@@ -2005,7 +1998,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         }
 
         var executable = command.Executable ?? command.ToolName;
-        
+
         if (!string.IsNullOrEmpty(executable))
         {
             if (executable.AsSpan().ContainsAny(DockerCommandBuilder.ShellSpecialChars))
@@ -2021,7 +2014,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 }
             }
         }
-        
+
         if (command.Arguments != null)
         {
             var isYosys = (command.Executable != null && command.Executable.Contains("yosys", StringComparison.OrdinalIgnoreCase))
@@ -2106,8 +2099,14 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
                 }
             }
 
-            var workingDirFull = Path.GetFullPath(command.WorkingDirectory);
+            var resolvedWorkingDir = string.IsNullOrWhiteSpace(command.WorkingDirectory) ? Directory.GetCurrentDirectory() : command.WorkingDirectory;
+            var workingDirFull = Path.GetFullPath(resolvedWorkingDir);
             command.PrepareCommand(System.Runtime.InteropServices.OSPlatform.Linux, path => Services.Docker.DockerCommandBuilder.MapPathToContainer(path, workingDirFull));
+
+            if (!OperatingSystem.IsWindows())
+            {
+                await EnsureUnixIdsLoadedAsync(ct).ConfigureAwait(false);
+            }
 
             SdkLog(command, $"[Docker SDK] Step 1: Resolving image for tool '{executable}'...", RankInfo);
             image = ResolveImage(command.ToolName ?? string.Empty);
@@ -2366,6 +2365,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
             Volatile.Write(ref _cleanupExecuted, 0);
         }
 
+        _connectionProvider.Dispose();
         _client.Dispose();
         _strategyLock.Dispose();
         ContainerTelemetry.Shutdown();
@@ -2385,7 +2385,7 @@ public sealed class DockerExecutionStrategy : IToolExecutionStrategy, IDisposabl
         }
         try
         {
-            input = UriCredentialsRegex.Replace(input, "***:***");
+            input = UriCredentialsRegex().Replace(input, "***:***");
         }
         catch { /* Ignore regex errors */ }
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);

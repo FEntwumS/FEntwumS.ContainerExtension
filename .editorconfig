@@ -4,7 +4,7 @@
 
 root = true
 
-# ── Baseline ─────────────────────────────────────────────────────────────────
+# -- Baseline -----------------------------------------------------------------
 [*]
 charset = utf-8
 end_of_line = lf
@@ -22,14 +22,22 @@ trim_trailing_whitespace = false
 [Makefile]
 indent_style = tab
 
-# ── C# ───────────────────────────────────────────────────────────────────────
+# -- C# -----------------------------------------------------------------------
 [*.cs]
 csharp_new_line_before_open_brace = all
 csharp_new_line_before_else = true
 csharp_new_line_before_catch = true
 csharp_new_line_before_finally = true
-csharp_style_namespace_declarations = file_scoped:warning
+csharp_style_namespace_declarations = file_scoped:error
 csharp_using_directive_placement = outside_namespace:suggestion
+
+# Native-AOT Compatibility Diagnostics
+dotnet_diagnostic.IL2026.severity = error
+dotnet_diagnostic.IL2055.severity = error
+dotnet_diagnostic.IL2057.severity = error
+dotnet_diagnostic.IL3050.severity = error
+dotnet_diagnostic.IL3051.severity = error
+dotnet_diagnostic.IL3052.severity = error
 
 # Null Checking & Safety
 dotnet_style_null_propagation = true:warning
@@ -42,7 +50,7 @@ csharp_style_expression_bodied_accessors = true:suggestion
 csharp_style_pattern_matching_over_is_with_cast_check = true:suggestion
 csharp_style_pattern_matching_over_as_with_null_check = true:suggestion
 
-# ── Python / Shell ───────────────────────────────────────────────────────────
+# -- Python / Shell -----------------------------------------------------------
 [*.py]
 max_line_length = 120
 
@@ -51,11 +59,11 @@ indent_size = 2
 end_of_line = lf
 shell_session_style = bash
 
-# ── Git Config ───────────────────────────────────────────────────────────────
+# -- Git Config ---------------------------------------------------------------
 [.git*]
 indent_style = tab
 
-# ── Naming Conventions ───────────────────────────────────────────────────────
+# -- Naming Conventions -------------------------------------------------------
 dotnet_naming_rule.interface_should_be_begins_with_i.severity = suggestion
 dotnet_naming_rule.interface_should_be_begins_with_i.symbols = interface
 dotnet_naming_rule.interface_should_be_begins_with_i.style = begins_with_i

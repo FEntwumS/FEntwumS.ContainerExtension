@@ -14,6 +14,10 @@ using OneWare.Essentials.ToolEngine;
 
 namespace ContainerExtension.Services.Docker;
 
+/// <summary>
+/// Static utility class for constructing Docker 'run' arguments, validating environment variables, 
+/// and securely escaping shell parameters for container execution.
+/// </summary>
 internal static class DockerCommandBuilder
 {
     private static long _containerCounter = 0;
@@ -81,7 +85,7 @@ internal static class DockerCommandBuilder
         bool isClean = true;
         foreach (var c in input)
         {
-            if (!(char.IsLetterOrDigit(c) || c == '.' || c == '-' || c == '_' || c == '='))
+            if (char.IsControl(c) || c == ';' || c == '&' || c == '|' || c == '`' || c == '$' || c == '<' || c == '>' || c == '\\' || c == '"' || c == '\'')
             {
                 isClean = false;
                 break;
@@ -92,7 +96,7 @@ internal static class DockerCommandBuilder
         var sb = new StringBuilder(input.Length);
         foreach (var c in input)
         {
-            if (char.IsLetterOrDigit(c) || c == '.' || c == '-' || c == '_' || c == '=')
+            if (!(char.IsControl(c) || c == ';' || c == '&' || c == '|' || c == '`' || c == '$' || c == '<' || c == '>' || c == '\\' || c == '"' || c == '\''))
             {
                 sb.Append(c);
             }
@@ -140,7 +144,15 @@ internal static class DockerCommandBuilder
         ArgumentNullException.ThrowIfNull(command);
         sdkLog ??= (_, _) => { };
 
-        var rawExePath = command.Executable ?? command.ToolName ?? "container-run";
+        var rawExePath = command.Executable;
+        if (string.IsNullOrWhiteSpace(rawExePath))
+        {
+            rawExePath = command.ToolName;
+        }
+        if (string.IsNullOrWhiteSpace(rawExePath))
+        {
+            rawExePath = "container-run";
+        }
         var executablePath = NormalizeSeparators(rawExePath);
         var executable = Path.GetFileName(executablePath);
         var resolvedWorkingDir = string.IsNullOrWhiteSpace(command.WorkingDirectory) ? Directory.GetCurrentDirectory() : command.WorkingDirectory;
@@ -235,24 +247,27 @@ internal static class DockerCommandBuilder
                             if (!string.IsNullOrWhiteSpace(dir))
                             {
                                 var absoluteDir = Path.GetFullPath(Path.Combine(workingDirFull, dir));
-                                var physicalDir = ResolvePhysicalPath(absoluteDir);
-                                var absBound = physicalDir;
-                                if (!absBound.EndsWith(Path.DirectorySeparatorChar) && !absBound.EndsWith(Path.AltDirectorySeparatorChar))
-                                    absBound += Path.DirectorySeparatorChar;
-
                                 var osAwareComparison = OperatingSystem.IsLinux()
                                     ? StringComparison.Ordinal
                                     : StringComparison.OrdinalIgnoreCase;
 
-                                if (absBound.StartsWith(workingDirBound, osAwareComparison) && !Directory.Exists(absoluteDir))
+                                if (absoluteDir.StartsWith(workingDirFull, osAwareComparison))
                                 {
-                                    try
+                                    var physicalDir = ResolvePhysicalPath(absoluteDir);
+                                    var absBound = physicalDir;
+                                    if (!absBound.EndsWith(Path.DirectorySeparatorChar) && !absBound.EndsWith(Path.AltDirectorySeparatorChar))
+                                        absBound += Path.DirectorySeparatorChar;
+
+                                    if (absBound.StartsWith(workingDirBound, osAwareComparison) && !Directory.Exists(absoluteDir))
                                     {
-                                        Directory.CreateDirectory(absoluteDir);
-                                    }
-                                    catch (Exception ex) when (ex is not OutOfMemoryException)
-                                    {
-                                        ContainerTelemetry.TrackError("DockerCommandBuilder", $"Workspace dir creation failed for '{absoluteDir}'", ex);
+                                        try
+                                        {
+                                            Directory.CreateDirectory(absoluteDir);
+                                        }
+                                        catch (Exception ex) when (ex is not OutOfMemoryException)
+                                        {
+                                            ContainerTelemetry.TrackError("DockerCommandBuilder", $"Workspace dir creation failed for '{absoluteDir}'", ex);
+                                        }
                                     }
                                 }
                             }
@@ -274,8 +289,8 @@ internal static class DockerCommandBuilder
             var rawExe = command.Executable ?? command.ToolName ?? "";
             if (rawExe.Contains("ghdl", StringComparison.OrdinalIgnoreCase) &&
                 argsList.Any(arg => arg != null && (
-                    arg.Equals("-m", StringComparison.Ordinal) || 
-                    arg.Equals("-e", StringComparison.Ordinal) || 
+                    arg.Equals("-m", StringComparison.Ordinal) ||
+                    arg.Equals("-e", StringComparison.Ordinal) ||
                     arg.Equals("-r", StringComparison.Ordinal) ||
                     arg.Equals("--synth", StringComparison.Ordinal) ||
                     arg.Equals("--elab", StringComparison.Ordinal) ||
@@ -339,7 +354,7 @@ internal static class DockerCommandBuilder
                             replaced = true;
                             break;
                         }
-                        else if ((arg.Equals("--work", StringComparison.OrdinalIgnoreCase) || 
+                        else if ((arg.Equals("--work", StringComparison.OrdinalIgnoreCase) ||
                                   arg.Equals("-work", StringComparison.OrdinalIgnoreCase)) &&
                                  j + 1 < argsList.Count)
                         {
@@ -419,12 +434,15 @@ internal static class DockerCommandBuilder
                     sbArgs.Append(processed);
                 }
             }
-            fullCmdString += " " + sbArgs.ToString();
+            if (sbArgs.Length > 0)
+            {
+                fullCmdString += " " + sbArgs.ToString();
+            }
         }
         var fullCmd = new List<string> { "sh", "-c", fullCmdString };
 
         var counter = Interlocked.Increment(ref _containerCounter);
-        var containerName = $"{SanitizeContainerName(rawPrefix)}{SanitizeContainerName(executable)}-{DateTime.Now:HHmmssfff}-{counter}-{Guid.NewGuid().ToString("N")[..8]}";
+        var containerName = $"{SanitizeContainerName(rawPrefix)}{SanitizeContainerName(executable)}-{DateTime.Now.ToString("HHmmssfff", System.Globalization.CultureInfo.InvariantCulture)}-{counter}-{Guid.NewGuid().ToString("N")[..8]}";
 
         var user = string.IsNullOrEmpty(uid) || string.IsNullOrEmpty(gid) || OperatingSystem.IsWindows()
           ? null
@@ -467,6 +485,11 @@ internal static class DockerCommandBuilder
             }
         }
 
+        if (!envList.Any(e => e.StartsWith("HOME=", StringComparison.Ordinal)))
+        {
+            envList.Add("HOME=/tmp");
+        }
+
         if (envList.Count > 500)
         {
             envList.RemoveRange(500, envList.Count - 500);
@@ -482,7 +505,7 @@ internal static class DockerCommandBuilder
         if (memMb > 0 && !double.IsNaN(memMb) && !double.IsInfinity(memMb))
         {
             const double maxMb = 8 * 1024 * 1024.0; // 8 TB max
-            var boundedMb = Math.Clamp(memMb, 0, maxMb);
+            var boundedMb = Math.Clamp(memMb, 6.0, maxMb);
             createParams.HostConfig.Memory = (long)(boundedMb * 1024 * 1024);
             createParams.HostConfig.MemorySwap = createParams.HostConfig.Memory;
         }
@@ -492,7 +515,7 @@ internal static class DockerCommandBuilder
         if (cpuCores > 0 && !double.IsNaN(cpuCores) && !double.IsInfinity(cpuCores))
         {
             var boundedCpus = Math.Clamp(cpuCores, 0, hostCores);
-            createParams.HostConfig.NanoCPUs = (long)(boundedCpus * 1_000_000_000);
+            createParams.HostConfig.NanoCPUs = (long)Math.Round(boundedCpus * 1_000_000_000);
         }
 
         var extraFlags = settingsService.SafeGetSetting(ContainerExtensionModule.ExtraFlagsSetting, "");
@@ -731,220 +754,217 @@ internal static class DockerCommandBuilder
             }
 
             var envVars = new List<string>();
-            var content = File.ReadAllText(envPath, Encoding.UTF8);
-            var lines = content.Split('\n');
-
-            int i = 0;
-            while (i < lines.Length)
+            using (var fs = new FileStream(envPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var reader = new StreamReader(fs, Encoding.UTF8))
             {
-                var lineSpan = lines[i].AsSpan().Trim();
-                i++;
-                if (lineSpan.IsEmpty || lineSpan[0] == '#')
+                while (reader.ReadLine() is string line)
                 {
-                    continue;
-                }
-
-                if (lineSpan.StartsWith("export ", StringComparison.Ordinal))
-                {
-                    lineSpan = lineSpan[7..].TrimStart();
-                }
-
-                var eqIdx = lineSpan.IndexOf('=');
-                if (eqIdx <= 0)
-                {
-                    continue;
-                }
-
-                var key = lineSpan[..eqIdx].Trim().ToString();
-                if (key.AsSpan().ContainsAny(DangerousEnvKeyChars))
-                {
-                    continue;
-                }
-                var value = lineSpan[(eqIdx + 1)..].Trim().ToString();
-
-                // Check if quotes are balanced on the same line
-                bool inDoubleQuotes = false;
-                bool inSingleQuotes = false;
-                for (int charIdx = 0; charIdx < value.Length; charIdx++)
-                {
-                    char c = value[charIdx];
-                    if (c == '"' && !inSingleQuotes)
+                    var lineSpan = line.AsSpan().Trim();
+                    if (lineSpan.IsEmpty || lineSpan[0] == '#')
                     {
-                        int backslashCount = 0;
-                        int prevIdx = charIdx - 1;
-                        while (prevIdx >= 0 && value[prevIdx] == '\\')
-                        {
-                            backslashCount++;
-                            prevIdx--;
-                        }
-                        if (backslashCount % 2 == 0)
-                        {
-                            inDoubleQuotes = !inDoubleQuotes;
-                        }
+                        continue;
                     }
-                    else if (c == '\'' && !inDoubleQuotes)
+
+                    if (lineSpan.StartsWith("export ", StringComparison.Ordinal))
                     {
-                        int backslashCount = 0;
-                        int prevIdx = charIdx - 1;
-                        while (prevIdx >= 0 && value[prevIdx] == '\\')
-                        {
-                            backslashCount++;
-                            prevIdx--;
-                        }
-                        if (backslashCount % 2 == 0)
-                        {
-                            inSingleQuotes = !inSingleQuotes;
-                        }
+                        lineSpan = lineSpan[7..].TrimStart();
                     }
-                }
 
-                // If quotes are not balanced, we have a multi-line value
-                if ((inDoubleQuotes || inSingleQuotes) && value.Length > 0)
-                {
-                    char quoteChar = inDoubleQuotes ? '"' : '\'';
-                    var sbVal = new StringBuilder(value);
-                    while (i < lines.Length)
+                    var eqIdx = lineSpan.IndexOf('=');
+                    if (eqIdx <= 0)
                     {
-                        var nextLine = lines[i];
-                        i++;
-                        sbVal.Append('\n').Append(nextLine);
+                        continue;
+                    }
 
-                        var nextLineSpan = nextLine.AsSpan();
-                        bool quoteClosed = false;
-                        for (int k = 0; k < nextLineSpan.Length; k++)
+                    var key = lineSpan[..eqIdx].Trim().ToString();
+                    if (key.AsSpan().ContainsAny(DangerousEnvKeyChars))
+                    {
+                        continue;
+                    }
+                    var value = lineSpan[(eqIdx + 1)..].Trim().ToString();
+
+                    // Check if quotes are balanced on the same line
+                    bool inDoubleQuotes = false;
+                    bool inSingleQuotes = false;
+                    for (int charIdx = 0; charIdx < value.Length; charIdx++)
+                    {
+                        char c = value[charIdx];
+                        if (c == '"' && !inSingleQuotes)
                         {
-                            if (nextLineSpan[k] == quoteChar)
+                            int backslashCount = 0;
+                            int prevIdx = charIdx - 1;
+                            while (prevIdx >= 0 && value[prevIdx] == '\\')
                             {
-                                int backslashCount = 0;
-                                int prevIdx = k - 1;
-                                while (prevIdx >= 0 && nextLineSpan[prevIdx] == '\\')
-                                {
-                                    backslashCount++;
-                                    prevIdx--;
-                                }
-                                if (backslashCount % 2 == 0)
-                                {
-                                    quoteClosed = true;
-                                    break;
-                                }
+                                backslashCount++;
+                                prevIdx--;
+                            }
+                            if (backslashCount % 2 == 0)
+                            {
+                                inDoubleQuotes = !inDoubleQuotes;
                             }
                         }
-                        if (quoteClosed)
+                        else if (c == '\'' && !inDoubleQuotes)
                         {
-                            break;
-                        }
-                    }
-                    value = sbVal.ToString();
-                }
-
-                // Strip inline comments
-                int commentIdx = -1;
-                inDoubleQuotes = false;
-                inSingleQuotes = false;
-                for (int charIdx = 0; charIdx < value.Length; charIdx++)
-                {
-                    char c = value[charIdx];
-                    if (c == '"' && !inSingleQuotes)
-                    {
-                        int backslashCount = 0;
-                        int prevIdx = charIdx - 1;
-                        while (prevIdx >= 0 && value[prevIdx] == '\\')
-                        {
-                            backslashCount++;
-                            prevIdx--;
-                        }
-                        if (backslashCount % 2 == 0)
-                        {
-                            inDoubleQuotes = !inDoubleQuotes;
-                        }
-                    }
-                    else if (c == '\'' && !inDoubleQuotes)
-                    {
-                        int backslashCount = 0;
-                        int prevIdx = charIdx - 1;
-                        while (prevIdx >= 0 && value[prevIdx] == '\\')
-                        {
-                            backslashCount++;
-                            prevIdx--;
-                        }
-                        if (backslashCount % 2 == 0)
-                        {
-                            inSingleQuotes = !inSingleQuotes;
-                        }
-                    }
-                    else if (c == '#' && !inDoubleQuotes && !inSingleQuotes)
-                    {
-                        bool isHexColor = false;
-                        if (charIdx + 6 < value.Length)
-                        {
-                            bool isHex6 = true;
-                            for (int k = 1; k <= 6; k++)
+                            int backslashCount = 0;
+                            int prevIdx = charIdx - 1;
+                            while (prevIdx >= 0 && value[prevIdx] == '\\')
                             {
-                                if (!char.IsAsciiHexDigit(value[charIdx + k]))
+                                backslashCount++;
+                                prevIdx--;
+                            }
+                            if (backslashCount % 2 == 0)
+                            {
+                                inSingleQuotes = !inSingleQuotes;
+                            }
+                        }
+                    }
+
+                    // If quotes are not balanced, we have a multi-line value
+                    if ((inDoubleQuotes || inSingleQuotes) && value.Length > 0)
+                    {
+                        char quoteChar = inDoubleQuotes ? '"' : '\'';
+                        var sbVal = new StringBuilder(value);
+                        while (reader.ReadLine() is string nextLine)
+                        {
+                            sbVal.Append('\n').Append(nextLine);
+
+                            var nextLineSpan = nextLine.AsSpan();
+                            bool quoteClosed = false;
+                            for (int k = 0; k < nextLineSpan.Length; k++)
+                            {
+                                if (nextLineSpan[k] == quoteChar)
                                 {
-                                    isHex6 = false;
-                                    break;
+                                    int backslashCount = 0;
+                                    int prevIdx = k - 1;
+                                    while (prevIdx >= 0 && nextLineSpan[prevIdx] == '\\')
+                                    {
+                                        backslashCount++;
+                                        prevIdx--;
+                                    }
+                                    if (backslashCount % 2 == 0)
+                                    {
+                                        quoteClosed = true;
+                                        break;
+                                    }
                                 }
                             }
-                            if (isHex6 && (charIdx + 7 == value.Length || !char.IsLetterOrDigit(value[charIdx + 7])))
+                            if (quoteClosed)
                             {
-                                isHexColor = true;
+                                break;
                             }
                         }
-                        if (!isHexColor && charIdx + 3 < value.Length)
+                        value = sbVal.ToString();
+                    }
+
+                    // Strip inline comments
+                    int commentIdx = -1;
+                    inDoubleQuotes = false;
+                    inSingleQuotes = false;
+                    for (int charIdx = 0; charIdx < value.Length; charIdx++)
+                    {
+                        char c = value[charIdx];
+                        if (c == '"' && !inSingleQuotes)
                         {
-                            bool isHex3 = true;
-                            for (int k = 1; k <= 3; k++)
+                            int backslashCount = 0;
+                            int prevIdx = charIdx - 1;
+                            while (prevIdx >= 0 && value[prevIdx] == '\\')
                             {
-                                if (!char.IsAsciiHexDigit(value[charIdx + k]))
+                                backslashCount++;
+                                prevIdx--;
+                            }
+                            if (backslashCount % 2 == 0)
+                            {
+                                inDoubleQuotes = !inDoubleQuotes;
+                            }
+                        }
+                        else if (c == '\'' && !inDoubleQuotes)
+                        {
+                            int backslashCount = 0;
+                            int prevIdx = charIdx - 1;
+                            while (prevIdx >= 0 && value[prevIdx] == '\\')
+                            {
+                                backslashCount++;
+                                prevIdx--;
+                            }
+                            if (backslashCount % 2 == 0)
+                            {
+                                inSingleQuotes = !inSingleQuotes;
+                            }
+                        }
+                        else if (c == '#' && !inDoubleQuotes && !inSingleQuotes)
+                        {
+                            bool isHexColor = false;
+                            if (charIdx + 6 < value.Length)
+                            {
+                                bool isHex6 = true;
+                                for (int k = 1; k <= 6; k++)
                                 {
-                                    isHex3 = false;
-                                    break;
+                                    if (!char.IsAsciiHexDigit(value[charIdx + k]))
+                                    {
+                                        isHex6 = false;
+                                        break;
+                                    }
+                                }
+                                if (isHex6 && (charIdx + 7 == value.Length || !char.IsLetterOrDigit(value[charIdx + 7])))
+                                {
+                                    isHexColor = true;
                                 }
                             }
-                            if (isHex3 && (charIdx + 4 == value.Length || !char.IsLetterOrDigit(value[charIdx + 4])))
+                            if (!isHexColor && charIdx + 3 < value.Length)
                             {
-                                isHexColor = true;
-                            }
-                        }
-
-                        bool isInsideUrl = false;
-                        int colonSlashIdx = value.AsSpan(0, charIdx).LastIndexOf("://", StringComparison.Ordinal);
-                        if (colonSlashIdx >= 0)
-                        {
-                            isInsideUrl = true;
-                            for (int k = colonSlashIdx + 3; k < charIdx; k++)
-                            {
-                                if (char.IsWhiteSpace(value[k]))
+                                bool isHex3 = true;
+                                for (int k = 1; k <= 3; k++)
                                 {
-                                    isInsideUrl = false;
-                                    break;
+                                    if (!char.IsAsciiHexDigit(value[charIdx + k]))
+                                    {
+                                        isHex3 = false;
+                                        break;
+                                    }
+                                }
+                                if (isHex3 && (charIdx + 4 == value.Length || !char.IsLetterOrDigit(value[charIdx + 4])))
+                                {
+                                    isHexColor = true;
                                 }
                             }
-                        }
 
-                        if (!isHexColor && !isInsideUrl)
-                        {
-                            commentIdx = charIdx;
-                            break;
+                            bool isInsideUrl = false;
+                            int colonSlashIdx = value.AsSpan(0, charIdx).LastIndexOf("://", StringComparison.Ordinal);
+                            if (colonSlashIdx >= 0)
+                            {
+                                isInsideUrl = true;
+                                for (int k = colonSlashIdx + 3; k < charIdx; k++)
+                                {
+                                    if (char.IsWhiteSpace(value[k]))
+                                    {
+                                        isInsideUrl = false;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (!isHexColor && !isInsideUrl)
+                            {
+                                commentIdx = charIdx;
+                                break;
+                            }
                         }
                     }
-                }
 
-                if (commentIdx >= 0)
-                {
-                    value = value[..commentIdx].Trim();
-                }
+                    if (commentIdx >= 0)
+                    {
+                        value = value[..commentIdx].Trim();
+                    }
 
-                // Strip outer quotes
-                if (value.Length >= 2 &&
-                    ((value[0] == '"' && value[^1] == '"') ||
-                     (value[0] == '\'' && value[^1] == '\'')))
-                {
-                    value = value[1..^1];
-                }
+                    // Strip outer quotes
+                    if (value.Length >= 2 &&
+                        ((value[0] == '"' && value[^1] == '"') ||
+                         (value[0] == '\'' && value[^1] == '\'')))
+                    {
+                        value = value[1..^1];
+                    }
 
-                envVars.Add($"{key}={value}");
+                    envVars.Add($"{key}={value}");
+                }
             }
 
             lock (EnvCacheLock)
@@ -1123,9 +1143,13 @@ internal static class DockerCommandBuilder
 
         var osComparison = (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()) ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
-        if ((path.StartsWith(ContainerWorkDir + "/", StringComparison.Ordinal) || path.Equals(ContainerWorkDir, StringComparison.Ordinal))
-            && !path.StartsWith(workingDirNormalized, osComparison)
-            && !path.Equals(resolvedWorkingDir, osComparison))
+        var normalizedPath = path.Replace('\\', '/');
+        var workingDirNormalizedUnix = workingDirNormalized.Replace('\\', '/');
+        var resolvedWorkingDirUnix = resolvedWorkingDir.Replace('\\', '/');
+
+        if ((normalizedPath.StartsWith(ContainerWorkDir + "/", StringComparison.Ordinal) || normalizedPath.Equals(ContainerWorkDir, StringComparison.Ordinal))
+            && !normalizedPath.StartsWith(workingDirNormalizedUnix, osComparison)
+            && !normalizedPath.Equals(resolvedWorkingDirUnix, osComparison))
         {
             return path;
         }
@@ -1422,28 +1446,29 @@ internal static class DockerCommandBuilder
                 return null;
             }
 
-            var content = File.ReadAllText(projFile);
-            using var document = JsonDocument.Parse(content);
-            var root = document.RootElement;
-
-            foreach (var property in root.EnumerateObject())
+            using (var fs = new FileStream(projFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var document = JsonDocument.Parse(fs))
             {
-                var propName = property.Name;
-                if (propName.StartsWith("GHDL-LIB_", StringComparison.OrdinalIgnoreCase))
+                var root = document.RootElement;
+                foreach (var property in root.EnumerateObject())
                 {
-                    var libName = propName["GHDL-LIB_".Length..];
-                    if (property.Value.ValueKind == JsonValueKind.Array)
+                    var propName = property.Name;
+                    if (propName.StartsWith("GHDL-LIB_", StringComparison.OrdinalIgnoreCase))
                     {
-                        foreach (var fileEl in property.Value.EnumerateArray())
+                        var libName = propName["GHDL-LIB_".Length..];
+                        if (property.Value.ValueKind == JsonValueKind.Array)
                         {
-                            var filePath = fileEl.GetString();
-                            if (filePath != null)
+                            foreach (var fileEl in property.Value.EnumerateArray())
                             {
-                                var normalizedPath = filePath.Replace('\\', '/');
-                                var fileName = Path.GetFileNameWithoutExtension(normalizedPath);
-                                if (string.Equals(fileName, unitName, StringComparison.OrdinalIgnoreCase))
+                                var filePath = fileEl.GetString();
+                                if (filePath != null)
                                 {
-                                    return libName;
+                                    var normalizedPath = filePath.Replace('\\', '/');
+                                    var fileName = Path.GetFileNameWithoutExtension(normalizedPath);
+                                    if (string.Equals(fileName, unitName, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        return libName;
+                                    }
                                 }
                             }
                         }

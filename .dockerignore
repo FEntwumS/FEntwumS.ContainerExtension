@@ -1,0 +1,44 @@
+# Exclude dotnet build outputs
+**/bin/
+**/obj/
+**/publish/
+**/publish_debug/
+
+# Exclude IDE and workspace settings
+.idea/
+.vs/
+.vscode/
+.gemini/
+*.user
+*.suo
+_ReSharper.Caches/
+
+# Exclude version control metadata
+.git/
+.gitignore
+.gitattributes
+.gitmodules
+
+# Exclude local configuration and secrets
+.env
+.env.*
+secrets.json
+docker_auth.json
+*.pem
+*.key
+*.cer
+*.crt
+
+# Exclude telemetry and logs
+*.log
+trivy-results.json
+sbom.spdx.json
+*.sarif
+TestResults/
+coverage/
+
+# Exclude tests and benchmarking harness
+tests/
+scripts/
+local_tests/
+local_test_workflows.sh

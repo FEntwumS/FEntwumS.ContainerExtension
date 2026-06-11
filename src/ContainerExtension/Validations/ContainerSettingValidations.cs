@@ -15,6 +15,10 @@ internal enum ResourceKind
     Custom
 }
 
+/// <summary>
+/// Validates numeric resource thresholds (Memory/CPU) ensuring they are positive, finite, 
+/// and within safe operational limits relative to host capacity.
+/// </summary>
 internal sealed class ResourceThresholdValidation : ISettingValidation
 {
     private readonly double _threshold;
@@ -24,20 +28,23 @@ internal sealed class ResourceThresholdValidation : ISettingValidation
 
     public ResourceThresholdValidation(double threshold, double total, string resourceName)
     {
+        _resourceName = resourceName ?? throw new ArgumentNullException(nameof(resourceName));
+        _resourceKind = _resourceName.Equals("memory", StringComparison.OrdinalIgnoreCase) ? ResourceKind.Memory :
+                        _resourceName.Equals("CPU", StringComparison.OrdinalIgnoreCase) ? ResourceKind.Cpu :
+                        ResourceKind.Custom;
+
         if (total <= 0 || double.IsNaN(total) || double.IsInfinity(total))
         {
-            throw new ArgumentOutOfRangeException(nameof(total), "Total capacity must be a positive finite number.");
+            total = _resourceKind == ResourceKind.Memory ? 4096.0 :
+                    _resourceKind == ResourceKind.Cpu ? 4.0 : 1.0;
         }
         if (threshold <= 0 || double.IsNaN(threshold) || double.IsInfinity(threshold))
         {
-            throw new ArgumentOutOfRangeException(nameof(threshold), "Threshold must be a positive finite number.");
+            threshold = total * 0.75;
         }
+
         _threshold = threshold;
         _total = total;
-        _resourceName = resourceName ?? throw new ArgumentNullException(nameof(resourceName));
-        _resourceKind = resourceName.Equals("memory", StringComparison.OrdinalIgnoreCase) ? ResourceKind.Memory :
-                        resourceName.Equals("CPU", StringComparison.OrdinalIgnoreCase) ? ResourceKind.Cpu :
-                        ResourceKind.Custom;
     }
 
     public bool Validate(object? value, out string? warningMessage)
@@ -76,6 +83,27 @@ internal sealed class ResourceThresholdValidation : ISettingValidation
                     break;
                 case long l:
                     numericValue = l;
+                    break;
+                case ulong ul:
+                    numericValue = ul;
+                    break;
+                case decimal dec:
+                    numericValue = (double)dec;
+                    break;
+                case uint ui:
+                    numericValue = ui;
+                    break;
+                case ushort us:
+                    numericValue = us;
+                    break;
+                case short sh:
+                    numericValue = sh;
+                    break;
+                case byte b:
+                    numericValue = b;
+                    break;
+                case sbyte sb:
+                    numericValue = sb;
                     break;
                 default:
                     return true;
@@ -133,6 +161,10 @@ internal sealed class ResourceThresholdValidation : ISettingValidation
     }
 }
 
+/// <summary>
+/// Validates Docker image strings against standard repository/tag formats.
+/// Supports optional allowances for empty strings depending on the setting requirement.
+/// </summary>
 internal sealed partial class DockerImageFormatValidation : ISettingValidation
 {
     private readonly bool _allowEmpty;
@@ -155,7 +187,7 @@ internal sealed partial class DockerImageFormatValidation : ISettingValidation
             return false;
         }
         var str = value as string ?? value.ToString();
-        if (string.IsNullOrWhiteSpace(str))
+        if (str == null || string.IsNullOrWhiteSpace(str))
         {
             if (_allowEmpty)
             {
@@ -185,6 +217,10 @@ internal sealed partial class DockerImageFormatValidation : ISettingValidation
     }
 }
 
+/// <summary>
+/// Validates custom daemon socket URIs for correct scheme prefixes (unix://, tcp://, npipe://)
+/// and restricts unsafe characters.
+/// </summary>
 internal sealed class DaemonSocketValidation : ISettingValidation
 {
 
@@ -196,7 +232,7 @@ internal sealed class DaemonSocketValidation : ISettingValidation
             return true;
         }
         var raw = value as string ?? value.ToString();
-        if (string.IsNullOrWhiteSpace(raw))
+        if (raw == null || string.IsNullOrWhiteSpace(raw))
         {
             return true;
         }
@@ -247,6 +283,10 @@ internal sealed class DaemonSocketValidation : ISettingValidation
     }
 }
 
+/// <summary>
+/// Validates container name prefixes to ensure compliance with Docker's naming conventions 
+/// (letters, digits, hyphens, underscores) and length limits.
+/// </summary>
 internal sealed partial class ContainerNameValidation : ISettingValidation
 {
     [GeneratedRegex(@"^[a-zA-Z0-9][a-zA-Z0-9._\-]*$", RegexOptions.ExplicitCapture | RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]
@@ -257,7 +297,7 @@ internal sealed partial class ContainerNameValidation : ISettingValidation
         warningMessage = null;
         if (value == null) return true;
         var str = value as string ?? value.ToString();
-        if (string.IsNullOrWhiteSpace(str)) return true;
+        if (str == null || string.IsNullOrWhiteSpace(str)) return true;
 
         str = str.Trim();
         if (!System.Text.Ascii.IsValid(str))

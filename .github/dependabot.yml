@@ -23,6 +23,10 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 3
+    groups:
+      actions-dependencies:
+        patterns:
+          - "*"
     labels:
       - "dependencies"
       - "ci"
@@ -36,6 +40,10 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 3
+    groups:
+      docker-dependencies:
+        patterns:
+          - "*"
     labels:
       - "dependencies"
       - "docker"

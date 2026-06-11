@@ -10,8 +10,13 @@ using OneWare.Essentials.Services;
 
 namespace ContainerExtension.Services.Docker;
 
+/// <summary>
+/// Handles container image resolution, pulling, inspection, and pruning.
+/// Integrates with <see cref="ISettingsService"/> to respect pull policies (Always, IfNotPresent, Never).
+/// </summary>
 public sealed class DockerImageManager
 {
+    private static readonly System.Diagnostics.ActivitySource ImageActivitySource = new("OneWare.ContainerExtension.Image");
     private static readonly SemaphoreSlim PullSemaphore = new(2, 2);
     private static readonly SemaphoreSlim PruneSemaphore = new(1, 1);
     private static readonly FrozenDictionary<string, IDictionary<string, bool>> DanglingFilters =
@@ -19,13 +24,11 @@ public sealed class DockerImageManager
         {
             { "dangling", new Dictionary<string, bool>(StringComparer.Ordinal) { { "true", true } }.ToFrozenDictionary(StringComparer.Ordinal) }
         }.ToFrozenDictionary(StringComparer.Ordinal);
-    
+
     private readonly DockerClient _client;
     private readonly ISettingsService _settingsService;
 
-    private int _lastImageCount = -1;
-    private (int imageCount, long totalSizeBytes, long reclaimableBytes) _cachedDiskUsage;
-    private readonly System.Threading.Lock _diskUsageLock = new();
+
 
     public DockerImageManager(DockerClient client, ISettingsService settingsService)
     {
@@ -72,6 +75,10 @@ public sealed class DockerImageManager
             }
             return images;
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             ContainerTelemetry.TrackError("DockerImageManager", "ListImagesAsync failed", ex);
@@ -88,6 +95,8 @@ public sealed class DockerImageManager
 
     public async Task RemoveImageAsync(string imageId, CancellationToken ct = default)
     {
+        using var activity = ImageActivitySource.StartActivity("DockerImageManager.RemoveImage");
+        activity?.SetTag("image.id", imageId);
         if (string.IsNullOrWhiteSpace(imageId))
         {
             throw new ArgumentException("Image ID cannot be null or whitespace.", nameof(imageId));
@@ -116,6 +125,7 @@ public sealed class DockerImageManager
 
     public async Task<(int pulled, int failed)> UpdateAllImagesAsync(Action<string>? progress = null, CancellationToken ct = default)
     {
+        using var activity = ImageActivitySource.StartActivity("DockerImageManager.UpdateAllImages");
         int pulled = 0, failed = 0;
         try
         {
@@ -276,20 +286,6 @@ public sealed class DockerImageManager
     public async Task<(int imageCount, long totalSizeBytes, long reclaimableBytes)> GetDiskUsageSummaryAsync(CancellationToken ct = default)
     {
         var images = await ListImagesAsync(ct).ConfigureAwait(false);
-        lock (_diskUsageLock)
-        {
-            if (images != null && images.Count == _lastImageCount && _lastImageCount != -1)
-            {
-                return _cachedDiskUsage;
-            }
-        }
-
-        var summary = ComputeDiskUsage(images, ct);
-        lock (_diskUsageLock)
-        {
-            _lastImageCount = images?.Count ?? 0;
-            _cachedDiskUsage = summary;
-        }
-        return summary;
+        return ComputeDiskUsage(images, ct);
     }
 }

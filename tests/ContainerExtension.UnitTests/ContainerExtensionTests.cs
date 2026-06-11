@@ -52,7 +52,7 @@ public sealed class ContainerExtensionTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    // ── Smoke Test ──────────────────────────────────────────────────────
+    // -- Smoke Test ------------------------------------------------------
 
     [Fact]
     public void LoadLibrary()
@@ -62,7 +62,7 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.Contains("ContainerExtension", assembly.GetName().Name, StringComparison.Ordinal);
     }
 
-    // ── String Extensions — Edge Cases ──────────────────────────────────
+    // -- String Extensions - Edge Cases ----------------------------------
 
     [Theory]
     [InlineData(null, null)]
@@ -83,7 +83,7 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.Equal("   ", result); // Preserves exact string structure up to 12
     }
 
-    // ── Docker Image Format Validation ──────────────────────────────────
+    // -- Docker Image Format Validation ----------------------------------
 
     [Theory]
     [InlineData("hdlc/ghdl:yosys", true)]
@@ -108,7 +108,7 @@ public sealed class ContainerExtensionTests : IDisposable
             Assert.NotNull(warning);
     }
 
-    // ── Daemon Socket URI Validation ────────────────────────────────────
+    // -- Daemon Socket URI Validation ------------------------------------
 
     [Theory]
     [InlineData("", true)]
@@ -127,15 +127,15 @@ public sealed class ContainerExtensionTests : IDisposable
             Assert.NotNull(warning);
     }
 
-    // ── Resource Threshold Logic ────────────────────────────────────────
+    // -- Resource Threshold Logic ----------------------------------------
 
     [Theory]
     [InlineData(0.0, true, false)]       // 0 = no limit, always valid, no warning
-    [InlineData(2048.0, true, false)]    // Below 75% of 16384 — valid, no warning
-    [InlineData(14000.0, true, true)]    // Above 75% of 16384 → valid with advisory warning
-    [InlineData(16384.0, true, true)]    // 100% of total → valid with advisory warning
-    [InlineData(20000.0, false, true)]   // Above total → rejected with error
-    [InlineData(-100.0, false, true)]    // Negative limits → rejected with error
+    [InlineData(2048.0, true, false)]    // Below 75% of 16384 - valid, no warning
+    [InlineData(14000.0, true, true)]    // Above 75% of 16384 -> valid with advisory warning
+    [InlineData(16384.0, true, true)]    // 100% of total -> valid with advisory warning
+    [InlineData(20000.0, false, true)]   // Above total -> rejected with error
+    [InlineData(-100.0, false, true)]    // Negative limits -> rejected with error
     public void ResourceThreshold_WarnsAbove75Percent(double value, bool expectedValid, bool expectWarning)
     {
         // Uses the real validator with 75% threshold of 16384 MB total
@@ -181,7 +181,7 @@ public sealed class ContainerExtensionTests : IDisposable
         }
     }
 
-    // ── Setting Constants ───────────────────────────────────────────────
+    // -- Setting Constants -----------------------------------------------
 
     [Fact]
     public void SettingConstants_AreConsistentlyPrefixed()
@@ -214,7 +214,7 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.True(result, $"FallbackImage '{fallback}' should pass the DockerImageFormatValidation.");
     }
 
-    // ── Container Name Prefix Validation ────────────────────────────────
+    // -- Container Name Prefix Validation --------------------------------
 
     [Theory]
     [InlineData("containerextension-", true)]
@@ -236,7 +236,7 @@ public sealed class ContainerExtensionTests : IDisposable
             Assert.NotNull(warning);
     }
 
-    // ── Container Name Prefix Length Limit ──────────────────────────────
+    // -- Container Name Prefix Length Limit ------------------------------
 
     [Fact]
     public void ContainerNamePrefix_RejectsOver64Characters()
@@ -255,7 +255,7 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.True(result, "Prefix of exactly 64 characters should be accepted.");
     }
 
-    // ── Container Telemetry ─────────────────────────────────────────────
+    // -- Container Telemetry ---------------------------------------------
 
     [Fact]
     public void Telemetry_LogAndRetrieveRoundtrip()
@@ -351,9 +351,9 @@ public sealed class ContainerExtensionTests : IDisposable
         ContainerTelemetry.ClearEntries();
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //  DrainLines Tests (DockerExecutionStrategy — stream demultiplexer)
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
+    //  DrainLines Tests (DockerExecutionStrategy - stream demultiplexer)
+    // =======================================================================
 
     [Fact]
     public void DrainLines_SingleLine_InvokedWithoutNewline()
@@ -430,9 +430,9 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.Equal("no newline", buffer.ToString());
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
     //  BuildContainerParameters Tests (DockerCommandBuilder)
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
 
     [Fact]
     public void BuildContainerParameters_BasicCommand_ProducesCorrectConfig()
@@ -476,13 +476,62 @@ public sealed class ContainerExtensionTests : IDisposable
     }
 
     [Fact]
+    public void BuildContainerParameters_DefaultHomeEnvVar_InjectedWhenMissing()
+    {
+        var command = new ToolCommand
+        {
+            Executable = "ghdl",
+            ToolName = "test",
+            WorkingDirectory = "/workspace/dir",
+            CommandArguments = new List<ICommandArgument>()
+        };
+
+        var param = DockerCommandBuilder.BuildContainerParameters(
+            "test_image:latest",
+            command,
+            null!,
+            "1000", "1000",
+            (cmd, log) => { });
+
+        Assert.NotNull(param.Env);
+        Assert.Contains("HOME=/tmp", param.Env);
+    }
+
+    [Fact]
+    public void BuildContainerParameters_DefaultHomeEnvVar_NotOverwrittenIfSet()
+    {
+        var command = new ToolCommand
+        {
+            Executable = "ghdl",
+            ToolName = "test",
+            WorkingDirectory = "/workspace/dir",
+            CommandArguments = new List<ICommandArgument>(),
+            EnvironmentVariables = new Dictionary<string, string>
+            {
+                { "HOME", "/custom/home" }
+            }
+        };
+
+        var param = DockerCommandBuilder.BuildContainerParameters(
+            "test_image:latest",
+            command,
+            null!,
+            "1000", "1000",
+            (cmd, log) => { });
+
+        Assert.NotNull(param.Env);
+        Assert.Contains("HOME=/custom/home", param.Env);
+        Assert.DoesNotContain("HOME=/tmp", param.Env);
+    }
+
+    [Fact]
     public void BuildContainerParameters_BindsCorrectlyBasedOnToolWriteAccess()
     {
         // 1. gmpack (pack tool -> write access -> bind without :ro)
-        var cmdGmpack = new ToolCommand 
-        { 
-            Executable = "gmpack", 
-            ToolName = "gmpack", 
+        var cmdGmpack = new ToolCommand
+        {
+            Executable = "gmpack",
+            ToolName = "gmpack",
             WorkingDirectory = "/workspace/dir",
             CommandArguments = new List<ICommandArgument>()
         };
@@ -490,10 +539,10 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.Contains(paramGmpack.HostConfig.Binds, b => b.EndsWith(":/workspace", StringComparison.Ordinal));
 
         // 2. openFPGALoader (programmer -> read only -> bind with :ro)
-        var cmdLoader = new ToolCommand 
-        { 
-            Executable = "openFPGALoader", 
-            ToolName = "openFPGALoader", 
+        var cmdLoader = new ToolCommand
+        {
+            Executable = "openFPGALoader",
+            ToolName = "openFPGALoader",
             WorkingDirectory = "/workspace/dir",
             CommandArguments = new List<ICommandArgument>()
         };
@@ -501,10 +550,10 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.Contains(paramLoader.HostConfig.Binds, b => b.EndsWith(":/workspace:ro", StringComparison.Ordinal));
 
         // 3. icepack (pack tool -> write access -> bind without :ro)
-        var cmdIcepack = new ToolCommand 
-        { 
-            Executable = "icepack", 
-            ToolName = "icepack", 
+        var cmdIcepack = new ToolCommand
+        {
+            Executable = "icepack",
+            ToolName = "icepack",
             WorkingDirectory = "/workspace/dir",
             CommandArguments = new List<ICommandArgument>()
         };
@@ -553,9 +602,9 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.Equal("tool_only", param.Cmd![2]);
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //  ParseEnvFile Tests (DockerExecutionStrategy — .env parsing)
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
+    //  ParseEnvFile Tests (DockerExecutionStrategy - .env parsing)
+    // =======================================================================
 
 
     [Fact]
@@ -649,12 +698,7 @@ public sealed class ContainerExtensionTests : IDisposable
     [InlineData("ghcr.io/namespace/repository/subrepo", "ghcr.io", "namespace/repository", "subrepo")]
     public void RegistryClient_ParseImageReference_SplitsCorrectly(string input, string expectedRegistry, string expectedNs, string expectedRepo)
     {
-        var method = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetMethod("ParseImageReference", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        Assert.NotNull(method);
-        var result = method.Invoke(null, new object[] { input });
-        Assert.NotNull(result);
-
-        var tuple = ((string Registry, string Namespace, string Repository))result;
+        var tuple = FEntwumS.ContainerExtension.Registry.RegistryClient.ParseImageReference(input);
         Assert.Equal(expectedRegistry, tuple.Registry);
         Assert.Equal(expectedNs, tuple.Namespace);
         Assert.Equal(expectedRepo, tuple.Repository);
@@ -690,9 +734,9 @@ public sealed class ContainerExtensionTests : IDisposable
         finally { Directory.Delete(dir, true); }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
     //  Resource Profile Telemetry Tests (OOM Analyzer)
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
 
     [Fact]
     public void Telemetry_ResourceProfile_RoundTrip()
@@ -760,9 +804,9 @@ public sealed class ContainerExtensionTests : IDisposable
         ContainerTelemetry.ClearEntries();
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
     //  Telemetry Export Tests
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
 
     [Fact]
     public void Telemetry_ExportTo_CreatesValidCopy()
@@ -804,9 +848,9 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.False(File.Exists(destPath), "No file should be created when export fails.");
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
     //  Setting Constants Value Correctness
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
 
     [Fact]
     public void SettingConstants_HaveExpectedValues()
@@ -819,9 +863,9 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.StartsWith("ContainerImage_", ContainerExtensionModule.PerToolImagePrefix, StringComparison.Ordinal);
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //  Docker Image Format — Additional Edge Cases
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
+    //  Docker Image Format - Additional Edge Cases
+    // =======================================================================
 
     [Theory]
     [InlineData("my.registry:5000/org/repo:v1.2", true)]    // Registry with port and namespace
@@ -1274,7 +1318,7 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.Equal("myrepo", res2.Repository);
     }
 
-    // ── Additional Unit Tests ───────────────────────────────────────────
+    // -- Additional Unit Tests -------------------------------------------
 
     [Fact]
     public void ShortId_StripsSha256PrefixCorrectly()
@@ -1418,7 +1462,7 @@ public sealed class ContainerExtensionTests : IDisposable
     public void ResourceThreshold_SupportsNumericConversions()
     {
         var validator = new ResourceThresholdValidation(75.0, 100.0, "Resource");
-        
+
         Assert.True(validator.Validate(50.0, out _));
         Assert.True(validator.Validate(50f, out _));
         Assert.True(validator.Validate(50, out _));
@@ -1450,7 +1494,7 @@ public sealed class ContainerExtensionTests : IDisposable
         var script = "synth_gatemate -top  Verilog_Blink -luttree -nomx8; write_json /Users/mtorun/OneWareStudio/Projects/Verilog_Blink/build/synth.json";
         var workingDirFull = "/Users/mtorun/OneWareStudio/Projects/Verilog_Blink";
         var workingDirCanonical = "/Users/mtorun/OneWareStudio/Projects/Verilog_Blink";
-        
+
         var result = DockerCommandBuilder.MapCommandScriptPaths(script, workingDirFull, workingDirCanonical);
         Assert.Equal("synth_gatemate -top  Verilog_Blink -luttree -nomx8; write_json /workspace/build/synth.json", result);
     }
@@ -1461,7 +1505,7 @@ public sealed class ContainerExtensionTests : IDisposable
         var script = "\"synth_gatemate -top  Verilog_Blink -luttree -nomx8; write_json /Users/mtorun/OneWareStudio/Projects/Verilog_Blink/build/synth.json\"";
         var workingDirFull = "/Users/mtorun/OneWareStudio/Projects/Verilog_Blink";
         var workingDirCanonical = "/Users/mtorun/OneWareStudio/Projects/Verilog_Blink";
-        
+
         var result = DockerCommandBuilder.MapCommandScriptPaths(script, workingDirFull, workingDirCanonical);
         Assert.Equal("\"synth_gatemate -top  Verilog_Blink -luttree -nomx8; write_json /workspace/build/synth.json\"", result);
     }
@@ -1472,7 +1516,7 @@ public sealed class ContainerExtensionTests : IDisposable
         var script = "synth_gatemate -top Verilog_Blink\nwrite_json\t/Users/mtorun/OneWareStudio/Projects/Verilog_Blink/build/synth.json\r\n#comment";
         var workingDirFull = "/Users/mtorun/OneWareStudio/Projects/Verilog_Blink";
         var workingDirCanonical = "/Users/mtorun/OneWareStudio/Projects/Verilog_Blink";
-        
+
         var result = DockerCommandBuilder.MapCommandScriptPaths(script, workingDirFull, workingDirCanonical);
         Assert.Equal("synth_gatemate -top Verilog_Blink\nwrite_json\t/workspace/build/synth.json\r\n#comment", result);
     }
@@ -1483,7 +1527,7 @@ public sealed class ContainerExtensionTests : IDisposable
         var script = "'\"synth_gatemate -top Verilog_Blink; write_json /Users/mtorun/OneWareStudio/Projects/Verilog_Blink/build/synth.json\"'";
         var workingDirFull = "/Users/mtorun/OneWareStudio/Projects/Verilog_Blink";
         var workingDirCanonical = "/Users/mtorun/OneWareStudio/Projects/Verilog_Blink";
-        
+
         var result = DockerCommandBuilder.MapCommandScriptPaths(script, workingDirFull, workingDirCanonical);
         Assert.Equal("'\"synth_gatemate -top Verilog_Blink; write_json /workspace/build/synth.json\"'", result);
     }
@@ -1515,21 +1559,21 @@ public sealed class ContainerExtensionTests : IDisposable
     public void ToolRequiresWriteAccess_DetectsRedirectionAndVariousOutputFlags()
     {
         // Shell Redirection
-        var cmdRedir = new ToolCommand 
-        { 
-            Executable = "some-unknown-tool", 
-            ToolName = "some-unknown-tool", 
-            CommandArguments = new List<ICommandArgument> { new TestCommandArgument(">"), new TestCommandArgument("out.txt") } 
+        var cmdRedir = new ToolCommand
+        {
+            Executable = "some-unknown-tool",
+            ToolName = "some-unknown-tool",
+            CommandArguments = new List<ICommandArgument> { new TestCommandArgument(">"), new TestCommandArgument("out.txt") }
         };
         var paramRedir = DockerCommandBuilder.BuildContainerParameters("img", cmdRedir, null!, null, null, (c, l) => { });
         Assert.Contains(paramRedir.HostConfig.Binds, b => b.EndsWith(":/workspace", StringComparison.Ordinal));
 
         // Output parameter format --write=
-        var cmdWrite = new ToolCommand 
-        { 
-            Executable = "some-unknown-tool", 
-            ToolName = "some-unknown-tool", 
-            CommandArguments = new List<ICommandArgument> { new TestCommandArgument("--write=out.json") } 
+        var cmdWrite = new ToolCommand
+        {
+            Executable = "some-unknown-tool",
+            ToolName = "some-unknown-tool",
+            CommandArguments = new List<ICommandArgument> { new TestCommandArgument("--write=out.json") }
         };
         var paramWrite = DockerCommandBuilder.BuildContainerParameters("img", cmdWrite, null!, null, null, (c, l) => { });
         Assert.Contains(paramWrite.HostConfig.Binds, b => b.EndsWith(":/workspace", StringComparison.Ordinal));
@@ -1548,7 +1592,7 @@ public sealed class ContainerExtensionTests : IDisposable
         var key = "openFPGALoader";
         var lowerKey = key.ToLowerInvariant();
         var settingKey = $"{ContainerExtensionModule.PerToolImagePrefix}{lowerKey}";
-        
+
         Assert.Equal("ContainerImage_openfpgaloader", settingKey);
     }
 
@@ -1630,7 +1674,7 @@ public sealed class ContainerExtensionTests : IDisposable
         var tagsCacheField = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetField("TagsCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(tagsCacheField);
         var cache = (System.Collections.Concurrent.ConcurrentDictionary<string, (List<string> tags, long cacheTimeTicks)>)tagsCacheField.GetValue(null)!;
-        
+
         cache.Clear();
         // Use very small sub-second offsets so none of them are considered expired (age >= 60 seconds),
         // triggering only the count-based oldest pruning logic.
@@ -1644,7 +1688,7 @@ public sealed class ContainerExtensionTests : IDisposable
 
         var addToCacheMethod = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetMethod("AddToCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(addToCacheMethod);
-        
+
         addToCacheMethod.Invoke(null, new object[] { "new_image", new List<string> { "v1" } });
 
         Assert.Equal(100, cache.Count);
@@ -1716,7 +1760,7 @@ public sealed class ContainerExtensionTests : IDisposable
         var cacheField = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetField("DnsCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(cacheField);
         var dnsCache = (System.Collections.Concurrent.ConcurrentDictionary<string, (System.Net.IPAddress[] ips, long cacheTimeTicks)>)cacheField.GetValue(null)!;
-        
+
         dnsCache.Clear();
 
         for (int i = 0; i < 49; i++)
@@ -2028,6 +2072,272 @@ public sealed class ContainerExtensionTests : IDisposable
         finally
         {
             Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void BuildContainerParameters_GhdlElabWithFileAndEntityName_ResolvesCorrectly()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"ghdl_elab_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var projectJson = @"{
+  ""GHDL-LIB_neorv32"": [
+    ""rtl/core/neorv32_top.vhd""
+  ]
+}";
+            File.WriteAllText(Path.Combine(tempDir, "test.fpgaproj"), projectJson);
+
+            // Test case 1: Old style where file path is passed to ghdl -e
+            var command1 = new ToolCommand
+            {
+                Executable = "ghdl",
+                ToolName = "ghdl",
+                WorkingDirectory = tempDir,
+                CommandArguments = new List<ICommandArgument>
+                {
+                    new TestCommandArgument("-e"),
+                    new TestCommandArgument("rtl/core/neorv32_top.vhd")
+                }
+            };
+            var param1 = DockerCommandBuilder.BuildContainerParameters("img", command1, null!, null, null, (c, l) => { });
+            Assert.Equal("ghdl -e --work=neorv32 neorv32_top", param1.Cmd![2]);
+
+            // Test case 2: New style where pure entity name is passed to ghdl -e
+            var command2 = new ToolCommand
+            {
+                Executable = "ghdl",
+                ToolName = "ghdl",
+                WorkingDirectory = tempDir,
+                CommandArguments = new List<ICommandArgument>
+                {
+                    new TestCommandArgument("-e"),
+                    new TestCommandArgument("neorv32_top")
+                }
+            };
+            var param2 = DockerCommandBuilder.BuildContainerParameters("img", command2, null!, null, null, (c, l) => { });
+            Assert.Equal("ghdl -e --work=neorv32 neorv32_top", param2.Cmd![2]);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void RegistryClient_ParseImageReference_HandlesDigestsWithTagsCorrectly()
+    {
+        var result1 = FEntwumS.ContainerExtension.Registry.RegistryClient.ParseImageReference("ubuntu:latest@sha256:45b23d8157d0e1b6567d0e1b6567d0e1b6567d0e1b6567d0e1b6567d0e1b6567");
+        Assert.Equal("", result1.Registry);
+        Assert.Equal("", result1.Namespace);
+        Assert.Equal("ubuntu", result1.Repository);
+
+        var result2 = FEntwumS.ContainerExtension.Registry.RegistryClient.ParseImageReference("registry-1.docker.io/library/ubuntu:latest@sha256:45b23d8157d0e1b6567d0e1b6567d0e1b6567d0e1b6567d0e1b6567d0e1b6567");
+        Assert.Equal("registry-1.docker.io", result2.Registry);
+        Assert.Equal("library", result2.Namespace);
+        Assert.Equal("ubuntu", result2.Repository);
+    }
+
+    [Fact]
+    public void RegistryClient_ScrubSecrets_ScrubsTokensAndProfiles()
+    {
+        var method = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetMethod("ScrubSecrets", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+
+        // Test token scrubbing
+        var tokenInput = "GET /v2/token=abc123xyz HTTP/1.1";
+        var tokenResult = method.Invoke(null, new object[] { tokenInput }) as string;
+        Assert.Equal("GET /v2/token=*** HTTP/1.1", tokenResult);
+
+        // Test user profile home directory scrubbing
+        var homeField = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetField("CachedUserProfile", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(homeField);
+        var originalHome = homeField.GetValue(null) as string;
+        if (!string.IsNullOrEmpty(originalHome))
+        {
+            var homeInput = $"File path: {originalHome}/settings.json";
+            var homeResult = method.Invoke(null, new object[] { homeInput }) as string;
+            Assert.Equal("File path: ~/settings.json", homeResult);
+        }
+
+        // Test username scrubbing
+        var userField = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetField("CachedUserName", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(userField);
+        var originalUser = userField.GetValue(null) as string;
+        if (!string.IsNullOrEmpty(originalUser))
+        {
+            var userInput = $"User is {originalUser}";
+            var userResult = method.Invoke(null, new object[] { userInput }) as string;
+            if (originalUser.Length >= 3)
+            {
+                Assert.Equal("User is ***", userResult);
+            }
+            else
+            {
+                Assert.Equal($"User is {originalUser}", userResult);
+            }
+        }
+    }
+
+    [Fact]
+    public void DockerCommandBuilder_MemoryLimitClamp_ClampsBelow6MB()
+    {
+        var settings = new MockSettingsService();
+        settings.SetSettingValue(ContainerExtensionModule.MemoryLimitSetting, 4.0); // 4MB
+
+        var command = new ToolCommand
+        {
+            Executable = "ghdl",
+            ToolName = "test",
+            WorkingDirectory = "/workspace",
+            CommandArguments = new List<ICommandArgument>()
+        };
+
+        var param = DockerCommandBuilder.BuildContainerParameters("img", command, settings, null, null, (c, l) => { });
+        Assert.Equal(6 * 1024 * 1024, param.HostConfig.Memory); // Clamped to 6MB
+    }
+
+    [Fact]
+    public void DockerCommandBuilder_CpuLimitNanoCPUs_RoundsCorrectly()
+    {
+        var settings = new MockSettingsService();
+        settings.SetSettingValue(ContainerExtensionModule.CpuLimitSetting, 0.5); // 0.5 cores
+
+        var command = new ToolCommand
+        {
+            Executable = "ghdl",
+            ToolName = "test",
+            WorkingDirectory = "/workspace",
+            CommandArguments = new List<ICommandArgument>()
+        };
+
+        var param = DockerCommandBuilder.BuildContainerParameters("img", command, settings, null, null, (c, l) => { });
+        Assert.Equal(500000000L, param.HostConfig.NanoCPUs); // Rounded/scaled core limit
+    }
+
+    [Fact]
+    public void DockerCommandBuilder_BuildContainerParameters_PreventsDirectoryTraversal()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"traversal_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        var outsideDirName = $"outside_dir_{Guid.NewGuid():N}";
+        var outsidePath = Path.GetFullPath(Path.Combine(tempDir, "..", outsideDirName));
+
+        try
+        {
+            var command = new ToolCommand
+            {
+                Executable = "ghdl",
+                ToolName = "test",
+                WorkingDirectory = tempDir,
+                CommandArguments = new List<ICommandArgument>
+                {
+                    new TestCommandArgument($"../{outsideDirName}/output.v")
+                }
+            };
+
+            _ = DockerCommandBuilder.BuildContainerParameters("img", command, null!, null, null, (c, l) => { });
+
+            Assert.False(Directory.Exists(outsidePath), "The outside directory traversal path should not have been created.");
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+            if (Directory.Exists(outsidePath))
+            {
+                Directory.Delete(outsidePath, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void DockerCommandBuilder_MapPathToContainerInternal_MapsPathsCorrectly()
+    {
+        var method = typeof(DockerCommandBuilder).GetMethod("MapPathToContainerInternal", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var workingDir = "/Users/mtorun/Projects/MyProject";
+        var path1 = "/Users/mtorun/Projects/MyProject/build/out.json";
+        var result1 = method.Invoke(null, new object[] { path1, workingDir }) as string;
+        Assert.Equal("/workspace/build/out.json", result1);
+
+        var path2 = "src/main.v";
+        var result2 = method.Invoke(null, new object[] { path2, workingDir }) as string;
+        Assert.Equal("/workspace/src/main.v", result2);
+    }
+
+    [Fact]
+    public async Task RegistryClient_ResolveDnsAsync_EvictsCacheWhenFull()
+    {
+        var cacheField = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetField("DnsCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(cacheField);
+        var dnsCache = (System.Collections.Concurrent.ConcurrentDictionary<string, (System.Net.IPAddress[] ips, long cacheTimeTicks)>)cacheField.GetValue(null)!;
+
+        dnsCache.Clear();
+        for (int i = 0; i < 50; i++)
+        {
+            dnsCache[$"host{i}.com"] = (Array.Empty<System.Net.IPAddress>(), Environment.TickCount64);
+        }
+
+        var method = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetMethod("ResolveDnsAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var task = method.Invoke(null, new object[] { "localhost", CancellationToken.None }) as Task<System.Net.IPAddress[]>;
+        Assert.NotNull(task);
+        _ = await task.ConfigureAwait(true);
+
+        Assert.Single(dnsCache);
+        Assert.True(dnsCache.ContainsKey("localhost"));
+    }
+
+    [Fact]
+    public void ContainerTelemetry_CountLinesSafe_CountsCorrectly()
+    {
+        var method = typeof(ContainerExtension.ContainerTelemetry).GetMethod("CountLinesSafe", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var resultNonExistent = method.Invoke(null, new object[] { "does-not-exist.txt" });
+        Assert.Equal(0, resultNonExistent);
+
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(tempFile, "line1\nline2\nline3\n");
+            var resultCount = method.Invoke(null, new object[] { tempFile });
+            Assert.Equal(3, resultCount);
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public void ContainerTelemetry_ReadLastLinesSafe_ReadsCorrectly()
+    {
+        var method = typeof(ContainerExtension.ContainerTelemetry).GetMethod("ReadLastLinesSafe", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var resultNonExistent = method.Invoke(null, new object[] { "does-not-exist.txt", 10 }) as List<string>;
+        Assert.NotNull(resultNonExistent);
+        Assert.Empty(resultNonExistent);
+
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(tempFile, "line1\nline2\nline3\nline4\nline5\n");
+            var resultLines = method.Invoke(null, new object[] { tempFile, 3 }) as List<string>;
+            Assert.NotNull(resultLines);
+            Assert.Equal(3, resultLines.Count);
+            Assert.Equal("line3", resultLines[0]);
+            Assert.Equal("line4", resultLines[1]);
+            Assert.Equal("line5", resultLines[2]);
+        }
+        finally
+        {
+            File.Delete(tempFile);
         }
     }
 #pragma warning restore CA1305, CA1307, CA1031, CA1822, CS8019, CA1308

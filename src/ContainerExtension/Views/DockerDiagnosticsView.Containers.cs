@@ -17,6 +17,10 @@ using Avalonia.Threading;
 
 namespace ContainerExtension.Views;
 
+/// <summary>
+/// Partial class containing the Container Lifecycle and Inspection logic:
+/// Real-time monitoring, log tailing, container stopping/removing, and port mapping visualization.
+/// </summary>
 public partial class DockerDiagnosticsView
 {
     private AsyncRelayCommand<string>? _logsCommand;
@@ -230,17 +234,6 @@ public partial class DockerDiagnosticsView
 
                     UpdateLogUI();
 
-                    filterTextBox.TextChanged += (sender, e) =>
-                    {
-                        var original = filterTextBox.Text ?? "";
-                        var filtered = new string(original.Where(ch => char.IsLetterOrDigit(ch) || char.IsWhiteSpace(ch)).ToArray());
-                        if (original != filtered)
-                        {
-                            filterTextBox.Text = filtered;
-                            filterTextBox.CaretIndex = filtered.Length;
-                        }
-                    };
-
                     filterTextBox.PropertyChanged += (sender, e) =>
                     {
                         if (e.Property == TextBox.TextProperty)
@@ -413,11 +406,12 @@ public partial class DockerDiagnosticsView
 
                     _ = Task.Run(async () =>
                     {
+                        Task? updateTask = null;
                         try
                         {
                             var needsUpdate = false;
 
-                            _ = Task.Run(async () =>
+                            updateTask = Task.Run(async () =>
                             {
                                 try
                                 {
@@ -440,6 +434,9 @@ public partial class DockerDiagnosticsView
                                     }
                                 }
                                 catch (OperationCanceledException)
+                                {
+                                }
+                                catch (ObjectDisposedException)
                                 {
                                 }
                             }, cts.Token);
@@ -495,6 +492,34 @@ public partial class DockerDiagnosticsView
                                 }
                             });
                         }
+                        finally
+                        {
+                            try
+                            {
+                                await cts.CancelAsync().ConfigureAwait(false);
+                            }
+                            catch (ObjectDisposedException)
+                            {
+                            }
+                            if (updateTask != null)
+                            {
+                                try
+                                {
+                                    await updateTask.ConfigureAwait(false);
+                                }
+                                catch
+                                {
+                                    // Ignore update task completion errors
+                                }
+                            }
+                            try
+                            {
+                                cts.Dispose();
+                            }
+                            catch (ObjectDisposedException)
+                            {
+                            }
+                        }
                     });
 
                     logWindow.Closed += (_, _) =>
@@ -507,17 +532,6 @@ public partial class DockerDiagnosticsView
                         {
                         }
                         _openLogWindows.TryRemove(logContainerId, out _);
-                        _ = Task.Run(async () =>
-                        {
-                            try
-                            {
-                                await Task.Delay(1000).ConfigureAwait(false);
-                                cts.Dispose();
-                            }
-                            catch (ObjectDisposedException)
-                            {
-                            }
-                        });
                     };
                     _openLogWindows[logContainerId] = logWindow;
 
@@ -532,8 +546,9 @@ public partial class DockerDiagnosticsView
                     }
                 });
             }
-            catch
+            catch (Exception ex)
             {
+                ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "LogsCommand", ex);
                 _openLogWindows.TryRemove(logContainerId, out _);
             }
         });
@@ -728,7 +743,7 @@ public partial class DockerDiagnosticsView
         });
     }
 
-    // ── Debouncer and Stats Cache State (F14, F15) ──────────────────────
+    // -- Debouncer and Stats Cache State (F14, F15) ----------------------
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _lastActionTimes = new(StringComparer.Ordinal);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _liveStats = new(StringComparer.Ordinal);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _activeStatsQueries = new(StringComparer.Ordinal);
@@ -844,6 +859,7 @@ public partial class DockerDiagnosticsView
 
     private void PopulateContainers(IList<Docker.DotNet.Models.ContainerListResponse> containers)
     {
+        if (containers == null) return;
         lock (_cachedDataLock)
         {
             _cachedContainers = containers;
@@ -1213,23 +1229,23 @@ public partial class DockerDiagnosticsView
     {
         if (ports == null || ports.Count == 0) return "No active port mappings.";
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine("╔═══════════════════════════════════════════╗");
+        sb.AppendLine("╔===========================================╗");
         sb.AppendLine("║          PORT MAPPING DIAGRAM             ║");
-        sb.AppendLine("╠═══════════════════════════════════════════╣");
+        sb.AppendLine("╠===========================================╣");
         foreach (var p in ports)
         {
             if (p.PublicPort != 0)
             {
                 var hostStr = $"{p.IP}:{p.PublicPort}".PadRight(18);
                 var containerStr = $"{p.PrivatePort}/{p.Type}".PadLeft(10);
-                sb.AppendLine($"║  [Host] {hostStr} ──► [Container] {containerStr}  ║");
+                sb.AppendLine($"║  [Host] {hostStr} --► [Container] {containerStr}  ║");
             }
             else
             {
                 sb.AppendLine($"║  [Container Exposure] {p.PrivatePort}/{p.Type}".PadRight(42) + "║");
             }
         }
-        sb.AppendLine("╚═══════════════════════════════════════════╝");
+        sb.AppendLine("╚===========================================╝");
         return sb.ToString();
     }
 }

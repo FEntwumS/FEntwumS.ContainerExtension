@@ -495,14 +495,14 @@ def build_docker_cli_cmd(args, workspace_dir: str, native_cmd: List[str]) -> Lis
 
 def build_dotnet_cmd(native_cmd: List[str]) -> List[str]:
     """Constructs the harness command for the DotNet backend."""
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    harness_exe = os.path.join(repo_root, "benchmarking_suite", HARNESS_DIR, HARNESS_BINARY)
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    harness_exe = os.path.join(repo_root, "tests", "benchmarking_suite", HARNESS_DIR, HARNESS_BINARY)
     if platform.system() == "Windows":
         harness_exe += ".exe"
     if not os.path.exists(harness_exe):
         logging.error(f"⚡ DotNet Backend Error: Executable not found at {harness_exe}")
-        logging.error("Run: dotnet publish src/ContainerBenchmarkHarness -c Release "
-                       f"-o benchmarking_suite/{HARNESS_DIR}")
+        logging.error("Run: dotnet publish src/ContainerBenchmarkHarness/ContainerBenchmarkHarness.csproj -c Release "
+                       f"-o tests/benchmarking_suite/{HARNESS_DIR}")
         sys.exit(1)
     return [harness_exe] + native_cmd
 

@@ -9,6 +9,8 @@
         "tamasfe.even-better-toml",
         "ms-vscode.test-adapter-converter",
         "aquasecurity.trivy-vulnerability-scanner",
-        "exiasr.hadolint"
+        "exiasr.hadolint",
+        "sonarsource.sonarlint-vscode",
+        "streetsidesoftware.code-spell-checker"
     ]
 }

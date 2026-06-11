@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -11,6 +12,10 @@ using System.Threading.Tasks;
 
 namespace ContainerExtension;
 
+/// <summary>
+/// Provides high-performance, cross-process synchronized JSON Lines telemetry logging.
+/// Captures execution metrics, tool errors, and structural logs without large object heap (LOH) allocations.
+/// </summary>
 public static partial class ContainerTelemetry
 {
     public static Func<bool> TelemetryOptedOutChecker { get; set; } = () => false;
@@ -56,7 +61,7 @@ public static partial class ContainerTelemetry
 
     private static readonly System.Threading.Lock MutexLock = new();
 
-    // ── Testing Hook ────────────────────────────────────────────────────────
+    // -- Testing Hook --------------------------------------------------------
     /// <summary>Isolates telemetry to a temporary directory during xUnit test execution.</summary>
     internal static void InitializeTestEnvironment(string tempDir)
     {
@@ -105,8 +110,16 @@ public static partial class ContainerTelemetry
     {
         get
         {
+            if (Volatile.Read(ref _isShutdown) == 1)
+            {
+                return null;
+            }
             lock (MutexLock)
             {
+                if (Volatile.Read(ref _isShutdown) == 1)
+                {
+                    return null;
+                }
                 return ProcessMutexLazy.Value;
             }
         }
@@ -133,7 +146,18 @@ public static partial class ContainerTelemetry
 
     public static void Shutdown()
     {
-        Interlocked.Exchange(ref _isShutdown, 1);
+        if (Interlocked.Exchange(ref _isShutdown, 1) == 1)
+        {
+            return;
+        }
+        try
+        {
+            ErrorChannel.Writer.TryComplete();
+        }
+        catch
+        {
+            // Ignore channel completion failures during shutdown
+        }
         try
         {
             lock (MutexLock)
@@ -168,19 +192,19 @@ public static partial class ContainerTelemetry
     {
         var resolvedPath = Path.GetFullPath(path);
         var resolvedBase = Path.GetFullPath(basePath);
-        
+
         var comp = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
-            ? StringComparison.OrdinalIgnoreCase 
+            ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
-            
+
         if (resolvedPath.Equals(resolvedBase, comp))
         {
             return true;
         }
-        
+
         var suffix = resolvedBase.EndsWith(Path.DirectorySeparatorChar) || resolvedBase.EndsWith(Path.AltDirectorySeparatorChar)
             ? "" : Path.DirectorySeparatorChar.ToString();
-            
+
         return resolvedPath.StartsWith(resolvedBase + suffix, comp);
     }
 
@@ -294,10 +318,10 @@ public static partial class ContainerTelemetry
     [GeneratedRegex(@"(?<=\b)(?<key>[a-zA-Z0-9_\-]*?(?:PASSWORD|PWD|CREDENTIALS|AUTH|PASS|TOKEN|SECRET|KEY)[a-zA-Z0-9_\-]*?)=(?<quote>[""']?)(?:[^\s""']+|(?<=[""'])[^\n\r]*?)\k<quote>", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 1000)]
     private static partial Regex SecretScrubRegex();
 
-    [GeneratedRegex(@"\\\\[^\s\\/]+(?:\\[^\s\\/]+)+", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
+    [GeneratedRegex(@"\\\\[^\s\\/]+(?:\\[^\s\\/]+)+", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]
     private static partial Regex UncShareRegex();
 
-    [GeneratedRegex(@"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b|\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b|\b[a-zA-Z0-9\-]+(?:\.local|\.lan)\b", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
+    [GeneratedRegex(@"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b|\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b|\b[a-zA-Z0-9\-]+(?:\.local|\.lan)\b", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]
     private static partial Regex IpRedactRegex();
 
     private static string? ScrubSecrets(string? commandLine)
@@ -367,16 +391,37 @@ public static partial class ContainerTelemetry
         return scrubbed;
     }
 
+    private static readonly SearchValues<byte> WhiteSpaceBytes = SearchValues.Create(" \t\r\n"u8);
     private static bool IsBytesWhiteSpace(ReadOnlySpan<byte> span)
     {
-        for (int i = 0; i < span.Length; i++)
+        if (System.Numerics.Vector.IsHardwareAccelerated && span.Length >= System.Numerics.Vector<byte>.Count)
         {
-            if (span[i] != (byte)' ' && span[i] != (byte)'\t' && span[i] != (byte)'\r' && span[i] != (byte)'\n')
+            var vSpace = new System.Numerics.Vector<byte>((byte)' ');
+            var vTab = new System.Numerics.Vector<byte>((byte)'\t');
+            var vCr = new System.Numerics.Vector<byte>((byte)'\r');
+            var vLf = new System.Numerics.Vector<byte>((byte)'\n');
+            int i = 0;
+            int limit = span.Length - System.Numerics.Vector<byte>.Count;
+            for (; i <= limit; i += System.Numerics.Vector<byte>.Count)
             {
-                return false;
+                var v = new System.Numerics.Vector<byte>(span.Slice(i));
+                var eqSpace = System.Numerics.Vector.Equals(v, vSpace);
+                var eqTab = System.Numerics.Vector.Equals(v, vTab);
+                var eqCr = System.Numerics.Vector.Equals(v, vCr);
+                var eqLf = System.Numerics.Vector.Equals(v, vLf);
+                var isWS = eqSpace | eqTab | eqCr | eqLf;
+                if (isWS != System.Numerics.Vector<byte>.AllBitsSet)
+                {
+                    return false;
+                }
             }
+            if (i < span.Length)
+            {
+                return !span.Slice(i).ContainsAnyExcept(WhiteSpaceBytes);
+            }
+            return true;
         }
-        return true;
+        return !span.ContainsAnyExcept(WhiteSpaceBytes);
     }
 
     private static int CountLinesSafe(string path)
@@ -412,15 +457,11 @@ public static partial class ContainerTelemetry
                     System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
                 }
             }
-            catch (IOException)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 if (attempt == 4) break;
                 Thread.Sleep(delay);
                 delay *= 2;
-            }
-            catch (Exception)
-            {
-                break;
             }
             if (success)
             {
@@ -455,7 +496,7 @@ public static partial class ContainerTelemetry
                         position -= toRead;
                         stream.Position = position;
                         int read = stream.Read(buffer, 0, toRead);
-                        
+
                         for (int i = read - 1; i >= 0 && linesFound < count; i--)
                         {
                             byte b = buffer[i];
@@ -489,7 +530,7 @@ public static partial class ContainerTelemetry
                 {
                     System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
                 }
-                
+
                 results.Reverse();
                 return results;
             }
@@ -507,12 +548,20 @@ public static partial class ContainerTelemetry
         return results;
     }
 
+    /// <summary>
+    /// Writes a structured telemetry entry to the unified execution log.
+    /// Handles PII redaction and thread-safe file appends automatically.
+    /// </summary>
     public static void LogExecution(
       string image, string tool, double durationSeconds, long exitCode, string? imageDigest = null,
       bool wasCancelled = false, string? dockerRunCommand = null, long? peakMemoryBytes = null,
       double? maxCpuPercent = null, bool oomKilled = false, int maxEntries = 0, string? errorMessage = null,
       bool isDebug = false)
     {
+        if (Volatile.Read(ref _isShutdown) == 1)
+        {
+            return;
+        }
         var checker = TelemetryOptedOutChecker;
         if (checker != null && checker())
         {
@@ -550,9 +599,13 @@ public static partial class ContainerTelemetry
                 {
                     acquired = mutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
                 }
-                catch (Exception)
+                catch (AbandonedMutexException)
                 {
                     acquired = true;
+                }
+                catch (Exception)
+                {
+                    acquired = false;
                 }
                 if (!acquired)
                 {
@@ -674,8 +727,16 @@ public static partial class ContainerTelemetry
         catch { /* Best-effort execution */ }
     }
 
+    /// <summary>
+    /// Asynchronously records a non-fatal error or exception to the error telemetry log.
+    /// Errors are processed by a background channel to ensure UI/Execution threads remain unblocked.
+    /// </summary>
     public static void TrackError(string component, string action, Exception? ex = null, string? context = null)
     {
+        if (Volatile.Read(ref _isShutdown) == 1)
+        {
+            return;
+        }
         var checker = TelemetryOptedOutChecker;
         if (checker != null && checker())
         {
@@ -739,9 +800,13 @@ public static partial class ContainerTelemetry
                 {
                     acquired = mutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
                 }
-                catch (Exception)
+                catch (AbandonedMutexException)
                 {
                     acquired = true;
+                }
+                catch (Exception)
+                {
+                    acquired = false;
                 }
                 if (!acquired)
                 {
@@ -869,9 +934,13 @@ public static partial class ContainerTelemetry
                 {
                     acquired = mutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
                 }
-                catch (Exception)
+                catch (AbandonedMutexException)
                 {
                     acquired = true;
+                }
+                catch (Exception)
+                {
+                    acquired = false;
                 }
                 if (!acquired || !File.Exists(_telemetryPath))
                 {
@@ -950,9 +1019,13 @@ public static partial class ContainerTelemetry
                 {
                     acquired = mutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
                 }
-                catch (Exception)
+                catch (AbandonedMutexException)
                 {
                     acquired = true;
+                }
+                catch (Exception)
+                {
+                    acquired = false;
                 }
                 if (!acquired || !File.Exists(_telemetryPath))
                 {
@@ -1057,13 +1130,25 @@ public static partial class ContainerTelemetry
 
                 if (matchIndex > 0)
                 {
-                    int writeLen = bytesRead - start - matchIndex;
-                    if (writeLen > 0)
+                    if (source.Position >= source.Length)
                     {
-                        destination.Write(buffer, start, writeLen);
+                        int writeLen = bytesRead - start;
+                        if (writeLen > 0)
+                        {
+                            destination.Write(buffer, start, writeLen);
+                        }
+                        matchIndex = 0;
                     }
-                    source.Position -= matchIndex;
-                    matchIndex = 0;
+                    else
+                    {
+                        int writeLen = bytesRead - start - matchIndex;
+                        if (writeLen > 0)
+                        {
+                            destination.Write(buffer, start, writeLen);
+                        }
+                        source.Position -= matchIndex;
+                        matchIndex = 0;
+                    }
                 }
                 else
                 {
@@ -1093,9 +1178,13 @@ public static partial class ContainerTelemetry
                 {
                     acquired = mutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
                 }
-                catch (Exception)
+                catch (AbandonedMutexException)
                 {
                     acquired = true;
+                }
+                catch (Exception)
+                {
+                    acquired = false;
                 }
                 if (!acquired)
                 {
@@ -1240,6 +1329,12 @@ public static partial class ContainerTelemetry
         }
     }
 
+    /// <summary>
+    /// Reads and parses the most recent telemetry entries from disk, computing aggregated statistics 
+    /// (success rate, average duration) over the history.
+    /// </summary>
+    /// <param name="count">The maximum number of recent entries to return.</param>
+    /// <returns>A tuple containing the list of entries and pre-calculated statistics.</returns>
     public static (List<TelemetryEntry> entries, int totalRuns, double successRate, double avgDuration) GetRecentEntriesWithStats(int count = 20)
     {
         try
@@ -1252,9 +1347,13 @@ public static partial class ContainerTelemetry
                 {
                     acquired = mutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
                 }
-                catch (Exception)
+                catch (AbandonedMutexException)
                 {
                     acquired = true;
+                }
+                catch (Exception)
+                {
+                    acquired = false;
                 }
                 var exists = File.Exists(_telemetryPath);
                 if (!acquired || !exists)
@@ -1433,9 +1532,13 @@ public static partial class ContainerTelemetry
             {
                 acquired = mutex?.WaitOne(TimeSpan.FromSeconds(5)) ?? true;
             }
-            catch (Exception)
+            catch (AbandonedMutexException)
             {
                 acquired = true;
+            }
+            catch (Exception)
+            {
+                acquired = false;
             }
             if (!acquired)
             {

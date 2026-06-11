@@ -4,45 +4,23 @@ The OneWare Container Extension implements the **Hybrid Strategy Pattern** for t
 
 ## Component Diagram
 
-```text
-┌─────────────────────────────────────────────────────────────┐
-│                     OneWare Studio IDE                       │
-│                                                             │
-│  ┌──────────────────────┐    ┌────────────────────────────┐ │
-│  │ ContainerExtension   │    │   IToolExecutionStrategy   │ │
-│  │ Module                │───▶│  (Plugin Interface)        │ │
-│  │ • Settings (16)       │    └────────────┬───────────────┘ │
-│  │ • Strategy Injection  │                 │                 │
-│  │ • UI Extensions       │    ┌────────────▼───────────────┐ │
-│  └──────────────────────┘    │  DockerExecutionStrategy   │ │
-│                               │  • Socket Probing          │ │
-│                               │  • Image Resolution        │ │
-│                               │  • Container Lifecycle      │ │
-│                               │  • Stream Demultiplexing    │ │
-│                               │  • Telemetry Logging        │ │
-│                               └────────────┬───────────────┘ │
-│                                            │                 │
-│  ┌──────────────────────┐    ┌────────────▼───────────────┐ │
-│  │ DockerButtonView     │    │  Docker.DotNet SDK         │ │
-│  │ (Toolbar Whale Icon) │    │  • DockerClient            │ │
-│  └──────────┬───────────┘    │  • Unix Socket / TCP       │ │
-│             │                 └────────────────────────────┘ │
-│  ┌──────────▼───────────────────────────────────────────┐   │
-│  │ DockerDiagnosticsViewModel (ExtendedTool)            │   │
-│  │ └─ DockerDiagnosticsView (UserControl)               │   │
-│  │    • Connection Status    • Images & Disk Usage       │   │
-│  │    • Live Containers      • Active Configuration      │   │
-│  │    • Quick Actions        • Recent Executions         │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                                                             │
-│  ┌──────────────────────┐    ┌────────────────────────────┐ │
-│  │ ContainerTelemetry   │    │  Validators                │ │
-│  │ • JSON Lines Logger  │    │  • DockerImageFormat       │ │
-│  │ • Stats Aggregation  │    │  • DaemonSocket            │ │
-│  │ • Export / Clear      │    │  • ResourceThreshold       │ │
-│  └──────────────────────┘    │  • ContainerName           │ │
-│                               └────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph IDE [OneWare Studio IDE]
+        CE[ContainerExtension Module<br/>- Settings 16<br/>- Strategy Injection<br/>- UI Extensions]
+        ITES[IToolExecutionStrategy<br/>Plugin Interface]
+        DES[DockerExecutionStrategy<br/>- Socket Probing<br/>- Image Resolution<br/>- Container Lifecycle<br/>- Stream Demultiplexing<br/>- Telemetry Logging]
+        DBV[DockerButtonView<br/>Toolbar Whale Icon]
+        SDK[Docker.DotNet SDK<br/>- DockerClient<br/>- Unix Socket / TCP]
+        DDVM[DockerDiagnosticsViewModel<br/>ExtendedTool<br/>- DockerDiagnosticsView<br/>- Connection Status<br/>- Images & Disk Usage<br/>- Live Containers<br/>- Active Configuration<br/>- Quick Actions<br/>- Recent Executions]
+        CT[ContainerTelemetry<br/>- JSON Lines Logger<br/>- Stats Aggregation<br/>- Export / Clear]
+        VAL[Validators<br/>- DockerImageFormat<br/>- DaemonSocket<br/>- ResourceThreshold<br/>- ContainerName]
+
+        CE --> ITES
+        ITES --> DES
+        DES --> SDK
+        DBV --> DDVM
+    end
 ```
 
 ## Source Files
@@ -54,13 +32,13 @@ The OneWare Container Extension implements the **Hybrid Strategy Pattern** for t
 | `DockerDiagnosticsView` | Docker Desktop-style live dashboard UserControl |
 | `DockerDiagnosticsViewModel` | ExtendedTool docking adapter |
 | `DockerDiagnosticsWindow` | Standalone Window wrapper (popup fallback) |
-| `DockerButtonView` | Toolbar whale icon — opens dockable dashboard |
+| `DockerButtonView` | Toolbar whale icon - opens dockable dashboard |
 | `ContainerTelemetry` | JSON Lines logger with stats and export |
 
 ## Image Resolution Hierarchy
 
 ```text
-1. ONEWARE_DOCKER_IMAGE env var        (highest — CI/CD override)
+1. ONEWARE_DOCKER_IMAGE env var        (highest - CI/CD override)
 2. ContainerImage_{tool} per-tool      (settings UI)
 3. ContainerExtension_DefaultImage     (global setting)
 4. hdlc/ghdl:yosys                     (hardcoded fallback)
@@ -69,10 +47,10 @@ The OneWare Container Extension implements the **Hybrid Strategy Pattern** for t
 ## Container Lifecycle
 
 ```text
-ResolveImage → EnsureImage (pull if needed) → BuildContainerParameters
-    → CreateContainer → AttachStreams → StartContainer
-    → DrainLines (demultiplex stdout/stderr)
-    → WaitContainer → Log Telemetry → Cleanup
+ResolveImage -> EnsureImage (pull if needed) -> BuildContainerParameters
+    -> CreateContainer -> AttachStreams -> StartContainer
+    -> DrainLines (demultiplex stdout/stderr)
+    -> WaitContainer -> Log Telemetry -> Cleanup
 ```
 
 ## Docking System Integration

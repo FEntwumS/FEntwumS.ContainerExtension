@@ -13,28 +13,39 @@ This extension adheres to hardened security practices to eliminate "Environment 
 - **Deterministic Dependencies**: Pipeline guarded by `<NuGetAudit>`, SLSA SBOM generation, and GitHub CodeQL SAST scanning.
 - **Immutable Provenance**: GitHub Releases embed cryptographic OIDC build-attestations.
 
-## Architecture & Features
+## Architecture Layers & Native-AOT Compatibility
 
-- **Transparent Execution** — FPGA tools (GHDL, Yosys, nextpnr, gmpack) run strictly inside ephemeral sandboxes with robust path mapping, GHDL unit-name translation, compound script tokenization, and automatic write-access binds for output/bitstream packers.
-- **Multi-Runtime Support** — Auto-detects Docker, Podman, Colima, and OrbStack runtimes.
-- **Automatic Image Pull** — Background pre-pull on startup with fallback logic and retry capabilities.
-- **Execution Telemetry** — JSON Lines log with stats, export, and image digest verification.
-- **Docker Dashboard** — Dockable panel with live daemon status, containers, images, disk usage, and sparkline trends.
-- **Orphan Cleanup** — Strict Interlocked-guarded teardown logic kills dangling containers on IDE crash.
+This repository is structured into isolated domains adhering to strict Native-AOT compile-time guarantees:
+- **ContainerExtension (Module Core)**: Built on C# 13, targeting .NET 10. Completely reflection-free. Utilizes static, source-generated serialization via `JsonSerializerContext` and regex source generators to eliminate dynamic code generation.
+- **ContainerBenchmarkHarness (Execution Harness)**: Provides developer-side benchmark execution profiles and telemetry stress testing capabilities.
+- **ContainerExtension.UnitTests (Testing boundary)**: Tests and verifies settings validator logic, regexes, and pipeline streaming parsing.
+- **Local Headless EDA Tests (`local_tests/`)**: A 15-phase Bash integration test suite verifying end-to-end containerized EDA workflows (GHDL, Icarus, Verilator, Yosys, NextPNR) directly against the `oss-cad-suite` Docker image.
+
+## Performance & Security Optimizations
+
+- **Compile-Time Engineering**: Static dependencies, source-generated JSON serialize/deserialize, and static regular expressions.
+- **Hardware Intrinsics**: SIMD-based white-space detection and search values checking for container name validation.
+- **Unmanaged Memory**: Modern `[LibraryImport]` structures, safe OS process token extractions, and SafeHandle structures.
+- **Pipeline Architectures**: System.IO.Pipelines-driven stream logging to prevent large object heap (LOH) fragmentation.
+- **Defensive Cryptography**: Fixed-time credentials comparison and zero-memory wipes for decrypted credentials.
+- **Zero-Allocation Observability**: Structured logs, pre-compiled JSON contexts, and OpenTelemetry Activity tracing.
+- **Avalonia Rendering**: Double-buffered sparkline drawing using WriteableBitmap memory copies.
 
 ## Quick Start
 
 ```bash
 # Clone (with submodules)
-git clone --recurse-submodules [https://github.com/FEntwumS/FEntwumS.ContainerExtension.git](https://github.com/FEntwumS/FEntwumS.ContainerExtension.git)
+git clone --recurse-submodules https://github.com/FEntwumS/FEntwumS.ContainerExtension.git
 
 # Verify Formatting & Determinism
 dotnet format --verify-no-changes
 dotnet build -warnaserror
 
-# Execute Tests
+# Execute C# Unit Tests
 dotnet test --verbosity normal
 
+# Execute Headless EDA Integration Tests
+cd local_tests && ./run_all.sh
 ```
 
 ## Supported Container Runtimes
@@ -51,4 +62,4 @@ Auto-generated API documentation is available via [DocFX](https://dotnet.github.
 
 ## License
 
-[MIT](License.md) © 2025 - 2026 Mert Torun
+[MIT](License.md) (C) 2025 - 2026 Mert Torun

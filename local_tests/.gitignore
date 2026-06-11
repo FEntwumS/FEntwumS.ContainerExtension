@@ -1,0 +1,19 @@
+# Ignore all generated build artifacts
+*.bin
+*.asc
+*.json
+*.log
+*.yw
+*.smtc
+*.vvp
+*.o
+*.cf
+*.lst
+*.config
+*.bit
+VHDL_Blink/vhdl_blink
+VHDL_Blink/vhdl_blink_tb
+build/
+obj_dir/
+Blink/
+test_report.md

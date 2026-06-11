@@ -95,7 +95,7 @@ The `--backend dotnet` mode requires the C# benchmark harness to be pre-compiled
 
 ```bash
 dotnet publish src/ContainerBenchmarkHarness/ContainerBenchmarkHarness.csproj \
-  -c Release -o benchmarking_suite/harness_bin
+  -c Release -o tests/benchmarking_suite/harness_bin
 ```
 
 ## Notes on Thesis Reproduction

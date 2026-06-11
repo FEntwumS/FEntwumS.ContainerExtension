@@ -7,7 +7,12 @@ using Docker.DotNet.Models;
 
 namespace ContainerExtension.Services.Docker;
 
-public sealed class DockerConnectionProvider
+/// <summary>
+/// Manages the connection lifecycle and health state of the Docker daemon.
+/// Automatically detects disconnects, tracks system information, and provides a centralized 
+/// IsConnected flag for UI and execution strategy checks.
+/// </summary>
+public sealed class DockerConnectionProvider : IDisposable
 {
     private readonly DockerClient _client;
     private volatile bool _lastPingSucceeded = true;
@@ -20,20 +25,22 @@ public sealed class DockerConnectionProvider
     private readonly System.Threading.Lock _systemInfoLock = new();
 
     private Task<SystemInfoResponse?>? _activeSystemInfoTask;
+    private volatile bool _disposed;
 
-    public bool IsConnected => _lastPingSucceeded && _lastSystemInfoSucceeded;
+    public bool IsConnected => _lastPingSucceeded && _lastSystemInfoSucceeded && !_disposed;
 
     public DockerConnectionProvider(DockerClient client)
     {
-        _client = client ?? throw new ArgumentNullException(nameof(client));
+        ArgumentNullException.ThrowIfNull(client);
+        _client = client;
     }
 
-    public static bool ValidateSocketPath(string path, out string? errorMessage)
+    public static bool ValidateSocketPath(string? path, out string? errorMessage)
     {
         errorMessage = null;
         if (string.IsNullOrWhiteSpace(path)) return true;
 
-        if (path.Contains("..", StringComparison.Ordinal) || path.Contains("/../") || path.Contains("\\..\\"))
+        if (path.Contains("..", StringComparison.Ordinal) || path.Contains("/../", StringComparison.Ordinal) || path.Contains("\\..\\", StringComparison.Ordinal))
         {
             errorMessage = "Socket path cannot contain directory traversal (..).";
             return false;
@@ -56,8 +63,8 @@ public sealed class DockerConnectionProvider
             }
             if (path.StartsWith("unix://", StringComparison.OrdinalIgnoreCase))
             {
-                var socketFilePath = path["unix://".Length..];
-                if (string.IsNullOrWhiteSpace(socketFilePath))
+                var socketFilePath = path.AsSpan("unix://".Length);
+                if (socketFilePath.IsWhiteSpace())
                 {
                     errorMessage = "Unix socket path cannot be empty.";
                     return false;
@@ -67,7 +74,7 @@ public sealed class DockerConnectionProvider
         return true;
     }
 
-    public static bool VerifyNamedPipeSafe(string pipeName, out string? errorMessage)
+    public static bool VerifyNamedPipeSafe(string? pipeName, out string? errorMessage)
     {
         errorMessage = null;
         if (!OperatingSystem.IsWindows())
@@ -75,18 +82,30 @@ public sealed class DockerConnectionProvider
             return true;
         }
 
+        if (string.IsNullOrWhiteSpace(pipeName))
+        {
+            errorMessage = "Named pipe path cannot be empty or null.";
+            return false;
+        }
+
         try
         {
+            // Normalize the path BEFORE passing it to Path.GetFullPath to prevent ArgumentException.
             var normalized = pipeName.Replace("npipe://", "", StringComparison.OrdinalIgnoreCase).Replace("/", "\\");
             if (!normalized.StartsWith(@"\\.\pipe\", StringComparison.OrdinalIgnoreCase) && !normalized.StartsWith(@"\\?\", StringComparison.Ordinal))
             {
                 errorMessage = "Windows named pipes must reside in the local pipe namespace (\\\\.\\pipe\\).";
                 return false;
             }
-            var fullPath = Path.GetFullPath(pipeName);
+            var fullPath = Path.GetFullPath(normalized);
             if (string.IsNullOrWhiteSpace(fullPath))
             {
                 errorMessage = "Named pipe path is empty after normalization.";
+                return false;
+            }
+            if (!fullPath.StartsWith(@"\\.\pipe\", StringComparison.OrdinalIgnoreCase) && !fullPath.StartsWith(@"\\?\", StringComparison.Ordinal))
+            {
+                errorMessage = "Windows named pipes must reside in the local pipe namespace (\\\\.\\pipe\\) after normalization.";
                 return false;
             }
         }
@@ -101,7 +120,9 @@ public sealed class DockerConnectionProvider
 
     public async ValueTask<bool> PingAsync(CancellationToken ct = default)
     {
-        if (_client == null || _client.System == null)
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (_client.System == null)
         {
             lock (_stateLock)
             {
@@ -160,25 +181,50 @@ public sealed class DockerConnectionProvider
         }
     }
 
-    public Task<SystemInfoResponse?> GetSystemInfoAsync(CancellationToken ct = default)
+    public async Task<SystemInfoResponse?> GetSystemInfoAsync(CancellationToken ct = default)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        Task<SystemInfoResponse?> task;
         lock (_systemInfoLock)
         {
             if (_cachedSystemInfo != null && Environment.TickCount64 < _systemInfoCacheExpiration)
             {
-                return Task.FromResult<SystemInfoResponse?>(_cachedSystemInfo);
+                return _cachedSystemInfo;
             }
-            if (_activeSystemInfoTask != null)
+            if (_activeSystemInfoTask == null)
             {
-                return _activeSystemInfoTask;
+                var t = RetrieveSystemInfoInternalAsync(CancellationToken.None);
+                if (!t.IsCompleted)
+                {
+                    _activeSystemInfoTask = t;
+                }
+                task = t;
             }
-            _activeSystemInfoTask = RetrieveSystemInfoInternalAsync(ct);
-            return _activeSystemInfoTask;
+            else
+            {
+                task = _activeSystemInfoTask;
+            }
         }
+
+        return await task.WaitAsync(ct).ConfigureAwait(false);
     }
 
     private async Task<SystemInfoResponse?> RetrieveSystemInfoInternalAsync(CancellationToken ct)
     {
+        if (_client.System == null)
+        {
+            lock (_stateLock)
+            {
+                _lastSystemInfoSucceeded = false;
+            }
+            lock (_systemInfoLock)
+            {
+                _activeSystemInfoTask = null;
+            }
+            return null;
+        }
+
         try
         {
             var info = await _client.System.GetSystemInfoAsync(ct).ConfigureAwait(false);
@@ -232,5 +278,12 @@ public sealed class DockerConnectionProvider
                 _activeSystemInfoTask = null;
             }
         }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        GC.SuppressFinalize(this);
     }
 }

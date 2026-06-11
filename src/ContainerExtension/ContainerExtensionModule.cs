@@ -15,6 +15,10 @@ using ContainerExtension.Validations;
 
 namespace ContainerExtension;
 
+/// <summary>
+/// Main entry point for the Container Extension module in OneWare Studio.
+/// Handles settings registration, Docker execution strategy injection, and Dashboard UI mounting.
+/// </summary>
 public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
 {
     private static CancellationTokenSource? _workspaceCts;
@@ -22,6 +26,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     private static readonly System.Threading.Lock InitializeLock = new();
     private static System.ComponentModel.PropertyChangedEventHandler? _propertyChangedHandler;
     private static DockerDiagnosticsViewModel? _cachedDashboardVm;
+    internal static IServiceProvider? GlobalServiceProvider { get; private set; }
 
     // Settings category and subcategory constants to prevent multiple string literal references
     public const string SettingsCategoryBinary = "Binary Management";
@@ -113,14 +118,24 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         return mem;
     }
 
+    /// <summary>
+    /// Registers singleton services used across the Container Extension into the Dependency Injection container.
+    /// </summary>
+    /// <param name="services">The service collection builder.</param>
     public override void RegisterServices(IServiceCollection services)
     {
         services.AddSingleton<DockerExecutionStrategy>();
         services.AddSingleton<DockerDiagnosticsViewModel>();
     }
 
+    /// <summary>
+    /// Initializes the module, populates UI settings, hooks up tool interceptors to redirect execution 
+    /// through the Container API, and starts daemon connectivity polling.
+    /// </summary>
+    /// <param name="serviceProvider">The root service provider.</param>
     public override void Initialize(IServiceProvider serviceProvider)
     {
+        GlobalServiceProvider = serviceProvider;
         CancellationToken ct;
         lock (InitializeLock)
         {
@@ -196,7 +211,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
             appCommandService = serviceProvider.Resolve<IApplicationCommandService>();
             windowService = serviceProvider.Resolve<IWindowService>();
         }
-        catch (KeyNotFoundException ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Console.Error.WriteLine($"[ContainerExtension] DI Resolution Error: {ex.Message}");
             ContainerTelemetry.TrackError("ContainerExtensionModule", "DependencyInjectionResolutionError", ex);
@@ -256,7 +271,6 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                 "Container Dashboard",
                 () =>
                 {
-                    Console.WriteLine("[DashboardDebug] SimpleApplicationCommand executed.");
                     dockService.Show(dashboardVm, DockShowLocation.RightPinned);
                     dashboardVm.IsOpen = true;
                     dashboardVm.IsActive = true;
@@ -273,7 +287,6 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                 Header = "Container Dashboard",
                 Command = new RelayCommand(() =>
                 {
-                    Console.WriteLine("[DashboardDebug] MenuItem Command executed.");
                     dockService.Show(dashboardVm, DockShowLocation.RightPinned);
                     dashboardVm.IsOpen = true;
                     dashboardVm.IsActive = true;
@@ -295,15 +308,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
             {
                 lock (settingsLock)
                 {
-                    var hash = dashboardVm.GetHashCode();
-                    Console.WriteLine($"[DashboardDebug] VM hash={hash} PropertyChanged: {e.PropertyName} (IsOpen={dashboardVm.IsOpen}, CanClose={dashboardVm.CanClose}, ShowInSelector={dashboardVm.ShowInSelector}, KeepPinnedDockableVisible={dashboardVm.KeepPinnedDockableVisible}, Owner={(dashboardVm.Owner?.GetType().Name ?? "null")})");
 
-                    if (string.Equals(e.PropertyName, nameof(DockerDiagnosticsViewModel.Owner), StringComparison.Ordinal) ||
-                        string.Equals(e.PropertyName, nameof(DockerDiagnosticsViewModel.IsOpen), StringComparison.Ordinal) ||
-                        string.Equals(e.PropertyName, nameof(DockerDiagnosticsViewModel.KeepPinnedDockableVisible), StringComparison.Ordinal))
-                    {
-                        Console.WriteLine($"[DashboardDebug] StackTrace for {e.PropertyName} change:\n{Environment.StackTrace}\n");
-                    }
 
                     if (string.Equals(e.PropertyName, nameof(DockerDiagnosticsViewModel.IsOpen), StringComparison.Ordinal) ||
                         string.Equals(e.PropertyName, nameof(DockerDiagnosticsViewModel.CanClose), StringComparison.Ordinal) ||
@@ -312,7 +317,6 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                     {
                         if (!dashboardVm.CanClose || !dashboardVm.ShowInSelector || !dashboardVm.KeepPinnedDockableVisible)
                         {
-                            Console.WriteLine($"[DashboardDebug] Enforcing VM properties! CanClose={dashboardVm.CanClose}->true, ShowInSelector={dashboardVm.ShowInSelector}->true, KeepPinnedDockableVisible={dashboardVm.KeepPinnedDockableVisible}->true");
                             dashboardVm.CanClose = true;
                             dashboardVm.ShowInSelector = true;
                             dashboardVm.KeepPinnedDockableVisible = true;
@@ -322,7 +326,6 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                              dashboardVm.Owner == null &&
                              dashboardVm.IsOpen)
                     {
-                        Console.WriteLine("[DashboardDebug] Owner became null while IsOpen is true. Restoring dashboard position via dockService.Show");
                         dockService.Show(dashboardVm, DockShowLocation.RightPinned);
                     }
                 }
@@ -338,19 +341,20 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
                 var existingTemplate = app.DataTemplates.FirstOrDefault(t => t is FuncDataTemplate<DockerDiagnosticsViewModel>);
-                if (existingTemplate == null)
+                if (existingTemplate != null)
                 {
-                    app.DataTemplates.Insert(0, new FuncDataTemplate<DockerDiagnosticsViewModel>((vm, _) =>
-                    {
-                        if (vm != null)
-                        {
-                            vm.ServiceProvider ??= serviceProvider;
-                            vm.Strategy ??= dockerStrategy;
-                            return new DockerDiagnosticsView(vm.ServiceProvider, vm.Strategy);
-                        }
-                        return new Avalonia.Controls.TextBlock { Text = "Loading...", Foreground = Avalonia.Media.Brushes.Gray, Margin = new Avalonia.Thickness(20) };
-                    }, true));
+                    app.DataTemplates.Remove(existingTemplate);
                 }
+                app.DataTemplates.Insert(0, new FuncDataTemplate<DockerDiagnosticsViewModel>((vm, _) =>
+                {
+                    if (vm != null)
+                    {
+                        vm.ServiceProvider ??= serviceProvider;
+                        vm.Strategy ??= dockerStrategy;
+                        return new DockerDiagnosticsView(vm.ServiceProvider, vm.Strategy);
+                    }
+                    return new Avalonia.Controls.TextBlock { Text = "Loading...", Foreground = Avalonia.Media.Brushes.Gray, Margin = new Avalonia.Thickness(20) };
+                }, true));
             });
         }
 
@@ -376,8 +380,16 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                         break;
                     }
                 }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
                 catch (Exception ex)
                 {
+                    if (ct.IsCancellationRequested || ex is ObjectDisposedException)
+                    {
+                        return;
+                    }
                     ContainerTelemetry.TrackError("ContainerExtensionModule", "Daemon ping transient error", ex);
                 }
 
@@ -400,7 +412,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                 try
                 {
                     var prefix = settingsService.SafeGetSetting(ContainerNamePrefixSetting, (string?)null);
-                    if (!string.IsNullOrWhiteSpace(prefix))
+                    if (!string.IsNullOrWhiteSpace(prefix) && dockerStrategy.Client?.Containers != null)
                     {
                         var containersToPrune = await dockerStrategy.Client.Containers.ListContainersAsync(
                       new Docker.DotNet.Models.ContainersListParameters
@@ -413,19 +425,29 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                     }
                       }, ct).ConfigureAwait(false);
 
-                        foreach (var container in containersToPrune)
+                        if (containersToPrune != null)
                         {
-                            try
+                            foreach (var container in containersToPrune)
                             {
-                                await dockerStrategy.Client.Containers.RemoveContainerAsync(container.ID, new Docker.DotNet.Models.ContainerRemoveParameters { Force = true }, ct).ConfigureAwait(false);
-                                await Console.Out.WriteLineAsync($"[ContainerExtension] 🧹 Reaped dangling container: {string.Join(", ", container.Names)}").ConfigureAwait(false);
+                                if (container == null || string.IsNullOrEmpty(container.ID)) continue;
+                                var names = container.Names != null ? string.Join(", ", container.Names) : container.ID;
+                                try
+                                {
+                                    await dockerStrategy.Client.Containers.RemoveContainerAsync(container.ID, new Docker.DotNet.Models.ContainerRemoveParameters { Force = true }, ct).ConfigureAwait(false);
+                                    await Console.Out.WriteLineAsync($"[ContainerExtension] 🧹 Reaped dangling container: {names}").ConfigureAwait(false);
+                                }
+                                catch (Exception ex)
+                                {
+                                    if (ct.IsCancellationRequested) return;
+                                    ContainerTelemetry.TrackError("ContainerExtensionModule", $"Failed to reap container {names}", ex);
+                                }
                             }
-                            catch (Exception ex) { ContainerTelemetry.TrackError("ContainerExtensionModule", $"Failed to reap container {string.Join(", ", container.Names)}", ex); }
                         }
                     }
                 }
                 catch (Exception ex)
                 {
+                    if (ct.IsCancellationRequested || ex is ObjectDisposedException) return;
                     ContainerTelemetry.TrackError("ContainerExtensionModule", "Failed to clean dangling containers", ex);
                 }
 
@@ -448,8 +470,13 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
 
     private static void InjectStrategyIntoAllTools(IToolService toolService, DockerExecutionStrategy dockerStrategy, ISettingsService settingsService)
     {
-        foreach (var globalTool in toolService.GetAllTools())
+        var allTools = toolService.GetAllTools();
+        if (allTools == null) return;
+
+        foreach (var globalTool in allTools)
         {
+            if (globalTool == null || string.IsNullOrEmpty(globalTool.Key)) continue;
+
             toolService.RegisterStrategy(globalTool.Key, dockerStrategy);
 
             var settingKey = $"{PerToolImagePrefix}{globalTool.Key.ToLowerInvariant()}";
@@ -493,6 +520,9 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         return false;
     }
 
+    /// <summary>
+    /// Safely terminates all background execution threads, UI handlers, and releases container process subscriptions.
+    /// </summary>
     public void Dispose()
     {
         lock (InitializeLock)
@@ -501,11 +531,11 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
             {
                 _workspaceCts?.Cancel();
             }
-            catch (ObjectDisposedException) 
-            { 
+            catch (ObjectDisposedException)
+            {
                 // Token source is already disposed, safe to ignore
             }
-            
+
             _workspaceCts?.Dispose();
             _workspaceCts = null;
 
@@ -515,8 +545,8 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                 {
                     AppDomain.CurrentDomain.ProcessExit -= _processExitHandler;
                 }
-                catch (Exception) 
-                { 
+                catch (Exception)
+                {
                     // Fail-safe domain unregistration on disposal
                 }
                 _processExitHandler = null;
@@ -528,8 +558,8 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                 {
                     _cachedDashboardVm.PropertyChanged -= _propertyChangedHandler;
                 }
-                catch (Exception) 
-                { 
+                catch (Exception)
+                {
                     // Fail-safe property-change listener unregistration on disposal
                 }
                 _propertyChangedHandler = null;

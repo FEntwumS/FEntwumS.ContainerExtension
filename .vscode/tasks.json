@@ -59,6 +59,27 @@
             "problemMatcher": []
         },
         {
+            "label": "Verify Formatting",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "format",
+                "${workspaceFolder}/OneWare.ContainerExtension.slnx",
+                "--verify-no-changes"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "Fix Formatting",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "format",
+                "${workspaceFolder}/OneWare.ContainerExtension.slnx"
+            ],
+            "problemMatcher": []
+        },
+        {
             "label": "Clean",
             "command": "dotnet",
             "type": "process",

@@ -28,7 +28,7 @@ namespace ContainerExtension.Views;
   Justification = "UserControl lifecycle manages _refreshCts disposal via DetachedFromVisualTree handler.")]
 public partial class DockerDiagnosticsView : UserControl
 {
-    // Grid column indices for sortable header rows (CA1861 — avoid per-call allocation)
+    // Grid column indices for sortable header rows (CA1861 - avoid per-call allocation)
     private static readonly int[] ThreeColumnIndices = { 0, 2, 4 };
     private static readonly int[] SevenColumnIndices = { 0, 2, 4, 6, 8, 10, 12 };
 
@@ -37,7 +37,7 @@ public partial class DockerDiagnosticsView : UserControl
     private static readonly SolidColorBrush DockerBlueBrush = new(Color.Parse(ContainerExtensionModule.DockerBlueHex));
     private static readonly SolidColorBrush LightGreenBrush = new(Colors.LightGreen);
 
-    // ── Instance State ──────────────────────────────────────────────────
+    // -- Instance State --------------------------------------------------
     private readonly DockerExecutionStrategy _strategy;
     private readonly ITerminalManagerService _terminalService;
     private readonly StackPanel _statusContent;
@@ -68,7 +68,7 @@ public partial class DockerDiagnosticsView : UserControl
     private bool _justAttached;
     private IDisposable? _isVisibleSubscription;
 
-    // ── Cached Data (for re-sorting without re-querying the daemon) ──
+    // -- Cached Data (for re-sorting without re-querying the daemon) --
     private readonly System.Threading.Lock _cachedDataLock = new();
     private readonly List<Grid> _recycledContainerRows = new();
     private readonly List<Grid> _recycledImageRows = new();
@@ -78,15 +78,15 @@ public partial class DockerDiagnosticsView : UserControl
     private bool _showAllImages;
     private (int imageCount, long totalSizeBytes, long reclaimableBytes) _cachedDiskUsage;
 
-    // ── Search/Filter State ──────────────────────────────────────────
+    // -- Search/Filter State ------------------------------------------
     private string _searchFilter = "";
 
-    // ── Sort State (column name + direction per table) ───────────────
+    // -- Sort State (column name + direction per table) ---------------
     private (string column, bool ascending) _containerSort = ("name", true);
     private (string column, bool ascending) _imageSort = ("repo", true);
     private (string column, bool ascending) _historySort = ("time", false); // newest-first default
 
-    // ── Data Fingerprints (skip UI rebuild when data is unchanged) ────
+    // -- Data Fingerprints (skip UI rebuild when data is unchanged) ----
     private int _lastContainerFingerprint;
     private int _lastImageFingerprint;
 
@@ -106,7 +106,7 @@ public partial class DockerDiagnosticsView : UserControl
         ActualThemeVariantChanged += (sender, args) => UpdateThemeColors();
 
         _pluginVersion = CachedPluginVersion;
-        
+
         _searchDebounceTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(150)
@@ -117,7 +117,7 @@ public partial class DockerDiagnosticsView : UserControl
             ApplySearchFilter();
         };
 
-        // ── Header ──────────────────────────────────────────────────────
+        // -- Header ------------------------------------------------------
         var whaleIcon = new PathIcon
         {
             Data = WhaleGeometry,
@@ -145,7 +145,7 @@ public partial class DockerDiagnosticsView : UserControl
         headerTitlePanel.Children.Add(whaleIcon);
         headerTitlePanel.Children.Add(_headerTitle);
 
-        // ── Global Search / Filter ──────────────────────────────────────
+        // -- Global Search / Filter --------------------------------------
         _searchBox = new TextBox
         {
             Watermark = "🔍  Filter containers, images, history... (Ctrl+F)",
@@ -234,41 +234,41 @@ public partial class DockerDiagnosticsView : UserControl
         header.Children.Add(headerTitlePanel);
         header.Children.Add(statusBar);
 
-        // ── Quick Actions (inline below header) ─────────────────────────
+        // -- Quick Actions (inline below header) -------------------------
         _quickActionsRow = BuildQuickActionsRow();
         _quickActionsRow.Opacity = 0.5;  // dimmed until daemon is confirmed reachable
         _quickActionsRow.IsEnabled = false;
 
-        // ── Section 1: Connection Status ────────────────────────────────
+        // -- Section 1: Connection Status --------------------------------
         _statusContent = new StackPanel { Spacing = 4 };
         _statusContent.Children.Add(CreateLoadingText("Connecting to daemon..."));
         var statusSection = CreateCard("Connection Status", _statusContent);
 
-        // ── Section 2: Containers ───────────────────────────────────────
+        // -- Section 2: Containers ---------------------------------------
         _containersContent = new StackPanel { Spacing = 2 };
         _containersContent.Children.Add(CreateLoadingText("Loading containers..."));
         var containersSection = CreateCard("Containers", _containersContent);
 
-        // ── Section 3: Images & Disk Usage ──────────────────────────────
+        // -- Section 3: Images & Disk Usage ------------------------------
         _imagesContent = new StackPanel { Spacing = 2 };
         _imagesContent.Children.Add(CreateLoadingText("Loading images..."));
         var imagesSection = CreateCard("Images & Disk Usage", _imagesContent);
 
-        // ── Section 4: Active Configuration ─────────────────────────────
+        // -- Section 4: Active Configuration -----------------------------
         _configContent = new StackPanel { Spacing = 2 };
         _configContent.Children.Add(CreateLoadingText("Reading settings..."));
         var configSection = CreateCard("Active Configuration", _configContent);
 
-        // ── Section 5: Recent Executions ────────────────────────────────
+        // -- Section 5: Recent Executions --------------------------------
         _telemetryContent = new StackPanel { Spacing = 2 };
         var telemetrySection = CreateCard("Execution History", _telemetryContent);
 
-        // ── Section 6: Toolchain Environment ────────────────────────────
+        // -- Section 6: Toolchain Environment ----------------------------
         _toolchainContent = new StackPanel { Spacing = 4 };
         _toolchainContent.Children.Add(CreateLoadingText("Loading available versions..."));
         var toolchainSection = CreateCard("Toolchain Environment", _toolchainContent);
 
-        // ── Layout ──────────────────────────────────────────────────────
+        // -- Layout ------------------------------------------------------
         var mainPanel = new StackPanel
         {
             Margin = new Thickness(20),
@@ -322,7 +322,6 @@ public partial class DockerDiagnosticsView : UserControl
             }
             _isVisibleSubscription = this.GetObservable(IsVisibleProperty).Subscribe(visible =>
             {
-                Console.WriteLine($"[DashboardDebug] View IsVisible changed to: {visible}");
                 if (visible)
                 {
                     try
@@ -392,7 +391,7 @@ public partial class DockerDiagnosticsView : UserControl
     {
         UpdateBackgroundBrush();
         UIBuilderHelpers.InitializeBrushes();
-        
+
         // Repaint static elements using the new brushes
         _headerTitle.Foreground = FontColor;
         _searchBox.Foreground = FontColor;
@@ -402,7 +401,7 @@ public partial class DockerDiagnosticsView : UserControl
         _ = RefreshAllAsync();
     }
 
-    // ── Drag & Drop Handlers for Search Box (F15) ───────────────────────
+    // -- Drag & Drop Handlers for Search Box (F15) -----------------------
     private static void OnSearchBoxDragOver(object? sender, DragEventArgs e)
     {
         if (e.DataTransfer.Contains(DataFormat.File))
@@ -438,10 +437,10 @@ public partial class DockerDiagnosticsView : UserControl
     private static bool IsValidLocalPath(string path)
     {
         if (string.IsNullOrEmpty(path)) return false;
-        
+
         // Block path traversal
         if (path.Contains("..", StringComparison.Ordinal)) return false;
-        
+
         // Restrict system files traversal
         if (path.StartsWith("/System", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("/etc", StringComparison.OrdinalIgnoreCase) ||
@@ -452,11 +451,11 @@ public partial class DockerDiagnosticsView : UserControl
         {
             return false;
         }
-        
+
         return true;
     }
 
-    // ── TextChanged Event Handler (F16) ─────────────────────────────────
+    // -- TextChanged Event Handler (F16) ---------------------------------
     private void OnSearchBoxTextChanged(object? sender, EventArgs e)
     {
         if (_searchBox.InnerRightContent is Button clearBtn)
@@ -480,7 +479,7 @@ public partial class DockerDiagnosticsView : UserControl
     private void UpdateLastRefreshedTimestamp()
     {
         _lastRefreshedText.Text = $"Last refreshed: {DateTime.Now.ToString("T", System.Globalization.CultureInfo.CurrentCulture)}";
-        
+
         int tickCount = 0;
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
         timer.Tick += (s, e) =>
@@ -590,16 +589,16 @@ public partial class DockerDiagnosticsView : UserControl
         SafeCancelAndDisposeCts(ref _refreshCts);
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
     //  Live Data Refresh
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
 
     private int _isRefreshingFlag;
 
     /// <summary>
     /// Creates a sortable header row for a table. Each column label becomes a clickable button.
     /// Clicking a column sorts the table by that column; clicking the same column toggles direction.
-    /// The active sort column shows a ▲ or ▼ indicator.
+    /// The active sort column shows an Up or Down indicator.
     /// </summary>
     /// <param name="columns">Array of (label, sortKey) tuples for each column.</param>
     /// <param name="currentSort">The current sort state (column, ascending).</param>
@@ -792,9 +791,9 @@ public partial class DockerDiagnosticsView : UserControl
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
     //  Section Population
-    // ═══════════════════════════════════════════════════════════════════════
+    // =======================================================================
 
     /// <summary>Populates the Toolchain Environment section by checking the remote registry for default image updates.</summary>
     private async Task PopulateToolchainEnvironmentAsync()
@@ -997,7 +996,7 @@ public partial class DockerDiagnosticsView : UserControl
             VerticalAlignment = VerticalAlignment.Center
         });
 
-        // "Open Desktop" button — launches the container runtime's GUI app
+        // "Open Desktop" button - launches the container runtime's GUI app
         var desktopAppName = GetDesktopAppName(_strategy.DetectedRuntime);
         if (desktopAppName != null)
         {
@@ -1080,7 +1079,7 @@ public partial class DockerDiagnosticsView : UserControl
     {
         _configContent.Children.Clear();
 
-        // ── Extension Metadata ──────────────────────────────────────────
+        // -- Extension Metadata ------------------------------------------
         var metaGrid = new Grid
         {
             ColumnDefinitions = new ColumnDefinitions("Auto,12,*"),
@@ -1108,7 +1107,7 @@ public partial class DockerDiagnosticsView : UserControl
 
         _configContent.Children.Add(CreateSeparator());
 
-        // ── Grouped Settings ────────────────────────────────────────────
+        // -- Grouped Settings --------------------------------------------
         var groups = new (string title, string[] keys)[]
         {
             ("Image & Execution", [ ContainerExtensionModule.SettingsKeyImage, ContainerExtensionModule.SettingsKeyPullPolicy, ContainerExtensionModule.SettingsKeyPlatform, ContainerExtensionModule.SettingsKeyNetwork ]),
@@ -1142,7 +1141,7 @@ public partial class DockerDiagnosticsView : UserControl
                 Opacity = 0.8
             });
 
-            // Single-column key=value grid — clean and predictable layout
+            // Single-column key=value grid - clean and predictable layout
             var rowDef = new RowDefinitions(string.Join(",", Enumerable.Repeat("Auto", pairs.Length)));
             var grid = new Grid
             {

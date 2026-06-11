@@ -2,16 +2,31 @@ using System;
 using System.Runtime.Serialization; // Required for [OnDeserialized]
 using OneWare.Essentials.ViewModels;
 using Avalonia;
+using OneWare.Essentials.Services;
 
 namespace ContainerExtension.ViewModels;
 
+/// <summary>
+/// ViewModel representing the Docker Diagnostics dashboard tool within the OneWare environment.
+/// </summary>
 public class DockerDiagnosticsViewModel : ExtendedTool
 {
-    [Newtonsoft.Json.JsonIgnore]
-    public IServiceProvider? ServiceProvider { get; internal set; }
+    private IServiceProvider? _serviceProvider;
+    private DockerExecutionStrategy? _strategy;
 
     [Newtonsoft.Json.JsonIgnore]
-    public DockerExecutionStrategy? Strategy { get; internal set; }
+    public IServiceProvider? ServiceProvider
+    {
+        get => _serviceProvider ?? ContainerExtensionModule.GlobalServiceProvider;
+        internal set => _serviceProvider = value;
+    }
+
+    [Newtonsoft.Json.JsonIgnore]
+    public DockerExecutionStrategy? Strategy
+    {
+        get => _strategy ?? ServiceProvider?.Resolve<DockerExecutionStrategy>();
+        internal set => _strategy = value;
+    }
 
     private static readonly Avalonia.Media.IImage DashboardIcon = CreateDashboardIcon() ?? CreateFallbackIcon();
 
@@ -23,7 +38,7 @@ public class DockerDiagnosticsViewModel : ExtendedTool
             var drawing = new Avalonia.Media.GeometryDrawing
             {
                 Geometry = geometry,
-                Brush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(ContainerExtensionModule.DockerBlueHex))
+                Brush = new Avalonia.Media.Immutable.ImmutableSolidColorBrush((uint)Avalonia.Media.Color.Parse(ContainerExtensionModule.DockerBlueHex).ToUInt32())
             };
             return new Avalonia.Media.DrawingImage { Drawing = drawing };
         }
@@ -35,7 +50,7 @@ public class DockerDiagnosticsViewModel : ExtendedTool
         var drawing = new Avalonia.Media.GeometryDrawing
         {
             Geometry = new Avalonia.Media.RectangleGeometry(new Rect(0, 0, 16, 16)),
-            Brush = Avalonia.Media.Brushes.Gray
+            Brush = new Avalonia.Media.Immutable.ImmutableSolidColorBrush((uint)Avalonia.Media.Colors.Gray.ToUInt32())
         };
         return new Avalonia.Media.DrawingImage { Drawing = drawing };
     }

@@ -102,8 +102,8 @@ public partial class DockerDiagnosticsView
                     if (!string.IsNullOrEmpty(_searchFilter))
                     {
                         entries.RemoveAll(e =>
-                            !( (e.Tool?.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                               (e.Image?.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase) ?? false) )
+                            !((e.Tool?.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                               (e.Image?.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase) ?? false))
                         );
                     }
 
@@ -318,10 +318,10 @@ public partial class DockerDiagnosticsView
             "cpu" => sort.ascending
               ? entries.OrderBy(e => e.MaxCpuPercent ?? 0)
               : entries.OrderByDescending(e => e.MaxCpuPercent ?? 0),
-             _ => sort.ascending // "time"
-                       ? entries.OrderBy(e => e.Timestamp)
-               : entries.OrderByDescending(e => e.Timestamp),
-         };
+            _ => sort.ascending // "time"
+                      ? entries.OrderBy(e => e.Timestamp)
+              : entries.OrderByDescending(e => e.Timestamp),
+        };
     }
 
     private Grid BuildTelemetryEntryRow(ContainerTelemetry.TelemetryEntry entry)

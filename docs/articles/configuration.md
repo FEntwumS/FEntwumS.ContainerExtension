@@ -1,6 +1,6 @@
 # Configuration Guide
 
-All settings are registered under **Binary Management → Container Engine** in OneWare Studio's settings panel.
+All settings are registered under **Binary Management -> Container Engine** in OneWare Studio's settings panel.
 
 ## Settings Reference
 
@@ -26,18 +26,18 @@ All settings are registered under **Binary Management → Container Engine** in 
 
 | Setting | Type | Default | Description |
 | ------- | ---- | ------- | ----------- |
-| Memory Limit | Slider (256 MB step) | 0 (no limit) | Container memory cap. Auto-detects host max |
+| Memory Limit | Slider (256 MB step) | 0 (no limit) | Container memory cap. Auto-detects host max. If non-zero, automatically clamped to a minimum of 6MB |
 | CPU Cores Limit | Slider | 0 (no limit) | Container CPU cap. Auto-detects host max |
 | Execution Timeout | Slider | 0 (no timeout) | Kill container after N minutes |
 
 > [!WARNING]
-> Setting resource limits above 75% of your system's capacity triggers a warning — this can starve the host OS.
+> Setting resource limits above 75% of your system's capacity triggers a warning - this can starve the host OS.
 
 ### Container Behavior
 
 | Setting | Type | Default | Description |
 | ------- | ---- | ------- | ----------- |
-| Auto-Remove Containers | CheckBox | ✅ on | Remove containers after execution |
+| Auto-Remove Containers | CheckBox | On | Remove containers after execution |
 | Network Mode | ComboBox | `bridge` | Docker network mode: `bridge`, `host`, `none` |
 | Container Name Prefix | Text | `containerextension-` | Prefix for generated container names |
 | Extra Container Labels | Text | *(empty)* | Space-separated `key=value` container labels for filtering |
@@ -47,7 +47,7 @@ All settings are registered under **Binary Management → Container Engine** in 
 | Setting | Type | Default | Description |
 | ------- | ---- | ------- | ----------- |
 | Log Level | ComboBox | `Verbose` | `Off`, `Errors Only`, `Info`, `Verbose` |
-| Show Timestamps | CheckBox | ✅ on | Prepend `HH:mm:ss.fff` to SDK log messages |
+| Show Timestamps | CheckBox | On | Prepend `HH:mm:ss.fff` to SDK log messages |
 | Telemetry Retention | ComboBox | `100` | Max entries: `None`, `25`, `50`, `100`, `250`, `500`, `1000`, `Unlimited` |
 | Dashboard Refresh | ComboBox | `Manual` | Auto-refresh: `Manual`, `2s`, `5s`, `10s`, `15s`, `30s`, `60s`, `120s` |
 
@@ -56,9 +56,9 @@ All settings are registered under **Binary Management → Container Engine** in 
 Each tool registered in OneWare Studio gets its own image override setting, dynamically created as `ContainerImage_{toolName}`. This allows using different images for different tools:
 
 ```text
-ContainerImage_ghdl      → hdlc/ghdl:yosys
-ContainerImage_yosys     → hdlc/ghdl:yosys
-ContainerImage_nextpnr   → hdlc/nextpnr:ecp5
+ContainerImage_ghdl      -> hdlc/ghdl:yosys
+ContainerImage_yosys     -> hdlc/ghdl:yosys
+ContainerImage_nextpnr   -> hdlc/nextpnr:ecp5
 ```
 
 ## Image Resolution Hierarchy
@@ -66,7 +66,7 @@ ContainerImage_nextpnr   → hdlc/nextpnr:ecp5
 When the extension needs to determine which image to use, it checks (in order):
 
 ```text
-1. ONEWARE_DOCKER_IMAGE env var        (highest — CI/CD override)
+1. ONEWARE_DOCKER_IMAGE env var        (highest - CI/CD override)
 2. ContainerImage_{tool} per-tool      (settings UI)
 3. ContainerExtension_DefaultImage     (global setting)
 4. hdlc/ghdl:yosys                     (hardcoded fallback)

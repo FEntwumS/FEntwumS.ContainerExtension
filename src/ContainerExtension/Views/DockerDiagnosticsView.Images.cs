@@ -32,6 +32,7 @@ public partial class DockerDiagnosticsView
     private void PopulateImages(IList<Docker.DotNet.Models.ImagesListResponse> images,
     (int imageCount, long totalSizeBytes, long reclaimableBytes) diskUsage)
     {
+        if (images == null) return;
         lock (_cachedDataLock)
         {
             _cachedImages = images;
@@ -145,7 +146,7 @@ public partial class DockerDiagnosticsView
         foreach (var img in itemsToShow)
         {
             var repoTag = Truncate(img.RepoTags?.FirstOrDefault() ?? "<none>:<none>", 35);
-            
+
             Grid? existingGrid = null;
             lock (_cachedDataLock)
             {
@@ -179,9 +180,11 @@ public partial class DockerDiagnosticsView
                     catch (Exception ex)
                     {
                         ContainerTelemetry.TrackError("DockerDiagnosticsView.Images", "Action_RemoveImage", ex);
+                        if (!_hasAttached) return;
                         removeBtn.Content = "Error ✗";
                         ToolTip.SetTip(removeBtn, $"Failed to remove: {ex.Message}");
                         await Task.Delay(3000);
+                        if (!_hasAttached) return;
                         removeBtn.Content = "Remove";
                         ToolTip.SetTip(removeBtn, prevTip);
                         removeBtn.IsEnabled = true;
@@ -262,7 +265,7 @@ public partial class DockerDiagnosticsView
             });
         }
 
-        // ── Disk Usage Summary (merged from standalone section) ──────
+        // -- Disk Usage Summary (merged from standalone section) ------
         if (diskUsage.totalSizeBytes > 0)
         {
             newChildren.Add(new Border

@@ -12,15 +12,22 @@ using System.Threading.Tasks;
 
 namespace FEntwumS.ContainerExtension.Registry;
 
+/// <summary>
+/// Represents an error that occurs during a registry connection or operation.
+/// </summary>
 public sealed class RegistryConnectionException : Exception
 {
     public RegistryConnectionException(string message) : base(message) { }
     public RegistryConnectionException(string message, Exception innerException) : base(message, innerException) { }
 }
 
+/// <summary>
+/// Static client for interacting with Docker/OCI container registries (e.g., ghcr.io, Docker Hub).
+/// Handles authentication logic, image manifest retrieval, and blob downloads.
+/// </summary>
 public static partial class RegistryClient
 {
-    [System.Text.RegularExpressions.GeneratedRegex(@"(token|bearer)\s*=\s*[a-zA-Z0-9_\-\.]+", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
+    [System.Text.RegularExpressions.GeneratedRegex(@"(?<type>token|bearer)(?<sep>\s*=\s*|\s+)[a-zA-Z0-9_\-\.\+\/=]+", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
     private static partial System.Text.RegularExpressions.Regex SecretScrubRegex();
 
     private static readonly string CachedUserName = Environment.UserName;
@@ -31,11 +38,8 @@ public static partial class RegistryClient
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (System.Net.IPAddress[] ips, long cacheTimeTicks)> DnsCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly System.Threading.Lock CacheEvictionLock = new();
-
-    private static readonly JsonSerializerOptions SerializerOptions = new()
-    {
-        TypeInfoResolver = RegistryJsonContext.Default
-    };
+    private static readonly System.Buffers.SearchValues<char> ControlChars = System.Buffers.SearchValues.Create(
+        "\0\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\v\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f\u007f\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f");
 
     private static HttpClient HttpClient
     {
@@ -75,17 +79,14 @@ public static partial class RegistryClient
             return cached.ips;
         }
         var ips = await System.Net.Dns.GetHostAddressesAsync(host, ct).ConfigureAwait(false);
-        if (DnsCache.Count >= 50)
+        lock (CacheEvictionLock)
         {
-            lock (CacheEvictionLock)
+            if (DnsCache.Count >= 50)
             {
-                if (DnsCache.Count >= 50)
-                {
-                    DnsCache.Clear();
-                }
+                DnsCache.Clear();
             }
+            DnsCache[host] = (ips, Environment.TickCount64);
         }
-        DnsCache[host] = (ips, Environment.TickCount64);
         return ips;
     }
 
@@ -106,7 +107,7 @@ public static partial class RegistryClient
                 return false;
             }
         }
-        
+
         var span = input.AsSpan();
         int start = 0;
         while (start < span.Length)
@@ -143,11 +144,13 @@ public static partial class RegistryClient
                         {
                             if (response.Headers.RetryAfter.Delta.HasValue)
                             {
-                                retryAfterSeconds = (int)response.Headers.RetryAfter.Delta.Value.TotalSeconds;
+                                var seconds = response.Headers.RetryAfter.Delta.Value.TotalSeconds;
+                                retryAfterSeconds = seconds is >= 1.0 and <= 3600.0 ? (int)seconds : 2;
                             }
                             else if (response.Headers.RetryAfter.Date.HasValue)
                             {
-                                retryAfterSeconds = (int)(response.Headers.RetryAfter.Date.Value.UtcDateTime - DateTime.UtcNow).TotalSeconds;
+                                var seconds = (response.Headers.RetryAfter.Date.Value.UtcDateTime - DateTime.UtcNow).TotalSeconds;
+                                retryAfterSeconds = seconds is >= 1.0 and <= 3600.0 ? (int)seconds : 2;
                             }
                         }
                         response.Dispose();
@@ -202,7 +205,7 @@ public static partial class RegistryClient
     }
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (List<string> tags, long cacheTimeTicks)> TagsCache = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly SemaphoreSlim ActiveFetchesLock = new(1, 1);
+
     private static readonly Dictionary<string, Task<List<string>>> ActiveFetches = new(StringComparer.OrdinalIgnoreCase);
 
     public static async Task<List<string>> FetchTagsAsync(string imageReference, CancellationToken cancellationToken = default)
@@ -230,8 +233,7 @@ public static partial class RegistryClient
         }
 
         Task<List<string>> task;
-        await ActiveFetchesLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+        lock (ActiveFetches)
         {
             if (ActiveFetches.TryGetValue(imageReference, out var existingTask))
             {
@@ -242,11 +244,13 @@ public static partial class RegistryClient
                 string key = imageReference;
                 task = Task.Run(async () =>
                 {
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                    var ct = cts.Token;
                     try
                     {
                         var parts = ParseImageReference(key);
 
-                        if (parts.Registry.Contains("http:", StringComparison.OrdinalIgnoreCase) || 
+                        if (parts.Registry.Contains("http:", StringComparison.OrdinalIgnoreCase) ||
                             parts.Registry.Contains("http", StringComparison.OrdinalIgnoreCase))
                         {
                             throw new RegistryConnectionException("Non-SSL / HTTP registries are strictly prohibited.");
@@ -261,7 +265,7 @@ public static partial class RegistryClient
                         try
                         {
                             var hostToResolve = string.IsNullOrEmpty(parts.Registry) ? "hub.docker.com" : parts.Registry;
-                            _ = await ResolveDnsAsync(hostToResolve, cancellationToken).ConfigureAwait(false);
+                            _ = await ResolveDnsAsync(hostToResolve, ct).ConfigureAwait(false);
                         }
                         catch (Exception)
                         {
@@ -271,12 +275,12 @@ public static partial class RegistryClient
                         List<string> result;
                         if (GhcrRegistries.Contains(parts.Registry))
                         {
-                            result = await FetchGhcrTagsAsync(parts.Namespace, parts.Repository, cancellationToken).ConfigureAwait(false);
+                            result = await FetchGhcrTagsAsync(parts.Namespace, parts.Repository, ct).ConfigureAwait(false);
                         }
                         else
                         {
                             string ns = string.IsNullOrEmpty(parts.Namespace) ? "library" : parts.Namespace;
-                            result = await FetchDockerHubTagsAsync(ns, parts.Repository, cancellationToken).ConfigureAwait(false);
+                            result = await FetchDockerHubTagsAsync(ns, parts.Repository, ct).ConfigureAwait(false);
                         }
 
                         AddToCache(key, result);
@@ -284,7 +288,6 @@ public static partial class RegistryClient
                     }
                     catch (OperationCanceledException)
                     {
-                        AddToCache(key, []);
                         return [];
                     }
                     catch (TimeoutException ex)
@@ -321,24 +324,15 @@ public static partial class RegistryClient
                     }
                     finally
                     {
-                        await ActiveFetchesLock.WaitAsync().ConfigureAwait(false);
-                        try
+                        lock (ActiveFetches)
                         {
                             ActiveFetches.Remove(key);
-                        }
-                        finally
-                        {
-                            ActiveFetchesLock.Release();
                         }
                     }
                 });
 
                 ActiveFetches[imageReference] = task;
             }
-        }
-        finally
-        {
-            ActiveFetchesLock.Release();
         }
 
         return cancellationToken.CanBeCanceled ? await task.WaitAsync(cancellationToken).ConfigureAwait(false) : await task.ConfigureAwait(false);
@@ -386,7 +380,7 @@ public static partial class RegistryClient
         return span.ToString();
     }
 
-    private static (string Registry, string Namespace, string Repository) ParseImageReference(string imageReference)
+    internal static (string Registry, string Namespace, string Repository) ParseImageReference(string imageReference)
     {
         if (string.IsNullOrWhiteSpace(imageReference))
         {
@@ -399,14 +393,11 @@ public static partial class RegistryClient
         {
             cleanImage = cleanImage[..shaIdx];
         }
-        else
+        var lastSlashIdx = cleanImage.LastIndexOf('/');
+        var lastColonIdx = cleanImage.LastIndexOf(':');
+        if (lastColonIdx >= 0 && lastColonIdx > lastSlashIdx)
         {
-            var lastSlashIdx = cleanImage.LastIndexOf('/');
-            var lastColonIdx = cleanImage.LastIndexOf(':');
-            if (lastColonIdx >= 0 && lastColonIdx > lastSlashIdx)
-            {
-                cleanImage = cleanImage[..lastColonIdx];
-            }
+            cleanImage = cleanImage[..lastColonIdx];
         }
 
         if (cleanImage.IsEmpty)
@@ -478,7 +469,7 @@ public static partial class RegistryClient
         HubResponse? res;
         try
         {
-            res = await JsonSerializer.DeserializeAsync(stream, typeof(HubResponse), SerializerOptions, cancellationToken).ConfigureAwait(false) as HubResponse;
+            res = await JsonSerializer.DeserializeAsync(stream, RegistryJsonContext.Default.HubResponse, cancellationToken).ConfigureAwait(false);
         }
         catch (JsonException)
         {
@@ -529,7 +520,7 @@ public static partial class RegistryClient
         GhcrTokenResponse? tokenRes;
         try
         {
-            tokenRes = await JsonSerializer.DeserializeAsync(tokenStream, typeof(GhcrTokenResponse), SerializerOptions, cancellationToken).ConfigureAwait(false) as GhcrTokenResponse;
+            tokenRes = await JsonSerializer.DeserializeAsync(tokenStream, RegistryJsonContext.Default.GhcrTokenResponse, cancellationToken).ConfigureAwait(false);
         }
         catch (JsonException)
         {
@@ -542,17 +533,13 @@ public static partial class RegistryClient
         }
 
         var rawToken = tokenRes.Token;
-        string token;
-        bool hasControl = false;
-        foreach (var c in rawToken)
+        if (string.IsNullOrEmpty(rawToken))
         {
-            if (char.IsControl(c))
-            {
-                hasControl = true;
-                break;
-            }
+            return [];
         }
-        if (!hasControl)
+        string token;
+        int firstControl = rawToken.AsSpan().IndexOfAny(ControlChars);
+        if (firstControl < 0)
         {
             token = rawToken;
         }
@@ -586,7 +573,7 @@ public static partial class RegistryClient
         GhcrTagsResponse? tagsRes;
         try
         {
-            tagsRes = await JsonSerializer.DeserializeAsync(tagsStream, typeof(GhcrTagsResponse), SerializerOptions, cancellationToken).ConfigureAwait(false) as GhcrTagsResponse;
+            tagsRes = await JsonSerializer.DeserializeAsync(tagsStream, RegistryJsonContext.Default.GhcrTagsResponse, cancellationToken).ConfigureAwait(false);
         }
         catch (JsonException)
         {
@@ -619,17 +606,17 @@ public static partial class RegistryClient
         }
         if (input.Contains("token=", StringComparison.OrdinalIgnoreCase) || input.Contains("bearer", StringComparison.OrdinalIgnoreCase))
         {
-            input = SecretScrubRegex().Replace(input, "$1=***");
-        }
-        var user = CachedUserName;
-        if (!string.IsNullOrWhiteSpace(user) && input.Contains(user, StringComparison.OrdinalIgnoreCase))
-        {
-            input = input.Replace(user, "***", StringComparison.OrdinalIgnoreCase);
+            input = SecretScrubRegex().Replace(input, m => $"{m.Groups["type"].Value}{m.Groups["sep"].Value}***");
         }
         var home = CachedUserProfile;
         if (!string.IsNullOrWhiteSpace(home) && input.Contains(home, StringComparison.OrdinalIgnoreCase))
         {
             input = input.Replace(home, "~", StringComparison.OrdinalIgnoreCase);
+        }
+        var user = CachedUserName;
+        if (!string.IsNullOrWhiteSpace(user) && user.Length >= 3 && input.Contains(user, StringComparison.OrdinalIgnoreCase))
+        {
+            input = input.Replace(user, "***", StringComparison.OrdinalIgnoreCase);
         }
         return input;
     }
@@ -638,9 +625,9 @@ public static partial class RegistryClient
 internal class HubResponse { [JsonPropertyName("results")] public List<HubTag>? Results { get; set; } }
 internal class HubTag { [JsonPropertyName("name")] public string? Name { get; set; } }
 internal class GhcrTagsResponse { [JsonPropertyName("tags")] public List<string>? Tags { get; set; } }
-internal class GhcrTokenResponse 
-{ 
-    [JsonPropertyName("token")] public string? Token { get; set; } 
+internal class GhcrTokenResponse
+{
+    [JsonPropertyName("token")] public string? Token { get; set; }
     [JsonPropertyName("expires_in")] public int? ExpiresIn { get; set; }
     [JsonPropertyName("issued_at")] public string? IssuedAt { get; set; }
 }
