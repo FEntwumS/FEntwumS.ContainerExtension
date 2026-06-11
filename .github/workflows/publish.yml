@@ -19,24 +19,24 @@ jobs:
       id-token: write      # Required for OIDC artifact attestation (SLSA)
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/global.json', '**/Directory.Packages.props', '**/Directory.Build.props', '**/*.csproj') }}
           restore-keys: ${{ runner.os }}-nuget-
 
       - name: Get Version
-        uses: kzrnm/get-net-sdk-project-versions-action@v1.3.0
+        uses: kzrnm/get-net-sdk-project-versions-action@v3.1.0
         id: get-version
         with:
           proj-path: src/ContainerExtension/ContainerExtension.csproj
@@ -61,12 +61,12 @@ jobs:
           directory: ./publish
 
       - name: Generate SLSA Build Provenance
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: ContainerExtension_${{steps.get-version.outputs.version}}_all.zip
 
       - name: Publish to GitHub Release
-        uses: ncipollo/release-action@v1.14.0
+        uses: ncipollo/release-action@v1.21.0
         with:
           artifacts: "ContainerExtension_${{steps.get-version.outputs.version}}_all.zip,./publish/compatibility.txt,./publish/sbom.spdx.json"
           tag: ${{steps.get-version.outputs.version}}
