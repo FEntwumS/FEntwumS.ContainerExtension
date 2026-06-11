@@ -1031,7 +1031,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         for (int i = candidates.Length - 1; i >= 0; i--)
         {
             var (path, name) = candidates[i];
-            if (path.Contains(home, StringComparison.Ordinal))
+            if (!string.IsNullOrEmpty(home) && path.Contains(home, StringComparison.Ordinal))
             {
                 var dir = Path.GetDirectoryName(path);
                 if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
