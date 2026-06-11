@@ -94,6 +94,7 @@ public partial class DockerDiagnosticsView : UserControl
     // -- Data Fingerprints (skip UI rebuild when data is unchanged) ----
     private int _lastContainerFingerprint;
     private int _lastImageFingerprint;
+    private bool? _wasDockerOnline;
 
     /// <summary>
     /// Constructs the Docker Desktop-style dashboard as a <see cref="UserControl"/>.
@@ -780,6 +781,12 @@ public partial class DockerDiagnosticsView : UserControl
                     ToolTip.SetTip(_headerTitle, null);
                     PopulateStatus(true, info);
 
+                    if (_wasDockerOnline == false)
+                    {
+                        ShowTemporaryStatus("Docker Daemon is back online!");
+                    }
+                    _wasDockerOnline = true;
+
                     // Skip-if-unchanged: compare a lightweight fingerprint of container/image data
                     // to avoid full UI tree rebuild when nothing has changed (critical at 2s/5s refresh rates).
                     var containerFp = containers.Count;
@@ -827,6 +834,12 @@ public partial class DockerDiagnosticsView : UserControl
                     _ = PopulateTelemetryAsync();
                     UpdateHeaderBadge(0);
                     UpdateLastRefreshedTimestamp();
+
+                    if (_wasDockerOnline == null || _wasDockerOnline == true)
+                    {
+                        ShowTemporaryError("Docker Daemon is offline", ex);
+                    }
+                    _wasDockerOnline = false;
                 });
             }
         }
