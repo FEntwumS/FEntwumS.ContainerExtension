@@ -19,24 +19,24 @@ jobs:
       id-token: write      # Required for OIDC artifact attestation (SLSA)
       attestations: write
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@39582172f897db67f6229396b75e31f030f57573 # v4.2.0
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
 
       - name: Cache NuGet packages
-        uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+        uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/global.json', '**/Directory.Packages.props', '**/Directory.Build.props', '**/*.csproj') }}
           restore-keys: ${{ runner.os }}-nuget-
 
       - name: Get Version
-        uses: kzrnm/get-net-sdk-project-versions-action@de7fb293c126ec6b95d9ba65f377c8e96bf710d2 # v1.3.0
+        uses: kzrnm/get-net-sdk-project-versions-action@v1.3.0
         id: get-version
         with:
           proj-path: src/ContainerExtension/ContainerExtension.csproj
@@ -47,26 +47,26 @@ jobs:
           GITHUB_ACTIONS: true
 
       - name: Generate SBOM
-        uses: anchore/sbom-action@f32e10fe7735aeaa2221f986fe7487f940b5fa8c # v0.17.9
+        uses: anchore/sbom-action@v0
         with:
           path: ./publish
           format: spdx-json
           output-file: publish/sbom.spdx.json
 
       - name: Compress Release Artifacts
-        uses: thedoctor0/zip-release@a340cc58dbfb4226d83cf803d41e8c75ab3f48a8 # v0.7.6
+        uses: thedoctor0/zip-release@0.7.6
         with:
           type: "zip"
           filename: ../ContainerExtension_${{steps.get-version.outputs.version}}_all.zip
           directory: ./publish
 
       - name: Generate SLSA Build Provenance
-        uses: actions/attest-build-provenance@520d128f165991a6c774bcb264f323e3d70747f4 # v1.4.3
+        uses: actions/attest-build-provenance@v1
         with:
           subject-path: ContainerExtension_${{steps.get-version.outputs.version}}_all.zip
 
       - name: Publish to GitHub Release
-        uses: ncipollo/release-action@2b85e0fe55fa16a75f14e59f42777174db62c8e3 # v1.14.0
+        uses: ncipollo/release-action@v1.14.0
         with:
           artifacts: "ContainerExtension_${{steps.get-version.outputs.version}}_all.zip,./publish/compatibility.txt,./publish/sbom.spdx.json"
           tag: ${{steps.get-version.outputs.version}}
