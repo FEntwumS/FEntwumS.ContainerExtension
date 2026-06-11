@@ -1312,6 +1312,7 @@ public partial class DockerDiagnosticsView : UserControl
                 var runtimePath = _strategy.GetRuntimePath();
                 var settings = _strategy.GetActiveSettingsSummary();
                 var img = settings.GetValueOrDefault("Image", ContainerExtensionModule.FallbackImage);
+                ShowTemporaryStatus($"Pulling default image '{img}' in terminal...");
                 await _terminalService.ExecuteInTerminalAsync($"{runtimePath} pull \"{img}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5)).ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -1325,17 +1326,23 @@ public partial class DockerDiagnosticsView : UserControl
         {
             try
             {
-                var result = await _strategy.UpdateAllImagesAsync(
-              msg => Dispatcher.UIThread.Post(() =>
-              {
-                  _headerTitle.Text = $"{ContainerExtensionModule.DashboardTitle} — {msg}";
-              })).ConfigureAwait(false);
                 Dispatcher.UIThread.Post(() =>
-            {
-                _headerTitle.Text = $"{ContainerExtensionModule.DashboardTitle} — Updated {result.pulled} image(s)" +
-              (result.failed > 0 ? $", {result.failed} failed" : "");
-                _ = RefreshAllAsync(); // Fire-and-forget; RefreshAllAsync has its own error handling
-            });
+                {
+                    _statusBannerText.Text = "Updating all local images...";
+                    _statusBanner.Background = new SolidColorBrush(Color.FromArgb(30, 36, 150, 237));
+                    _statusBanner.BorderBrush = new SolidColorBrush(Color.FromArgb(80, 36, 150, 237));
+                    _statusBanner.IsVisible = true;
+                });
+
+                var result = await _strategy.UpdateAllImagesAsync(
+                    msg => Dispatcher.UIThread.Post(() =>
+                    {
+                        _statusBannerText.Text = $"Updating images: {msg}";
+                    })
+                ).ConfigureAwait(false);
+
+                ShowTemporaryStatus($"Successfully updated {result.pulled} image(s)" + (result.failed > 0 ? $", {result.failed} failed" : ""));
+                _ = RefreshAllAsync();
             }
             catch (Exception ex)
             {
@@ -1354,6 +1361,7 @@ public partial class DockerDiagnosticsView : UserControl
                     return;
                 }
                 var runtimePath = _strategy.GetRuntimePath();
+                ShowTemporaryStatus("Pruning unused images in terminal...");
                 await _terminalService.ExecuteInTerminalAsync($"{runtimePath} image prune -a -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -1373,6 +1381,7 @@ public partial class DockerDiagnosticsView : UserControl
                     return;
                 }
                 var runtimePath = _strategy.GetRuntimePath();
+                ShowTemporaryStatus("Pruning system in terminal...");
                 await _terminalService.ExecuteInTerminalAsync($"{runtimePath} system prune -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -1387,6 +1396,7 @@ public partial class DockerDiagnosticsView : UserControl
             try
             {
                 var runtimePath = _strategy.GetRuntimePath();
+                ShowTemporaryStatus("Running Hello-World test in terminal...");
                 await _terminalService.ExecuteInTerminalAsync($"{runtimePath} run --rm hello-world", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -1401,6 +1411,7 @@ public partial class DockerDiagnosticsView : UserControl
             try
             {
                 var runtimePath = _strategy.GetRuntimePath();
+                ShowTemporaryStatus("Querying Engine Info in terminal...");
                 await _terminalService.ExecuteInTerminalAsync($"{runtimePath} info", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(1)).ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -1419,6 +1430,7 @@ public partial class DockerDiagnosticsView : UserControl
                 if (topLevel?.Clipboard != null)
                 {
                     await topLevel.Clipboard.SetTextAsync(cmd).ConfigureAwait(false);
+                    ShowTemporaryStatus("📋 Copied equivalent 'docker run' command to clipboard!");
                     await Console.Out.WriteLineAsync($"[ContainerExtension] 📋 Copied to clipboard: {cmd}").ConfigureAwait(false);
                 }
             }
