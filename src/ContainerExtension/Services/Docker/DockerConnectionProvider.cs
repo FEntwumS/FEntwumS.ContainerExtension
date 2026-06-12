@@ -29,6 +29,17 @@ public sealed class DockerConnectionProvider : IDisposable
 
     public bool IsConnected => _lastPingSucceeded && _lastSystemInfoSucceeded && !_disposed;
 
+    public SystemInfoResponse? CachedSystemInfo
+    {
+        get
+        {
+            lock (_systemInfoLock)
+            {
+                return _cachedSystemInfo;
+            }
+        }
+    }
+
     public DockerConnectionProvider(DockerClient client)
     {
         ArgumentNullException.ThrowIfNull(client);

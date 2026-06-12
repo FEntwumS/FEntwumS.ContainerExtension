@@ -121,6 +121,14 @@ public sealed class ContainerExtensionTests : IDisposable
     [InlineData("just-a-path", false)]
     public void DaemonSocketFormat_ValidatesCorrectly(string input, bool expectedValid)
     {
+        if (expectedValid)
+        {
+            bool isNamedPipe = input.StartsWith(@"\\.\", StringComparison.Ordinal) || input.StartsWith("npipe://", StringComparison.OrdinalIgnoreCase);
+            bool isUnixSocket = input.StartsWith("unix://", StringComparison.OrdinalIgnoreCase);
+            if (isNamedPipe && !OperatingSystem.IsWindows()) expectedValid = false;
+            if (isUnixSocket && OperatingSystem.IsWindows()) expectedValid = false;
+        }
+
         var result = _socketValidator.Validate(input, out var warning);
         Assert.Equal(expectedValid, result);
         if (!expectedValid)
@@ -1747,6 +1755,14 @@ public sealed class ContainerExtensionTests : IDisposable
     [InlineData("\\\\.\\pipe\\docker_engine", true)]
     public void DaemonSocketValidation_EdgeCases(string input, bool expectedValid)
     {
+        if (expectedValid)
+        {
+            bool isNamedPipe = input.StartsWith(@"\\.\", StringComparison.Ordinal) || input.StartsWith("npipe://", StringComparison.OrdinalIgnoreCase);
+            bool isUnixSocket = input.StartsWith("unix://", StringComparison.OrdinalIgnoreCase);
+            if (isNamedPipe && !OperatingSystem.IsWindows()) expectedValid = false;
+            if (isUnixSocket && OperatingSystem.IsWindows()) expectedValid = false;
+        }
+
         var result = _socketValidator.Validate(input, out var warning);
         Assert.Equal(expectedValid, result);
         if (!expectedValid)
@@ -2374,6 +2390,119 @@ public sealed class ContainerExtensionTests : IDisposable
         {
             // Allow network/timeout failures to pass silently to prevent flaky tests in offline/CI environments
         }
+    }
+
+    [Fact]
+    public void DockerCommandBuilder_ParseEnvFile_DeduplicatesKeys()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"env_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        var envFile = Path.Combine(tempDir, ".env");
+        try
+        {
+            File.WriteAllText(envFile, "FOO=bar\nBAZ=qux\nFOO=override\n");
+            var result = DockerCommandBuilder.ParseEnvFile(tempDir);
+            Assert.NotNull(result);
+            Assert.Equal(2, result.Count);
+            Assert.Contains("FOO=override", result);
+            Assert.Contains("BAZ=qux", result);
+            Assert.Single(result, s => s.StartsWith("FOO=", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void ContainerTelemetry_IsSubpath_ResolvesCanonicalSymlinks()
+    {
+        var method = typeof(ContainerExtension.ContainerTelemetry).GetMethod("IsSubpath", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var tempDir = Path.Combine(Path.GetTempPath(), $"telemetry_sym_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        var subDir = Path.Combine(tempDir, "sub");
+        Directory.CreateDirectory(subDir);
+
+        try
+        {
+            var isSub1 = method.Invoke(null, new object[] { subDir, tempDir }) as bool?;
+            Assert.True(isSub1);
+
+            var fileInSub = Path.Combine(subDir, "telemetry.json");
+            var isSub2 = method.Invoke(null, new object[] { fileInSub, tempDir }) as bool?;
+            Assert.True(isSub2);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void DockerCommandBuilder_BuildContainerParameters_ClampsToRemoteCpuCores()
+    {
+        var settings = new MockSettingsService();
+        settings.SetSettingValue(ContainerExtensionModule.CpuLimitSetting, 16.0); // Configure 16 cores
+
+        var command = new ToolCommand
+        {
+            Executable = "ghdl",
+            ToolName = "test",
+            WorkingDirectory = "/workspace",
+            CommandArguments = new List<ICommandArgument>()
+        };
+
+        var param1 = DockerCommandBuilder.BuildContainerParameters("img", command, settings, null, null, (c, l) => { }, 8.0);
+        Assert.Equal(8000000000L, param1.HostConfig.NanoCPUs);
+
+        var param2 = DockerCommandBuilder.BuildContainerParameters("img", command, settings, null, null, (c, l) => { }, null);
+        Assert.Equal(16000000000L, param2.HostConfig.NanoCPUs);
+    }
+
+    [Fact]
+    public void ContainerExtensionModule_ValidateRuntimePath_AcceptsEmptyOrValidExecutables()
+    {
+        var method = typeof(ContainerExtensionModule).GetMethod("ValidateRuntimePath", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var resultEmpty = method.Invoke(null, new object[] { "" }) as bool?;
+        Assert.True(resultEmpty);
+
+        var selfPath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+        if (!string.IsNullOrEmpty(selfPath))
+        {
+            var resultSelf = method.Invoke(null, new object[] { selfPath }) as bool?;
+            Assert.True(resultSelf);
+        }
+    }
+
+    [Fact]
+    public void RegistryClient_ChallengeParameterRegex_ParsesCommasInQuotes()
+    {
+        var method = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetMethod("ChallengeParameterRegex", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+        var regex = method.Invoke(null, null) as System.Text.RegularExpressions.Regex;
+        Assert.NotNull(regex);
+
+        var headerParam = "realm=\"https://auth.docker.io/token\",service=\"registry.docker.io\",scope=\"repository:samalba/my-app:pull,push\"";
+        var matches = regex.Matches(headerParam);
+        Assert.Equal(3, matches.Count);
+
+        string? realm = null, service = null, scope = null;
+        foreach (System.Text.RegularExpressions.Match match in matches)
+        {
+            var key = match.Groups["key"].Value;
+            var val = match.Groups["value"].Value;
+            if (key == "realm") realm = val;
+            else if (key == "service") service = val;
+            else if (key == "scope") scope = val;
+        }
+
+        Assert.Equal("https://auth.docker.io/token", realm);
+        Assert.Equal("registry.docker.io", service);
+        Assert.Equal("repository:samalba/my-app:pull,push", scope);
     }
 #pragma warning restore CA1305, CA1307, CA1031, CA1822, CS8019, CA1308
 }

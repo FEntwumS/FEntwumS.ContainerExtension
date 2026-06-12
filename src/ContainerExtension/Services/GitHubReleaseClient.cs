@@ -70,6 +70,10 @@ internal static class GitHubReleaseClient
             }
             return tag;
         }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new InvalidOperationException("Network connection timed out while fetching the latest release from GitHub (10s limit exceeded).", ex);
+        }
         catch (HttpRequestException ex)
         {
             throw new InvalidOperationException("Network connection failed while fetching the latest release from GitHub: " + ex.Message, ex);

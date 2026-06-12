@@ -20,6 +20,7 @@ namespace ContainerExtension.Views;
 /// </summary>
 public partial class DockerDiagnosticsView
 {
+    private readonly SemaphoreSlim _telemetrySemaphore = new(1, 1);
     private int _lastTelemetryFingerprint;
     private int _currentTelemetryToken;
     private long _lastTelemetryPopulationTime;
@@ -40,8 +41,14 @@ public partial class DockerDiagnosticsView
         Volatile.Write(ref _lastTelemetryPopulationTime, Environment.TickCount64);
 
         var localToken = System.Threading.Interlocked.Increment(ref _currentTelemetryToken);
+        await _telemetrySemaphore.WaitAsync().ConfigureAwait(false);
         try
         {
+            if (System.Threading.Volatile.Read(ref _currentTelemetryToken) != localToken)
+            {
+                return;
+            }
+
             // Check if telemetry is disabled via the Retention = None setting
             var retentionStr = _settingsService.SafeGetSetting(ContainerExtensionModule.TelemetryRetentionSetting, "100");
 
@@ -112,6 +119,7 @@ public partial class DockerDiagnosticsView
                     }
 
                     // Apply global search filter
+                    int preFilterCount = entries.Count;
                     if (!string.IsNullOrEmpty(_searchFilter))
                     {
                         entries.RemoveAll(e =>
@@ -142,11 +150,11 @@ public partial class DockerDiagnosticsView
                             newChildren.Add(BuildTelemetryEntryRow(entry));
                         }
 
-                        if (totalRuns > entries.Count)
+                        if (totalRuns > preFilterCount)
                         {
                             newChildren.Add(new TextBlock
                             {
-                                Text = $"... and {totalRuns - entries.Count} more run(s) — Open Log to see all entries",
+                                Text = $"... and {totalRuns - preFilterCount} more run(s) — Open Log to see all entries",
                                 Foreground = MutedColor,
                                 FontSize = 10,
                                 FontStyle = FontStyle.Italic,
@@ -180,6 +188,10 @@ public partial class DockerDiagnosticsView
         catch (Exception ex)
         {
             ContainerTelemetry.TrackError("DockerDiagnosticsView.History", "PopulateTelemetryAsync", ex);
+        }
+        finally
+        {
+            _telemetrySemaphore.Release();
         }
     }
 

@@ -139,9 +139,10 @@ internal sealed class ResourceThresholdValidation : ISettingValidation
             return false;
         }
 
-        if (_resourceKind == ResourceKind.Cpu && (numericValue < 0.1 || numericValue > 32.0))
+        if (_resourceKind == ResourceKind.Cpu && (numericValue < 0.1 || numericValue > Math.Max(32.0, _total)))
         {
-            warningMessage = "CPU cores limit must be between 0.1 and 32.0 (or 0 for unlimited).";
+            var maxLimit = Math.Max(32.0, _total);
+            warningMessage = string.Create(CultureInfo.InvariantCulture, $"CPU cores limit must be between 0.1 and {maxLimit.ToString("F1", CultureInfo.InvariantCulture)} (or 0 for unlimited).");
             return false;
         }
 
@@ -255,9 +256,9 @@ internal sealed class DaemonSocketValidation : ISettingValidation
 
         bool isNamedPipe = raw.StartsWith(@"\\.\", StringComparison.Ordinal) || raw.StartsWith("npipe://", StringComparison.OrdinalIgnoreCase);
 
-        if (!isNamedPipe && raw.Contains('\\', StringComparison.Ordinal))
+        if (isNamedPipe && !OperatingSystem.IsWindows())
         {
-            warningMessage = "Socket URI contains invalid characters (backslashes).";
+            warningMessage = "Windows named pipes are not supported on Unix.";
             return false;
         }
 
@@ -268,7 +269,20 @@ internal sealed class DaemonSocketValidation : ISettingValidation
 
         var span = raw.AsSpan();
         bool valid = false;
-        if (span.StartsWith("unix://", StringComparison.OrdinalIgnoreCase) && span.Length > 7) valid = true;
+        if (span.StartsWith("unix://", StringComparison.OrdinalIgnoreCase) && span.Length > 7)
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                warningMessage = "Unix domain sockets are not supported on Windows.";
+                return false;
+            }
+            if (raw.Contains('\\'))
+            {
+                warningMessage = "Unix socket path cannot contain backslashes.";
+                return false;
+            }
+            valid = true;
+        }
         else if (span.StartsWith("tcp://", StringComparison.OrdinalIgnoreCase) && span.Length > 6) valid = true;
         else if (span.StartsWith("npipe://", StringComparison.OrdinalIgnoreCase) && span.Length > 8) valid = true;
         else if (span.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && span.Length > 7) valid = true;

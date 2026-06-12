@@ -193,8 +193,8 @@ public static partial class ContainerTelemetry
 
     private static bool IsSubpath(string path, string basePath)
     {
-        var resolvedPath = Path.GetFullPath(path);
-        var resolvedBase = Path.GetFullPath(basePath);
+        var resolvedPath = GetCanonicalPath(path);
+        var resolvedBase = GetCanonicalPath(basePath);
 
         var comp = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
             ? StringComparison.OrdinalIgnoreCase
@@ -209,6 +209,37 @@ public static partial class ContainerTelemetry
             ? "" : Path.DirectorySeparatorChar.ToString();
 
         return resolvedPath.StartsWith(resolvedBase + suffix, comp);
+    }
+
+    private static string GetCanonicalPath(string path)
+    {
+        try
+        {
+            var resolved = Path.GetFullPath(path);
+            var info = new System.IO.DirectoryInfo(resolved);
+            if (info.Exists)
+            {
+                var target = info.LinkTarget;
+                if (!string.IsNullOrEmpty(target))
+                {
+                    return info.ResolveLinkTarget(true)?.FullName ?? info.FullName;
+                }
+            }
+            var fileInfo = new System.IO.FileInfo(resolved);
+            if (fileInfo.Exists)
+            {
+                var target = fileInfo.LinkTarget;
+                if (!string.IsNullOrEmpty(target))
+                {
+                    return fileInfo.ResolveLinkTarget(true)?.FullName ?? fileInfo.FullName;
+                }
+            }
+            return resolved;
+        }
+        catch
+        {
+            return Path.GetFullPath(path);
+        }
     }
 
     private static void EnsureDirectoryAndFileSecure(string dir, string filepath)
@@ -1622,7 +1653,7 @@ public static partial class ContainerTelemetry
                                 File.Move(tempPath, path, overwrite: true);
                             }
                         }
-                        catch (IOException)
+                        catch (Exception ex) when (ex is not OutOfMemoryException)
                         {
                             File.Move(tempPath, path, overwrite: true);
                         }

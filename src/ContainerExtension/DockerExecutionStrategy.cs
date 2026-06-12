@@ -190,6 +190,14 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             }
             return false;
         }
+        catch (FileNotFoundException)
+        {
+            return true;
+        }
+        catch (IOException ex) when (ex.InnerException is FileNotFoundException)
+        {
+            return true;
+        }
         catch (TimeoutException)
         {
             return false;
@@ -948,7 +956,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 string fullPath;
                 try
                 {
-                    fullPath = Path.GetFullPath(hostPath);
+                    fullPath = GetCanonicalPath(hostPath);
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
@@ -1010,6 +1018,37 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                     }
                 }
             }
+        }
+    }
+
+    private static string GetCanonicalPath(string path)
+    {
+        try
+        {
+            var resolved = Path.GetFullPath(path);
+            var info = new System.IO.DirectoryInfo(resolved);
+            if (info.Exists)
+            {
+                var target = info.LinkTarget;
+                if (!string.IsNullOrEmpty(target))
+                {
+                    return info.ResolveLinkTarget(true)?.FullName ?? info.FullName;
+                }
+            }
+            var fileInfo = new System.IO.FileInfo(resolved);
+            if (fileInfo.Exists)
+            {
+                var target = fileInfo.LinkTarget;
+                if (!string.IsNullOrEmpty(target))
+                {
+                    return fileInfo.ResolveLinkTarget(true)?.FullName ?? fileInfo.FullName;
+                }
+            }
+            return resolved;
+        }
+        catch
+        {
+            return Path.GetFullPath(path);
         }
     }
 
@@ -1441,6 +1480,12 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         return _containerManager.StartContainerAsync(containerId, ct);
     }
 
+    public Task RestartContainerAsync(string containerId, CancellationToken ct = default)
+    {
+        ThrowIfDisposed();
+        return _containerManager.RestartContainerAsync(containerId, ct);
+    }
+
     public Task RemoveContainerAsync(string containerId, CancellationToken ct = default)
     {
         ThrowIfDisposed();
@@ -1643,13 +1688,15 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
 
     private CreateContainerParameters BuildContainerParameters(string image, ToolCommand command)
     {
+        double? remoteCpuCores = _connectionProvider.CachedSystemInfo?.NCPU;
         return Services.Docker.DockerCommandBuilder.BuildContainerParameters(
           image,
           command,
           _settingsService,
           _cachedUid,
           _cachedGid,
-          (cmd, msg) => SdkLog(cmd, msg));
+          (cmd, msg) => SdkLog(cmd, msg),
+          remoteCpuCores);
     }
 
     private async Task<string?> EnsureImageAsync(string image, ToolCommand command, CancellationToken ct)

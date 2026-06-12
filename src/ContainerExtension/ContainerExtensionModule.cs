@@ -192,7 +192,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, ExtraFlagsSetting, new TextBoxSetting("Extra Container Labels", "", "Additional key=value labels attached to the container."));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DashboardRefreshSetting, new ComboBoxSetting("Dashboard Refresh", "Manual", ["Manual", "2s", "5s", "10s", "15s", "30s", "60s", "120s"]));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, TelemetryRetentionSetting, new ComboBoxSetting("Telemetry Retention", "100", ["None", "25", "50", "100", "250", "500", "1000", "Unlimited"]));
-        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DockerRuntimePathSetting, new FilePathSetting("Container Runtime Path", "", "Absolute path to the container runtime executable.", null, System.IO.File.Exists));
+        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DockerRuntimePathSetting, new FilePathSetting("Container Runtime Path", "", "Absolute path to the container runtime executable.", null, ValidateRuntimePath));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DaemonSocketSetting, new TextBoxSetting("Custom Daemon Socket", "", "Optional: Override DOCKER_HOST.") { Validator = DaemonSocketValidatorInstance });
 
         IToolService toolService;
@@ -420,7 +420,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                           All = true,
                           Filters = new Dictionary<string, IDictionary<string, bool>>(StringComparer.Ordinal)
                     {
-                  { "name", new Dictionary<string, bool>(StringComparer.Ordinal) { { $"^{prefix}", true } } },
+                  { "name", new Dictionary<string, bool>(StringComparer.Ordinal) { { prefix, true } } },
                   { "status", new Dictionary<string, bool>(StringComparer.Ordinal) { { "exited", true }, { "dead", true }, { "created", true } } }
                     }
                       }, ct).ConfigureAwait(false);
@@ -430,6 +430,10 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                             foreach (var container in containersToPrune)
                             {
                                 if (container == null || string.IsNullOrEmpty(container.ID)) continue;
+                                var matchesPrefix = container.Names != null && container.Names.Any(n =>
+                                    n != null && (n.StartsWith(prefix, StringComparison.Ordinal) ||
+                                                 n.StartsWith($"/{prefix}", StringComparison.Ordinal)));
+                                if (!matchesPrefix) continue;
                                 var names = container.Names != null ? string.Join(", ", container.Names) : container.ID;
                                 try
                                 {
@@ -566,6 +570,64 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                 _cachedDashboardVm = null;
             }
         }
+    }
+
+    private static bool ValidateRuntimePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return true;
+        }
+
+        if (System.IO.File.Exists(path))
+        {
+            return true;
+        }
+
+        var fileName = Path.GetFileName(path);
+        if ((string.Equals(fileName, path, StringComparison.Ordinal) || !Path.IsPathRooted(path)) && ExistsOnPath(path))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool ExistsOnPath(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName)) return false;
+
+        var extensions = OperatingSystem.IsWindows()
+            ? new[] { "", ".exe", ".cmd", ".bat" }
+            : new[] { "" };
+
+        var pathEnv = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrEmpty(pathEnv)) return false;
+
+        var paths = pathEnv.Split(Path.PathSeparator);
+        foreach (var path in paths)
+        {
+            var cleanPath = path.Trim(' ', '"');
+            if (string.IsNullOrEmpty(cleanPath)) continue;
+
+            foreach (var ext in extensions)
+            {
+                try
+                {
+                    var fullPath = Path.Combine(cleanPath, fileName + ext);
+                    if (System.IO.File.Exists(fullPath))
+                    {
+                        return true;
+                    }
+                }
+                catch
+                {
+                    // Ignore path combinability issues
+                }
+            }
+        }
+
+        return false;
     }
 }
 

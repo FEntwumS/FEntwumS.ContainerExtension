@@ -416,53 +416,70 @@ public partial class DockerDiagnosticsView
                     detailsGrid.Children.Add(logTextBox);
 
                     var cts = new System.Threading.CancellationTokenSource();
-
-                    _ = Task.Run(async () =>
+                    try
                     {
-                        Task? updateTask = null;
-                        try
+                        _ = Task.Run(async () =>
                         {
-                            var needsUpdate = false;
-
-                            updateTask = Task.Run(async () =>
+                            Task? updateTask = null;
+                            try
                             {
-                                try
+                                var needsUpdate = false;
+
+                                updateTask = Task.Run(async () =>
                                 {
-                                    while (!cts.IsCancellationRequested)
+                                    try
                                     {
-                                        await Task.Delay(100, cts.Token).ConfigureAwait(false);
-                                        bool shouldUpdate = false;
-                                        lock (logLock)
+                                        while (!cts.IsCancellationRequested)
                                         {
-                                            if (needsUpdate)
+                                            await Task.Delay(100, cts.Token).ConfigureAwait(false);
+                                            bool shouldUpdate = false;
+                                            lock (logLock)
                                             {
-                                                shouldUpdate = true;
-                                                needsUpdate = false;
+                                                if (needsUpdate)
+                                                {
+                                                    shouldUpdate = true;
+                                                    needsUpdate = false;
+                                                }
+                                            }
+                                            if (shouldUpdate)
+                                            {
+                                                UpdateLogUI();
                                             }
                                         }
-                                        if (shouldUpdate)
+                                    }
+                                    catch (OperationCanceledException)
+                                    {
+                                    }
+                                    catch (ObjectDisposedException)
+                                    {
+                                    }
+                                }, cts.Token);
+
+                                var batch = new List<string>();
+                                var lastBatchTime = Environment.TickCount64;
+
+                                await foreach (var logLine in _strategy.StreamContainerLogsAsync(logContainerId, cts.Token).ConfigureAwait(false))
+                                {
+                                    var alignedLine = AlignLogTimestamp(logLine);
+                                    batch.Add(alignedLine ?? string.Empty);
+
+                                    if (batch.Count >= 50 || (Environment.TickCount64 - lastBatchTime) > 100)
+                                    {
+                                        lock (logLock)
                                         {
-                                            UpdateLogUI();
+                                            logLines.AddRange(batch);
+                                            if (logLines.Count > 2500)
+                                            {
+                                                logLines.RemoveRange(0, logLines.Count - 2000);
+                                            }
+                                            needsUpdate = true;
                                         }
+                                        batch.Clear();
+                                        lastBatchTime = Environment.TickCount64;
                                     }
                                 }
-                                catch (OperationCanceledException)
-                                {
-                                }
-                                catch (ObjectDisposedException)
-                                {
-                                }
-                            }, cts.Token);
 
-                            var batch = new List<string>();
-                            var lastBatchTime = Environment.TickCount64;
-
-                            await foreach (var logLine in _strategy.StreamContainerLogsAsync(logContainerId, cts.Token).ConfigureAwait(false))
-                            {
-                                var alignedLine = AlignLogTimestamp(logLine);
-                                batch.Add(alignedLine ?? string.Empty);
-
-                                if (batch.Count >= 50 || (Environment.TickCount64 - lastBatchTime) > 100)
+                                if (batch.Count > 0)
                                 {
                                     lock (logLock)
                                     {
@@ -473,88 +490,80 @@ public partial class DockerDiagnosticsView
                                         }
                                         needsUpdate = true;
                                     }
-                                    batch.Clear();
-                                    lastBatchTime = Environment.TickCount64;
                                 }
                             }
-
-                            if (batch.Count > 0)
+                            catch (OperationCanceledException)
                             {
-                                lock (logLock)
+                            }
+                            catch (Exception ex)
+                            {
+                                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                                 {
-                                    logLines.AddRange(batch);
-                                    if (logLines.Count > 2500)
+                                    if (weakTextBox.TryGetTarget(out var tb))
                                     {
-                                        logLines.RemoveRange(0, logLines.Count - 2000);
+                                        tb.Text += $"\n[Log Stream Failed: {ex.Message}]";
                                     }
-                                    needsUpdate = true;
-                                }
+                                });
                             }
-                        }
-                        catch (OperationCanceledException)
-                        {
-                        }
-                        catch (Exception ex)
-                        {
-                            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                            {
-                                if (weakTextBox.TryGetTarget(out var tb))
-                                {
-                                    tb.Text += $"\n[Log Stream Failed: {ex.Message}]";
-                                }
-                            });
-                        }
-                        finally
-                        {
-                            try
-                            {
-                                await cts.CancelAsync().ConfigureAwait(false);
-                            }
-                            catch (ObjectDisposedException)
-                            {
-                            }
-                            if (updateTask != null)
+                            finally
                             {
                                 try
                                 {
-                                    await updateTask.ConfigureAwait(false);
+                                    await cts.CancelAsync().ConfigureAwait(false);
                                 }
-                                catch
+                                catch (ObjectDisposedException)
                                 {
-                                    // Ignore update task completion errors
+                                }
+                                if (updateTask != null)
+                                {
+                                    try
+                                    {
+                                        await updateTask.ConfigureAwait(false);
+                                    }
+                                    catch
+                                    {
+                                        // Ignore update task completion errors
+                                    }
+                                }
+                                try
+                                {
+                                    cts.Dispose();
+                                }
+                                catch (ObjectDisposedException)
+                                {
                                 }
                             }
+                        });
+
+                        logWindow.Closed += (_, _) =>
+                        {
                             try
                             {
-                                cts.Dispose();
+                                cts.Cancel();
                             }
                             catch (ObjectDisposedException)
                             {
+                                // Already disposed, ignore.
                             }
-                        }
-                    });
+                            _openLogWindows.TryRemove(logContainerId, out _);
+                        };
+                        _openLogWindows[logContainerId] = logWindow;
 
-                    logWindow.Closed += (_, _) =>
-                    {
-                        try
+                        var mainWindow = TopLevel.GetTopLevel(this) as Window;
+                        if (mainWindow != null)
                         {
-                            cts.Cancel();
+                            logWindow.Show(mainWindow);
                         }
-                        catch (ObjectDisposedException)
+                        else
                         {
+                            logWindow.Show();
                         }
-                        _openLogWindows.TryRemove(logContainerId, out _);
-                    };
-                    _openLogWindows[logContainerId] = logWindow;
-
-                    var mainWindow = TopLevel.GetTopLevel(this) as Window;
-                    if (mainWindow != null)
-                    {
-                        logWindow.Show(mainWindow);
                     }
-                    else
+                    catch (Exception)
                     {
-                        logWindow.Show();
+                        try { cts.Cancel(); } catch { /* Ignore cancellation errors during fallback cleanup */ }
+                        try { cts.Dispose(); } catch { /* Ignore disposal errors during fallback cleanup */ }
+                        throw;
                     }
                 });
             }
@@ -760,7 +769,7 @@ public partial class DockerDiagnosticsView
             try
             {
                 ShowTemporaryStatus($"Restarting container '{displayName}'...");
-                await _strategy.Client.Containers.RestartContainerAsync(containerId, new ContainerRestartParameters { WaitBeforeKillSeconds = 5 });
+                await _strategy.RestartContainerAsync(containerId);
                 await RefreshAllAsync();
                 ShowTemporaryStatus($"Container '{displayName}' restarted successfully.");
             }
@@ -807,10 +816,35 @@ public partial class DockerDiagnosticsView
         return false;
     }
 
-    private sealed class StatelessProgress<T>(Action<T> handler) : IProgress<T>
+
+    private sealed class StatefulProgress<TState, T>(TState state, Action<TState, T> handler) : IProgress<T>
     {
-        public void Report(T value) => handler(value);
+        public void Report(T value) => handler(state, value);
     }
+
+    private static readonly Action<(DockerDiagnosticsView View, string ContainerId), ContainerStatsResponse> StatsReportHandler =
+        (state, stats) =>
+        {
+            if (stats != null)
+            {
+                var mem = stats.MemoryStats?.Usage ?? 0;
+                var cpu = 0.0;
+                if (stats.CPUStats != null && stats.PreCPUStats != null)
+                {
+                    var cpuDelta = (double)(stats.CPUStats.CPUUsage?.TotalUsage ?? 0UL) - (stats.PreCPUStats.CPUUsage?.TotalUsage ?? 0UL);
+                    var systemDelta = (double)stats.CPUStats.SystemUsage - stats.PreCPUStats.SystemUsage;
+                    if (systemDelta > 0 && stats.CPUStats.OnlineCPUs > 0)
+                    {
+                        cpu = (cpuDelta / systemDelta) * stats.CPUStats.OnlineCPUs * 100.0;
+                    }
+                }
+                var ramStr = FormatBytes((long)mem);
+                var statsText = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{cpu:F1}% CPU / {ramStr}");
+                state.View._liveStats[state.ContainerId] = statsText;
+
+                state.View.UpdateContainerStatsUI(state.ContainerId, $" ({statsText})", isRunning: true);
+            }
+        };
 
     private void QueryContainerStats(string containerId)
     {
@@ -824,28 +858,7 @@ public partial class DockerDiagnosticsView
             try
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                var progress = new StatelessProgress<ContainerStatsResponse>(stats =>
-                {
-                    if (stats != null)
-                    {
-                        var mem = stats.MemoryStats?.Usage ?? 0;
-                        var cpu = 0.0;
-                        if (stats.CPUStats != null && stats.PreCPUStats != null)
-                        {
-                            var cpuDelta = (double)(stats.CPUStats.CPUUsage?.TotalUsage ?? 0UL) - (stats.PreCPUStats.CPUUsage?.TotalUsage ?? 0UL);
-                            var systemDelta = (double)stats.CPUStats.SystemUsage - stats.PreCPUStats.SystemUsage;
-                            if (systemDelta > 0 && stats.CPUStats.OnlineCPUs > 0)
-                            {
-                                cpu = (cpuDelta / systemDelta) * stats.CPUStats.OnlineCPUs * 100.0;
-                            }
-                        }
-                        var ramStr = FormatBytes((long)mem);
-                        var statsText = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{cpu:F1}% CPU / {ramStr}");
-                        _liveStats[containerId] = statsText;
-
-                        UpdateContainerStatsUI(containerId, $" ({statsText})", isRunning: true);
-                    }
-                });
+                var progress = new StatefulProgress<(DockerDiagnosticsView, string), ContainerStatsResponse>((this, containerId), StatsReportHandler);
 
                 await _strategy.Client.Containers.GetContainerStatsAsync(
                     containerId,
@@ -1281,16 +1294,20 @@ public partial class DockerDiagnosticsView
         sb.AppendLine("╠===========================================╣");
         foreach (var p in ports)
         {
+            string lineContent;
             if (p.PublicPort != 0)
             {
-                var hostStr = $"{p.IP}:{p.PublicPort}".PadRight(18);
-                var containerStr = $"{p.PrivatePort}/{p.Type}".PadLeft(10);
-                sb.AppendLine($"║  [Host] {hostStr} --► [Container] {containerStr}  ║");
+                var hostStr = $"{p.IP}:{p.PublicPort}";
+                var containerStr = $"{p.PrivatePort}/{p.Type}";
+                lineContent = $"[Host] {hostStr} -> [Cont] {containerStr}";
             }
             else
             {
-                sb.AppendLine($"║  [Container Exposure] {p.PrivatePort}/{p.Type}".PadRight(42) + "║");
+                lineContent = $"[Exposure] {p.PrivatePort}/{p.Type}";
             }
+
+            var paddedContent = lineContent.Length > 39 ? lineContent[..39] : lineContent.PadRight(39);
+            sb.AppendLine($"║  {paddedContent}  ║");
         }
         sb.AppendLine("╚===========================================╝");
         return sb.ToString();
