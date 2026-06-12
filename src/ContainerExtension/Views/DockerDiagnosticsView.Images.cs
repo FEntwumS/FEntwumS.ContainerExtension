@@ -124,7 +124,7 @@ public partial class DockerDiagnosticsView
               }
               PopulateImages(localImages, localDiskUsage);
           },
-          "3.5*,8,80,8,2*,8,Auto",
+          "250,8,80,8,150,8,Auto",
           ThreeColumnIndices));
         newChildren.Add(CreateSeparator());
 
@@ -311,7 +311,7 @@ public partial class DockerDiagnosticsView
     {
         var grid = existingGrid ?? new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("3.5*,8,80,8,2*,8,Auto"),
+            ColumnDefinitions = new ColumnDefinitions("250,8,80,8,150,8,Auto"),
             Margin = new Thickness(0, isHeader ? 0 : 1)
         };
 
