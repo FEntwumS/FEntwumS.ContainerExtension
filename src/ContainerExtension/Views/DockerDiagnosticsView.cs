@@ -287,12 +287,24 @@ public partial class DockerDiagnosticsView : UserControl
         // -- Section 2: Containers ---------------------------------------
         _containersContent = new StackPanel { Spacing = 2 };
         _containersContent.Children.Add(CreateLoadingText("Loading containers..."));
-        var containersSection = CreateCard("Containers", _containersContent);
+        var containersScroll = new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+            Content = _containersContent
+        };
+        var containersSection = CreateCard("Containers", containersScroll);
 
         // -- Section 3: Images & Disk Usage ------------------------------
         _imagesContent = new StackPanel { Spacing = 2 };
         _imagesContent.Children.Add(CreateLoadingText("Loading images..."));
-        var imagesSection = CreateCard("Images & Disk Usage", _imagesContent);
+        var imagesScroll = new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+            Content = _imagesContent
+        };
+        var imagesSection = CreateCard("Images & Disk Usage", imagesScroll);
 
         // -- Section 4: Active Configuration -----------------------------
         _configContent = new StackPanel { Spacing = 2 };
@@ -301,7 +313,13 @@ public partial class DockerDiagnosticsView : UserControl
 
         // -- Section 5: Recent Executions --------------------------------
         _telemetryContent = new StackPanel { Spacing = 2 };
-        var telemetrySection = CreateCard("Execution History", _telemetryContent);
+        var telemetryScroll = new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+            Content = _telemetryContent
+        };
+        var telemetrySection = CreateCard("Execution History", telemetryScroll);
 
         // -- Section 6: Toolchain Environment ----------------------------
         _toolchainContent = new StackPanel { Spacing = 4 };
@@ -1001,7 +1019,11 @@ public partial class DockerDiagnosticsView : UserControl
             }
             _toolchainContent.Children.Clear();
 
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+            var row = new WrapPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center
+            };
 
             row.Children.Add(new TextBlock
             {
@@ -1009,7 +1031,8 @@ public partial class DockerDiagnosticsView : UserControl
                 Foreground = FontColor,
                 FontWeight = FontWeight.SemiBold,
                 FontSize = 13,
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 4, 8, 4)
             });
 
             if (tags.Count > 0)
@@ -1018,7 +1041,8 @@ public partial class DockerDiagnosticsView : UserControl
                 {
                     Width = 250,
                     VerticalAlignment = VerticalAlignment.Center,
-                    FontSize = 12
+                    FontSize = 12,
+                    Margin = new Thickness(0, 4, 8, 4)
                 };
                 var lastColonIdx = currentImage.LastIndexOf(':');
                 var lastSlashIdx = currentImage.LastIndexOf('/');
@@ -1062,7 +1086,8 @@ public partial class DockerDiagnosticsView : UserControl
                     Foreground = AccentColor,
                     FontFamily = MonoFont,
                     FontSize = 12,
-                    VerticalAlignment = VerticalAlignment.Center
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 4, 8, 4)
                 });
 
                 row.Children.Add(new TextBlock
@@ -1070,7 +1095,8 @@ public partial class DockerDiagnosticsView : UserControl
                     Text = "(Tags unavailable)",
                     Foreground = MutedColor,
                     FontSize = 11,
-                    VerticalAlignment = VerticalAlignment.Center
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 4, 8, 4)
                 });
             }
 
@@ -1079,7 +1105,8 @@ public partial class DockerDiagnosticsView : UserControl
             {
                 Content = "Check for Updates & Pull",
                 Padding = new Thickness(8, 4),
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 4, 0, 4)
             };
             btn.Command = new AsyncRelayCommand(async () =>
         {
