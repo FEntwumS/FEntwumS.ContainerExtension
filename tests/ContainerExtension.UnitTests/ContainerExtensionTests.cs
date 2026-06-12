@@ -2340,6 +2340,23 @@ public sealed class ContainerExtensionTests : IDisposable
             File.Delete(tempFile);
         }
     }
+
+    [Fact]
+    public async Task GitHubReleaseClient_GetLatestReleaseTagAsync_RetrievesValidTag()
+    {
+        try
+        {
+            using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var tag = await ContainerExtension.Services.GitHubReleaseClient.GetLatestReleaseTagAsync(cts.Token);
+            Assert.NotNull(tag);
+            Assert.NotEmpty(tag);
+            Assert.StartsWith("20", tag, StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is HttpRequestException || ex is System.Net.Sockets.SocketException || ex is TaskCanceledException || ex is System.IO.IOException)
+        {
+            // Allow network/timeout failures to pass silently to prevent flaky tests in offline/CI environments
+        }
+    }
 #pragma warning restore CA1305, CA1307, CA1031, CA1822, CS8019, CA1308
 }
 

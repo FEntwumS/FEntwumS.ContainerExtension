@@ -10,7 +10,9 @@
         <SelfContained>false</SelfContained>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <NoWarn>$(NoWarn);CS1591;MA0051;S3358;MA0048;MA0016;MA0011;MA0009;S1075;S3903;S3267;S3010;S2930;S2696;S125;S1244;S1118;MA0134;MA0047;S1905;S3168;S6966</NoWarn>
-    <AnalysisLevel>latest-All</AnalysisLevel><EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild></PropertyGroup>
+        <AnalysisLevel>latest-All</AnalysisLevel>
+        <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    </PropertyGroup>
 
     <ItemGroup>
         <InternalsVisibleTo Include="ContainerExtension.UnitTests" />
@@ -19,6 +21,12 @@
 
     <ItemGroup>
         <AvaloniaResource Include="Assets\**\*.*" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Content Include="../../docker/oss-cad-suite/Dockerfile" Link="docker/oss-cad-suite/Dockerfile">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
     </ItemGroup>
 
     <ItemGroup>
@@ -50,13 +58,17 @@
             <_PkgId>%(PackageReference.Identity)</_PkgId>
             <_PkgVer>%(PackageReference.Version)</_PkgVer>
             <_PkgVer Condition="'$(_PkgVer)' == ''">%(PackageReference.VersionOverride)</_PkgVer>
-        <AnalysisLevel>latest-All</AnalysisLevel><EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild></PropertyGroup>
+            <AnalysisLevel>latest-All</AnalysisLevel>
+            <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+        </PropertyGroup>
         <ItemGroup>
             <_MatchedPackageVersion Include="@(PackageVersion)" Condition="'%(Identity)' == '$(_PkgId)'" />
         </ItemGroup>
         <PropertyGroup>
             <_PkgVer Condition="'$(_PkgVer)' == ''">%(_MatchedPackageVersion.Version)</_PkgVer>
-        <AnalysisLevel>latest-All</AnalysisLevel><EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild></PropertyGroup>
+            <AnalysisLevel>latest-All</AnalysisLevel>
+            <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+        </PropertyGroup>
         <WriteLinesToFile File="$(OutDir)compatibility.txt" Lines="$(_PkgId) : $(_PkgVer)" Overwrite="false" Condition="'$(_PkgId)' != '' and '%(PackageReference.Private)' != 'true' and '%(PackageReference.PrivateAssets)' != 'all'" />
     </Target>
 

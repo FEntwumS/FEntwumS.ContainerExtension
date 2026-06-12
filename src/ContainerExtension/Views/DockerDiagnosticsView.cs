@@ -1372,6 +1372,79 @@ public partial class DockerDiagnosticsView : UserControl
             }
         }, "Download or update the configured default toolchain image"));
 
+        actionsRow.Children.Add(CreateActionButton("Build Local Image", async () =>
+        {
+            try
+            {
+                var selection = await ShowBuildDialogAsync().ConfigureAwait(true);
+                if (selection == null)
+                {
+                    return;
+                }
+
+                var runtimePath = _strategy.GetRuntimePath();
+#pragma warning disable IL3000
+                var assemblyDir = Path.GetDirectoryName(typeof(ContainerExtensionModule).Assembly.Location);
+#pragma warning restore IL3000
+                if (string.IsNullOrEmpty(assemblyDir))
+                {
+                    throw new InvalidOperationException("Could not determine executing plugin directory.");
+                }
+
+                var dockerfilePath = Path.Combine(assemblyDir, "docker", "oss-cad-suite", "Dockerfile");
+                if (!File.Exists(dockerfilePath))
+                {
+                    // If not found in the bin output, check the relative source location for local development:
+                    var devPath = Path.GetFullPath(Path.Combine(assemblyDir, "..", "..", "..", "..", "docker", "oss-cad-suite", "Dockerfile"));
+                    if (File.Exists(devPath))
+                    {
+                        dockerfilePath = devPath;
+                    }
+                    else
+                    {
+                        throw new FileNotFoundException($"Local Dockerfile not found at '{dockerfilePath}'.");
+                    }
+                }
+
+                var buildContextDir = Path.GetDirectoryName(dockerfilePath);
+                if (string.IsNullOrEmpty(buildContextDir))
+                {
+                    throw new InvalidOperationException("Could not determine build context directory.");
+                }
+
+                var tag = "fentwums/oss-cad-suite:local";
+                var extraArgs = "";
+
+                if (selection == "latest")
+                {
+                    ShowTemporaryStatus("Querying latest release tag from GitHub...");
+                    
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                    var latestTag = await ContainerExtension.Services.GitHubReleaseClient.GetLatestReleaseTagAsync(cts.Token).ConfigureAwait(true);
+                    if (string.IsNullOrWhiteSpace(latestTag))
+                    {
+                        throw new InvalidOperationException("Failed to fetch the latest release tag from GitHub.");
+                    }
+                    
+                    var dateStr = latestTag.Replace("-", "", StringComparison.Ordinal);
+                    extraArgs = $"--build-arg RELEASE_TAG={latestTag} --build-arg RELEASE_DATE={dateStr} ";
+                    ShowTemporaryStatus($"Building newest release tag '{latestTag}' in terminal...");
+                }
+                else
+                {
+                    ShowTemporaryStatus("Building pinned release version in terminal...");
+                }
+
+                var commandLine = $"{runtimePath} build {extraArgs}-t {tag} -f \"{dockerfilePath}\" \"{buildContextDir}\"";
+                await _terminalService.ExecuteInTerminalAsync(commandLine, ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(20)).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_BuildLocalImage", ex);
+                ShowTemporaryError("⚠️ Action failed", ex);
+            }
+        }, "Build the local FPGA toolchain Docker image from source"));
+
         actionsRow.Children.Add(CreateActionButton("Update All Images", async () =>
         {
             try
@@ -1665,6 +1738,76 @@ public partial class DockerDiagnosticsView : UserControl
         dialog.Content = panel;
 
         dialog.Closed += (s, e) => { tcs.TrySetResult(false); };
+
+        var owner = TopLevel.GetTopLevel(this) as Window;
+        if (owner != null)
+        {
+            await dialog.ShowDialog(owner);
+        }
+        else
+        {
+            dialog.Show();
+        }
+
+        return await tcs.Task;
+    }
+
+    private async Task<string?> ShowBuildDialogAsync()
+    {
+        var tcs = new TaskCompletionSource<string?>();
+        var dialog = new Window
+        {
+            Title = "Build Local Image",
+            Width = 420,
+            Height = 200,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false
+        };
+
+        var panel = new StackPanel { Margin = new Thickness(16), Spacing = 12 };
+        panel.Children.Add(new TextBlock 
+        { 
+            Text = "How would you like to build the local FPGA toolchain image?", 
+            TextWrapping = TextWrapping.Wrap, 
+            FontSize = 12,
+            FontWeight = FontWeight.SemiBold
+        });
+        panel.Children.Add(new TextBlock 
+        { 
+            Text = "• Build Pinned: Builds the stable version defined in the repository.\n• Build Latest: Fetches and builds the latest nightly release from YosysHQ.", 
+            TextWrapping = TextWrapping.Wrap, 
+            FontSize = 11,
+            Opacity = 0.7
+        });
+
+        var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Margin = new Thickness(0, 12, 0, 0) };
+        var pinnedBtn = new Button { Content = "Build Pinned", Padding = new Thickness(8, 4) };
+        var latestBtn = new Button { Content = "Build Latest", Padding = new Thickness(8, 4) };
+        var cancelBtn = new Button { Content = "Cancel", Width = 60, Padding = new Thickness(8, 4) };
+
+        pinnedBtn.Command = new RelayCommand(() =>
+        {
+            tcs.TrySetResult("pinned");
+            dialog.Close();
+        });
+        latestBtn.Command = new RelayCommand(() =>
+        {
+            tcs.TrySetResult("latest");
+            dialog.Close();
+        });
+        cancelBtn.Command = new RelayCommand(() =>
+        {
+            tcs.TrySetResult(null);
+            dialog.Close();
+        });
+
+        buttonPanel.Children.Add(pinnedBtn);
+        buttonPanel.Children.Add(latestBtn);
+        buttonPanel.Children.Add(cancelBtn);
+        panel.Children.Add(buttonPanel);
+        dialog.Content = panel;
+
+        dialog.Closed += (s, e) => { tcs.TrySetResult(null); };
 
         var owner = TopLevel.GetTopLevel(this) as Window;
         if (owner != null)
