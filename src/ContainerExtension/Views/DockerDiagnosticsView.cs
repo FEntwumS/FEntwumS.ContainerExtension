@@ -1240,20 +1240,12 @@ public partial class DockerDiagnosticsView : UserControl
         }
     }
 
-    /// <summary>Populates the Active Configuration section with grouped, color-coded settings.</summary>
+    /// <summary>Populates the Active Configuration section with card-grouped settings layout.</summary>
     private void PopulateConfig(Dictionary<string, string> settings)
     {
         _configContent.Children.Clear();
 
-        // -- Extension Metadata ------------------------------------------
-        var metaGrid = new Grid
-        {
-            ColumnDefinitions = new ColumnDefinitions("Auto,12,*"),
-            RowDefinitions = new RowDefinitions("Auto,Auto,Auto")
-        };
-        AddInfoRow(metaGrid, 0, "Extension", $"Container Extension {_pluginVersion}");
-        AddInfoRow(metaGrid, 1, "Runtime", $"{_strategy.DetectedRuntime} | .NET {Environment.Version}");
-
+        // -- Extension Metadata Card --------------------------------------
         var telemetryPath = ContainerTelemetry.TelemetryFilePath;
         try
         {
@@ -1265,53 +1257,77 @@ public partial class DockerDiagnosticsView : UserControl
         }
         catch (Exception ex)
         {
-            // Ignored to prevent metadata display failures
             _ = ex;
         }
-        AddInfoRow(metaGrid, 2, "Telemetry", telemetryPath);
-        _configContent.Children.Add(metaGrid);
 
-        _configContent.Children.Add(CreateSeparator());
+        var metaPanel = new StackPanel { Spacing = 6 };
+        metaPanel.Children.Add(new TextBlock
+        {
+            Text = "ENVIRONMENT INFO",
+            Foreground = AccentColor,
+            FontSize = 10,
+            FontWeight = FontWeight.Bold,
+            Margin = new Thickness(0, 0, 0, 4)
+        });
+
+        var metaGrid = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("Auto,12,*"),
+            RowDefinitions = new RowDefinitions("Auto,Auto,Auto")
+        };
+        AddInfoRow(metaGrid, 0, "Extension", $"Container Extension {_pluginVersion}");
+        AddInfoRow(metaGrid, 1, "Runtime", $"{_strategy.DetectedRuntime} | .NET {Environment.Version}");
+        AddInfoRow(metaGrid, 2, "Telemetry", telemetryPath);
+        metaPanel.Children.Add(metaGrid);
+
+        var metaCard = new Border
+        {
+            Background = Brush.Parse("#0DFFFFFF"), // Sub card card background
+            BorderBrush = Brush.Parse("#2D2D30"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(12, 10, 12, 10),
+            Margin = new Thickness(0, 0, 0, 8),
+            Child = metaPanel
+        };
+        _configContent.Children.Add(metaCard);
 
         // -- Grouped Settings --------------------------------------------
         var groups = new (string title, string[] keys)[]
         {
-            ("Image & Execution", [ ContainerExtensionModule.SettingsKeyImage, ContainerExtensionModule.SettingsKeyPullPolicy, ContainerExtensionModule.SettingsKeyPlatform, ContainerExtensionModule.SettingsKeyNetwork ]),
-            ("Resource Limits",  [ ContainerExtensionModule.SettingsKeyMemory, ContainerExtensionModule.SettingsKeyCpu, ContainerExtensionModule.SettingsKeyTimeout ]),
-            ("Container",     [ ContainerExtensionModule.SettingsKeyAutoRemove, ContainerExtensionModule.SettingsKeyNamePrefix, ContainerExtensionModule.SettingsKeyExtraLabels ]),
-            ("Logging",      [ ContainerExtensionModule.SettingsKeyLogLevel, ContainerExtensionModule.SettingsKeyTimestamps ]),
-            ("Dashboard",     [ ContainerExtensionModule.SettingsKeyDashboardRefresh, ContainerExtensionModule.SettingsKeyRetention ]),
-            ("Advanced",     [ ContainerExtensionModule.SettingsKeyRuntimePath ]),
+            ("IMAGE & EXECUTION", [ ContainerExtensionModule.SettingsKeyImage, ContainerExtensionModule.SettingsKeyPullPolicy, ContainerExtensionModule.SettingsKeyPlatform, ContainerExtensionModule.SettingsKeyNetwork ]),
+            ("RESOURCE LIMITS",  [ ContainerExtensionModule.SettingsKeyMemory, ContainerExtensionModule.SettingsKeyCpu, ContainerExtensionModule.SettingsKeyTimeout ]),
+            ("CONTAINER INFO",   [ ContainerExtensionModule.SettingsKeyAutoRemove, ContainerExtensionModule.SettingsKeyNamePrefix, ContainerExtensionModule.SettingsKeyExtraLabels ]),
+            ("LOGGING CONFIG",   [ ContainerExtensionModule.SettingsKeyLogLevel, ContainerExtensionModule.SettingsKeyTimestamps ]),
+            ("DASHBOARD DATA",   [ ContainerExtensionModule.SettingsKeyDashboardRefresh, ContainerExtensionModule.SettingsKeyRetention ]),
+            ("ADVANCED PATHS",   [ ContainerExtensionModule.SettingsKeyRuntimePath ]),
         };
 
         foreach (var (title, keys) in groups)
         {
-            // Collect only keys that exist in the settings dictionary
             var pairs = keys
-        .Where(k => settings.ContainsKey(k))
-        .Select(k => (key: k, value: settings[k]))
-        .ToArray();
+                .Where(k => settings.ContainsKey(k))
+                .Select(k => (key: k, value: settings[k]))
+                .ToArray();
             if (pairs.Length == 0)
             {
                 continue;
             }
 
-            // Category label
-            _configContent.Children.Add(new TextBlock
+            var groupPanel = new StackPanel { Spacing = 6 };
+            groupPanel.Children.Add(new TextBlock
             {
                 Text = title,
                 Foreground = AccentColor,
                 FontSize = 10,
-                FontWeight = FontWeight.SemiBold,
-                Margin = new Thickness(0, 6, 0, 2),
-                Opacity = 0.8
+                FontWeight = FontWeight.Bold,
+                Margin = new Thickness(0, 0, 0, 4)
             });
 
-            // Single-column key=value grid - clean and predictable layout
             var rowDef = new RowDefinitions(string.Join(",", Enumerable.Repeat("Auto", pairs.Length)));
             var grid = new Grid
             {
-                ColumnDefinitions = new ColumnDefinitions("Auto,8,*"),
+                ColumnDefinitions = new ColumnDefinitions("Auto,12,*"),
                 RowDefinitions = rowDef
             };
 
@@ -1321,20 +1337,22 @@ public partial class DockerDiagnosticsView : UserControl
                 {
                     Text = pairs[i].key,
                     Foreground = MutedColor,
-                    FontFamily = MonoFont,
                     FontSize = 11,
-                    Margin = new Thickness(8, 2, 0, 0)
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 2, 0, 2)
                 };
                 Grid.SetRow(keyBlock, i);
                 Grid.SetColumn(keyBlock, 0);
                 grid.Children.Add(keyBlock);
 
-                // Color-code values: green=enabled, red=disabled, muted=default/none
                 var val = pairs[i].value;
                 var valColor = val switch
                 {
                     "On" => GreenColor,
                     "Off" => RedColor,
+                    "always" => GreenColor,
+                    "if-not-present" => AccentColor,
+                    "never" => RedColor,
                     "No limit" => MutedColor,
                     "None" => MutedColor,
                     "(none)" => MutedColor,
@@ -1347,27 +1365,54 @@ public partial class DockerDiagnosticsView : UserControl
                     Foreground = valColor,
                     FontFamily = MonoFont,
                     FontSize = 11,
-                    Margin = new Thickness(0, 2, 0, 0),
-                    TextWrapping = Avalonia.Media.TextWrapping.Wrap
+                    VerticalAlignment = VerticalAlignment.Center,
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 2, 0, 2)
                 };
                 Grid.SetRow(valBlock, i);
                 Grid.SetColumn(valBlock, 2);
                 grid.Children.Add(valBlock);
             }
+            groupPanel.Children.Add(grid);
 
-            _configContent.Children.Add(grid);
+            var groupCard = new Border
+            {
+                Background = Brush.Parse("#0DFFFFFF"),
+                BorderBrush = Brush.Parse("#2D2D30"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(12, 10, 12, 10),
+                Margin = new Thickness(0, 0, 0, 8),
+                Child = groupPanel
+            };
 
-            // Subtle separator between groups
-            _configContent.Children.Add(CreateSeparator());
+            _configContent.Children.Add(groupCard);
         }
+
+        var configureBtn = new Button
+        {
+            Content = "⚙️ Configure Settings...",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            FontWeight = FontWeight.SemiBold,
+            Margin = new Thickness(0, 8, 0, 4),
+            Padding = new Thickness(12, 8),
+            CornerRadius = new CornerRadius(4),
+            Background = Brush.Parse("#1A2496ED"),
+            Foreground = AccentColor,
+            BorderBrush = Brush.Parse("#2D2D30"),
+            BorderThickness = new Thickness(1)
+        };
+        configureBtn.Command = new AsyncRelayCommand(ShowSettingsDialogAsync);
+        _configContent.Children.Add(configureBtn);
 
         _configContent.Children.Add(new TextBlock
         {
-            Text = "Settings: Binary Management > Container Engine",
+            Text = "Configure: Settings > Binary Management > Container Engine",
             Foreground = MutedColor,
             FontSize = 10,
             FontStyle = FontStyle.Italic,
-            Margin = new Thickness(0, 2, 0, 0)
+            Margin = new Thickness(4, 4, 0, 0)
         });
     }
 
@@ -2029,6 +2074,384 @@ public partial class DockerDiagnosticsView : UserControl
         }
 
         return await tcs.Task;
+    }
+
+    private Panel CreateFormItem(string label, string desc, Control control)
+    {
+        var panel = new StackPanel { Spacing = 2, Margin = new Thickness(0, 0, 0, 10) };
+        panel.Children.Add(new TextBlock { Text = label, FontSize = 12, FontWeight = FontWeight.SemiBold, Foreground = FontColor });
+        if (!string.IsNullOrEmpty(desc))
+        {
+            panel.Children.Add(new TextBlock { Text = desc, FontSize = 10, Foreground = MutedColor, TextWrapping = TextWrapping.Wrap });
+        }
+        panel.Children.Add(control);
+        return panel;
+    }
+
+    private Panel CreateFormSectionHeader(string title)
+    {
+        var panel = new StackPanel { Spacing = 4, Margin = new Thickness(0, 12, 0, 8) };
+        panel.Children.Add(new TextBlock { Text = title, FontSize = 11, FontWeight = FontWeight.Bold, Foreground = AccentColor });
+        panel.Children.Add(new Border { Height = 1, Background = MutedColor, Opacity = 0.2 });
+        return panel;
+    }
+
+    private async Task ShowSettingsDialogAsync()
+    {
+        var dialog = new Window
+        {
+            Title = "Configure Container Engine Settings",
+            Width = 520,
+            Height = 650,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = true
+        };
+
+        var mainPanel = new StackPanel { Spacing = 16 };
+
+        var headerPanel = new StackPanel { Spacing = 6 };
+        var titleText = new TextBlock
+        {
+            Text = "Container Engine Settings",
+            FontSize = 15,
+            FontWeight = FontWeight.Bold,
+            Foreground = AccentColor
+        };
+        var separator = new Border
+        {
+            Height = 2,
+            Background = AccentColor,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Width = 60,
+            Margin = new Thickness(0, 2, 0, 8)
+        };
+        headerPanel.Children.Add(titleText);
+        headerPanel.Children.Add(separator);
+        mainPanel.Children.Add(headerPanel);
+
+        var formPanel = new StackPanel { Spacing = 12 };
+
+        // 1. IMAGE & EXECUTION
+        formPanel.Children.Add(CreateFormSectionHeader("IMAGE & EXECUTION"));
+
+        var defaultImage = _settingsService.SafeGetSetting(ContainerExtensionModule.DefaultImageSetting, ContainerExtensionModule.FallbackImage);
+        var defaultImageTextBox = new TextBox { Text = defaultImage, FontSize = 12, Height = 28, VerticalContentAlignment = VerticalAlignment.Center };
+        formPanel.Children.Add(CreateFormItem("Default Toolchain Image", "The default container image to pull and use for all tools.", defaultImageTextBox));
+
+        var pullPolicy = _settingsService.SafeGetSetting(ContainerExtensionModule.PullPolicySetting, "if-not-present");
+        var pullPolicyComboBox = new ComboBox
+        {
+            ItemsSource = new[] { "always", "if-not-present", "never" },
+            SelectedItem = pullPolicy,
+            FontSize = 12,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        formPanel.Children.Add(CreateFormItem("Image Pull Policy", "Determines when the plugin should pull images from the registry.", pullPolicyComboBox));
+
+        var platform = _settingsService.SafeGetSetting(ContainerExtensionModule.PlatformSetting, "auto");
+        var platformComboBox = new ComboBox
+        {
+            ItemsSource = new[] { "auto", "linux/amd64", "linux/arm64", "linux/arm/v7" },
+            SelectedItem = platform,
+            FontSize = 12,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        formPanel.Children.Add(CreateFormItem("Image Platform", "Forces a specific system architecture platform when running containers.", platformComboBox));
+
+        var networkMode = _settingsService.SafeGetSetting(ContainerExtensionModule.NetworkModeSetting, "bridge");
+        var networkModeComboBox = new ComboBox
+        {
+            ItemsSource = new[] { "bridge", "host", "none" },
+            SelectedItem = networkMode,
+            FontSize = 12,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        formPanel.Children.Add(CreateFormItem("Network Mode", "The Docker network mode used for containerized tool executions.", networkModeComboBox));
+
+        // 2. RESOURCE LIMITS
+        formPanel.Children.Add(CreateFormSectionHeader("RESOURCE LIMITS"));
+
+        var totalRam = ContainerExtensionModule.GetHostMemoryMB();
+        var currentMem = _settingsService.SafeGetSetting<double>(ContainerExtensionModule.MemoryLimitSetting, 0);
+        var memValueText = new TextBlock { Text = currentMem == 0 ? "Unlimited" : $"{currentMem:N0} MB", Width = 90, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center, FontSize = 12, FontFamily = MonoFont };
+        var memSlider = new Slider { Minimum = 0, Maximum = totalRam, Value = currentMem, SmallChange = 256, LargeChange = 1024, TickFrequency = 256, IsSnapToTickEnabled = true, VerticalAlignment = VerticalAlignment.Center };
+        memSlider.ValueChanged += (s, e) => {
+            var val = Math.Round(memSlider.Value);
+            memValueText.Text = val == 0 ? "Unlimited" : $"{val:N0} MB";
+        };
+        var memGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,12,Auto") };
+        Grid.SetColumn(memSlider, 0);
+        Grid.SetColumn(memValueText, 2);
+        memGrid.Children.Add(memSlider);
+        memGrid.Children.Add(memValueText);
+        formPanel.Children.Add(CreateFormItem($"Memory Limit (0 = unlimited) — Max: {totalRam:N0} MB", "Restricts memory consumption of container tasks.", memGrid));
+
+        var totalCores = (double)Environment.ProcessorCount;
+        var currentCpu = _settingsService.SafeGetSetting<double>(ContainerExtensionModule.CpuLimitSetting, 0);
+        var cpuValueText = new TextBlock { Text = currentCpu == 0 ? "Unlimited" : $"{currentCpu:N0} Cores", Width = 90, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center, FontSize = 12, FontFamily = MonoFont };
+        var cpuSlider = new Slider { Minimum = 0, Maximum = totalCores, Value = currentCpu, SmallChange = 1, LargeChange = 2, TickFrequency = 1, IsSnapToTickEnabled = true, VerticalAlignment = VerticalAlignment.Center };
+        cpuSlider.ValueChanged += (s, e) => {
+            var val = Math.Round(cpuSlider.Value);
+            cpuValueText.Text = val == 0 ? "Unlimited" : $"{val:N0} Cores";
+        };
+        var cpuGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,12,Auto") };
+        Grid.SetColumn(cpuSlider, 0);
+        Grid.SetColumn(cpuValueText, 2);
+        cpuGrid.Children.Add(cpuSlider);
+        cpuGrid.Children.Add(cpuValueText);
+        formPanel.Children.Add(CreateFormItem($"CPU Cores Limit (0 = unlimited) — Max: {totalCores:N0} Cores", "Restricts CPU cores usage for container tasks.", cpuGrid));
+
+        var currentTimeout = _settingsService.SafeGetSetting<double>(ContainerExtensionModule.TimeoutSetting, 0);
+        var timeoutValueText = new TextBlock { Text = currentTimeout == 0 ? "No timeout" : $"{currentTimeout:N0} min", Width = 90, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center, FontSize = 12, FontFamily = MonoFont };
+        var timeoutSlider = new Slider { Minimum = 0, Maximum = 480, Value = currentTimeout, SmallChange = 5, LargeChange = 30, TickFrequency = 5, IsSnapToTickEnabled = true, VerticalAlignment = VerticalAlignment.Center };
+        timeoutSlider.ValueChanged += (s, e) => {
+            var val = Math.Round(timeoutSlider.Value);
+            timeoutValueText.Text = val == 0 ? "No timeout" : $"{val:N0} min";
+        };
+        var timeoutGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,12,Auto") };
+        Grid.SetColumn(timeoutSlider, 0);
+        Grid.SetColumn(timeoutValueText, 2);
+        timeoutGrid.Children.Add(timeoutSlider);
+        timeoutGrid.Children.Add(timeoutValueText);
+        formPanel.Children.Add(CreateFormItem("Execution Timeout (0 = no timeout)", "Maximum execution time for containers before cancellation.", timeoutGrid));
+
+        // 3. CONTAINER CONFIG
+        formPanel.Children.Add(CreateFormSectionHeader("CONTAINER CONFIG"));
+
+        var autoRemoveSetting = _settingsService.SafeGetSetting(ContainerExtensionModule.AutoRemoveSetting, true);
+        var autoRemoveCheckBox = new CheckBox { Content = "Auto-Remove Containers on Completion", IsChecked = autoRemoveSetting, FontSize = 12 };
+        formPanel.Children.Add(CreateFormItem("Auto-Remove Containers", "Automatically delete containers once the executable process exits.", autoRemoveCheckBox));
+
+        var allowPrivileged = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowPrivilegedSetting, false);
+        var allowPrivilegedCheckBox = new CheckBox { Content = "Allow Privileged Containers", IsChecked = allowPrivileged, FontSize = 12 };
+        formPanel.Children.Add(CreateFormItem("Allow Privileged Mode", "Runs containers with privileged capabilities (required in some complex mounting setups).", allowPrivilegedCheckBox));
+
+        var namePrefix = _settingsService.SafeGetSetting(ContainerExtensionModule.ContainerNamePrefixSetting, "containerextension-");
+        var prefixTextBox = new TextBox { Text = namePrefix, FontSize = 12, Height = 28, VerticalContentAlignment = VerticalAlignment.Center };
+        formPanel.Children.Add(CreateFormItem("Container Name Prefix", "Prefix assigned to all containers spawned by this extension.", prefixTextBox));
+
+        var extraFlags = _settingsService.SafeGetSetting(ContainerExtensionModule.ExtraFlagsSetting, "");
+        var extraFlagsTextBox = new TextBox { Text = extraFlags, FontSize = 12, Height = 28, VerticalContentAlignment = VerticalAlignment.Center };
+        formPanel.Children.Add(CreateFormItem("Extra Container Labels", "Additional labels applied to containers (format: key=value,key2=value2).", extraFlagsTextBox));
+
+        // 4. LOGGING & DASHBOARD
+        formPanel.Children.Add(CreateFormSectionHeader("LOGGING & DASHBOARD"));
+
+        var logLevel = _settingsService.SafeGetSetting(ContainerExtensionModule.LogLevelSetting, "Verbose");
+        var logLevelComboBox = new ComboBox
+        {
+            ItemsSource = new[] { "Off", "Errors Only", "Info", "Verbose" },
+            SelectedItem = logLevel,
+            FontSize = 12,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        formPanel.Children.Add(CreateFormItem("Log Level", "Detail level for container task diagnostics logs.", logLevelComboBox));
+
+        var showTimestamps = _settingsService.SafeGetSetting(ContainerExtensionModule.ShowTimestampsSetting, true);
+        var showTimestampsCheckBox = new CheckBox { Content = "Include Timestamps in Logs", IsChecked = showTimestamps, FontSize = 12 };
+        formPanel.Children.Add(CreateFormItem("Timestamps", "Prepend time signatures to stdout/stderr in log windows.", showTimestampsCheckBox));
+
+        var dashboardRefresh = _settingsService.SafeGetSetting(ContainerExtensionModule.DashboardRefreshSetting, "Manual");
+        var refreshComboBox = new ComboBox
+        {
+            ItemsSource = new[] { "Manual", "2s", "5s", "10s", "15s", "30s", "60s", "120s" },
+            SelectedItem = dashboardRefresh,
+            FontSize = 12,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        formPanel.Children.Add(CreateFormItem("Dashboard Refresh", "Auto-refresh frequency for container list, images, and metrics.", refreshComboBox));
+
+        var telemetryRetention = _settingsService.SafeGetSetting(ContainerExtensionModule.TelemetryRetentionSetting, "100");
+        var retentionComboBox = new ComboBox
+        {
+            ItemsSource = new[] { "None", "25", "50", "100", "250", "500", "1000", "Unlimited" },
+            SelectedItem = telemetryRetention,
+            FontSize = 12,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        formPanel.Children.Add(CreateFormItem("Telemetry Retention", "Number of recent executions to retain in history logs.", retentionComboBox));
+
+        // 5. ADVANCED PATHS
+        formPanel.Children.Add(CreateFormSectionHeader("ADVANCED PATHS"));
+
+        var runtimePath = _settingsService.SafeGetSetting(ContainerExtensionModule.DockerRuntimePathSetting, "");
+        var runtimePathTextBox = new TextBox { Text = runtimePath, FontSize = 12, Height = 28, VerticalContentAlignment = VerticalAlignment.Center };
+        var browseBtn = new Button { Content = "Browse...", FontSize = 11, Padding = new Thickness(10, 4) };
+        browseBtn.Command = new AsyncRelayCommand(async () =>
+        {
+            try
+            {
+#pragma warning disable CS0618
+                var openFileDialog = new OpenFileDialog
+                {
+                    Title = "Select Container Runtime Executable",
+                    AllowMultiple = false
+                };
+                var result = await openFileDialog.ShowAsync(dialog);
+                if (result != null && result.Length > 0)
+                {
+                    runtimePathTextBox.Text = result[0];
+                }
+#pragma warning restore CS0618
+            }
+            catch (Exception ex)
+            {
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "BrowseRuntimePath", ex);
+            }
+        });
+        var runtimeGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,8,Auto") };
+        Grid.SetColumn(runtimePathTextBox, 0);
+        Grid.SetColumn(browseBtn, 2);
+        runtimeGrid.Children.Add(runtimePathTextBox);
+        runtimeGrid.Children.Add(browseBtn);
+        formPanel.Children.Add(CreateFormItem("Container Runtime Path", "Explicit path to docker or podman binary (leave empty for system auto-detection).", runtimeGrid));
+
+        var customSocket = _settingsService.SafeGetSetting(ContainerExtensionModule.DaemonSocketSetting, "");
+        var socketTextBox = new TextBox { Text = customSocket, FontSize = 12, Height = 28, VerticalContentAlignment = VerticalAlignment.Center };
+        formPanel.Children.Add(CreateFormItem("Custom Daemon Socket", "Overrides the standard DOCKER_HOST endpoint (e.g. unix:///var/run/docker.sock).", socketTextBox));
+
+        var scroll = new ScrollViewer
+        {
+            Content = formPanel,
+            MaxHeight = 450
+        };
+        mainPanel.Children.Add(scroll);
+
+        // Validation Error Label
+        var errorText = new TextBlock
+        {
+            Foreground = RedColor,
+            FontSize = 11,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 4, 0, 4),
+            IsVisible = false
+        };
+        mainPanel.Children.Add(errorText);
+
+        // Footer buttons
+        var buttonPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 10,
+            Margin = new Thickness(0, 10, 0, 0)
+        };
+
+        var saveBtn = new Button
+        {
+            Content = "Save Settings",
+            FontWeight = FontWeight.SemiBold,
+            Background = AccentColor,
+            Foreground = Brushes.White,
+            Padding = new Thickness(16, 8),
+            CornerRadius = new CornerRadius(4)
+        };
+        var cancelBtn = new Button
+        {
+            Content = "Cancel",
+            Padding = new Thickness(16, 8),
+            CornerRadius = new CornerRadius(4)
+        };
+
+        saveBtn.Command = new RelayCommand(() =>
+        {
+            // Perform validations
+            var imageVal = new ContainerExtension.Validations.DockerImageFormatValidation(allowEmpty: false);
+            var prefixVal = new ContainerExtension.Validations.ContainerNameValidation();
+            var socketVal = new ContainerExtension.Validations.DaemonSocketValidation();
+            var memVal = new ContainerExtension.Validations.ResourceThresholdValidation(totalRam * 0.75, totalRam, "memory");
+            var cpuVal = new ContainerExtension.Validations.ResourceThresholdValidation(totalCores * 0.75, totalCores, "CPU");
+
+            string? warn;
+            if (!imageVal.Validate(defaultImageTextBox.Text, out warn))
+            {
+                errorText.Text = $"Image Error: {warn}";
+                errorText.IsVisible = true;
+                return;
+            }
+            if (!prefixVal.Validate(prefixTextBox.Text, out warn))
+            {
+                errorText.Text = $"Prefix Error: {warn}";
+                errorText.IsVisible = true;
+                return;
+            }
+            if (!socketVal.Validate(socketTextBox.Text, out warn))
+            {
+                errorText.Text = $"Socket Error: {warn}";
+                errorText.IsVisible = true;
+                return;
+            }
+            if (!memVal.Validate(memSlider.Value, out warn))
+            {
+                errorText.Text = $"Memory Limit Error: {warn}";
+                errorText.IsVisible = true;
+                return;
+            }
+            if (!cpuVal.Validate(cpuSlider.Value, out warn))
+            {
+                errorText.Text = $"CPU limit Error: {warn}";
+                errorText.IsVisible = true;
+                return;
+            }
+
+            try
+            {
+                _settingsService.SetSettingValue(ContainerExtensionModule.DefaultImageSetting, defaultImageTextBox.Text?.Trim() ?? "");
+                _settingsService.SetSettingValue(ContainerExtensionModule.PullPolicySetting, pullPolicyComboBox.SelectedItem as string ?? "");
+                _settingsService.SetSettingValue(ContainerExtensionModule.PlatformSetting, platformComboBox.SelectedItem as string ?? "");
+                _settingsService.SetSettingValue(ContainerExtensionModule.NetworkModeSetting, networkModeComboBox.SelectedItem as string ?? "");
+
+                _settingsService.SetSettingValue(ContainerExtensionModule.MemoryLimitSetting, Math.Round(memSlider.Value));
+                _settingsService.SetSettingValue(ContainerExtensionModule.CpuLimitSetting, Math.Round(cpuSlider.Value));
+                _settingsService.SetSettingValue(ContainerExtensionModule.TimeoutSetting, Math.Round(timeoutSlider.Value));
+
+                _settingsService.SetSettingValue(ContainerExtensionModule.AutoRemoveSetting, autoRemoveCheckBox.IsChecked == true);
+                _settingsService.SetSettingValue(ContainerExtensionModule.AllowPrivilegedSetting, allowPrivilegedCheckBox.IsChecked == true);
+                _settingsService.SetSettingValue(ContainerExtensionModule.ContainerNamePrefixSetting, prefixTextBox.Text?.Trim() ?? "");
+                _settingsService.SetSettingValue(ContainerExtensionModule.ExtraFlagsSetting, extraFlagsTextBox.Text?.Trim() ?? "");
+
+                _settingsService.SetSettingValue(ContainerExtensionModule.LogLevelSetting, logLevelComboBox.SelectedItem as string ?? "");
+                _settingsService.SetSettingValue(ContainerExtensionModule.ShowTimestampsSetting, showTimestampsCheckBox.IsChecked == true);
+                _settingsService.SetSettingValue(ContainerExtensionModule.DashboardRefreshSetting, refreshComboBox.SelectedItem as string ?? "");
+                _settingsService.SetSettingValue(ContainerExtensionModule.TelemetryRetentionSetting, retentionComboBox.SelectedItem as string ?? "");
+
+                _settingsService.SetSettingValue(ContainerExtensionModule.DockerRuntimePathSetting, runtimePathTextBox.Text?.Trim() ?? "");
+                _settingsService.SetSettingValue(ContainerExtensionModule.DaemonSocketSetting, socketTextBox.Text?.Trim() ?? "");
+
+                _ = RefreshAllAsync(); // Refresh dashboard display
+                dialog.Close();
+            }
+            catch (Exception ex)
+            {
+                errorText.Text = $"Save Error: {ex.Message}";
+                errorText.IsVisible = true;
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "SaveSettings", ex);
+            }
+        });
+
+        cancelBtn.Command = new RelayCommand(() => dialog.Close());
+
+        buttonPanel.Children.Add(cancelBtn);
+        buttonPanel.Children.Add(saveBtn);
+        mainPanel.Children.Add(buttonPanel);
+
+        var wrapper = new Border
+        {
+            Padding = new Thickness(24),
+            Child = mainPanel
+        };
+
+        dialog.Content = wrapper;
+
+        var owner = TopLevel.GetTopLevel(this) as Window;
+        if (owner != null)
+        {
+            await dialog.ShowDialog(owner);
+        }
+        else
+        {
+            dialog.Show();
+        }
     }
 
     private static readonly string CachedPluginVersion = GetPluginVersionString();
