@@ -442,6 +442,22 @@ public sealed class ContainerExtensionTests : IDisposable
     //  BuildContainerParameters Tests (DockerCommandBuilder)
     // =======================================================================
 
+    [Theory]
+    [InlineData("C:\u0008in\u0009ools", "C:/bin/tools")]
+    [InlineData("gh\tdl", "gh/tdl")]
+    [InlineData("gh\bdl", "gh/bdl")]
+    [InlineData("gh\ndl", "gh/ndl")]
+    [InlineData("gh\rdl", "gh/rdl")]
+    [InlineData("gh\vdl", "gh/vdl")]
+    [InlineData("gh\fdl", "gh/fdl")]
+    [InlineData("gh\adl", "gh/adl")]
+    public void HealEscapedPaths_HealsControlCharacters(string input, string expected)
+    {
+        var healed = DockerCommandBuilder.HealEscapedPaths(input);
+        var normalized = healed.Replace('\\', '/');
+        Assert.Equal(expected, normalized);
+    }
+
     [Fact]
     public void BuildContainerParameters_BasicCommand_ProducesCorrectConfig()
     {
@@ -1037,7 +1053,7 @@ public sealed class ContainerExtensionTests : IDisposable
         using var strategy = new DockerExecutionStrategy(provider);
         var command = new ToolCommand
         {
-            Executable = "gh\tdl",
+            Executable = "gh\0dl",
             ToolName = "test",
             WorkingDirectory = "/workspace/dir",
             CommandArguments = new List<ICommandArgument>()
