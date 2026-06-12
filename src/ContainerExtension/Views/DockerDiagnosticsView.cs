@@ -57,7 +57,16 @@ public partial class DockerDiagnosticsView : UserControl
     private readonly Border _statusBanner;
     private readonly TextBlock _statusBannerText;
 
-    // Tracks open container log windows to prevent duplicate spawning
+    // -- KPI Metrics Controls ---------------------------------------------
+    private TextBlock? _metricDaemonStatusText;
+    private TextBlock? _metricDaemonDetailText;
+    private Border? _metricDaemonBorder;
+    private TextBlock? _metricContainersText;
+    private TextBlock? _metricContainersDetailText;
+    private TextBlock? _metricImagesText;
+    private TextBlock? _metricImagesDetailText;
+    private TextBlock? _metricDiskText;
+    private TextBlock? _metricDiskDetailText;    // Tracks open container log windows to prevent duplicate spawning
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Window> _openLogWindows = new(StringComparer.Ordinal);
 
     // Auto-refresh state
@@ -248,6 +257,28 @@ public partial class DockerDiagnosticsView : UserControl
         _quickActionsRow.Opacity = 0.5;  // dimmed until daemon is confirmed reachable
         _quickActionsRow.IsEnabled = false;
 
+        // -- KPI Row -----------------------------------------------------
+        var kpiGrid = new Grid
+        {
+            Margin = new Thickness(0, 4, 0, 8),
+            ColumnDefinitions = new ColumnDefinitions("*,*,*,*")
+        };
+
+        var daemonCard = CreateMetricCard("DAEMON STATUS", "Offline", "Not Connected", RedColor, out _metricDaemonStatusText, out _metricDaemonDetailText, out _metricDaemonBorder);
+        var containersCard = CreateMetricCard("CONTAINERS", "0 Running", "0 total", AccentColor, out _metricContainersText, out _metricContainersDetailText, out _);
+        var imagesCard = CreateMetricCard("IMAGES", "0 Images", "0 B total", AccentColor, out _metricImagesText, out _metricImagesDetailText, out _);
+        var diskCard = CreateMetricCard("RECLAIMABLE SPACE", "0 B", "No dangling items", AccentColor, out _metricDiskText, out _metricDiskDetailText, out _);
+
+        Grid.SetColumn(daemonCard, 0);
+        Grid.SetColumn(containersCard, 1);
+        Grid.SetColumn(imagesCard, 2);
+        Grid.SetColumn(diskCard, 3);
+
+        kpiGrid.Children.Add(daemonCard);
+        kpiGrid.Children.Add(containersCard);
+        kpiGrid.Children.Add(imagesCard);
+        kpiGrid.Children.Add(diskCard);
+
         // -- Section 1: Connection Status --------------------------------
         _statusContent = new StackPanel { Spacing = 4 };
         _statusContent.Children.Add(CreateLoadingText("Connecting to daemon..."));
@@ -315,23 +346,53 @@ public partial class DockerDiagnosticsView : UserControl
 
         closeBannerBtn.Command = new RelayCommand(() => _statusBanner.IsVisible = false);
 
+        // -- Layout Grid Columns -----------------------------------------
+        var columnsGrid = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("2*,16,*"),
+            Margin = new Thickness(0, 8, 0, 0)
+        };
+
+        var leftColumnPanel = new StackPanel
+        {
+            Spacing = 12,
+            Children =
+            {
+                containersSection,
+                imagesSection,
+                telemetrySection
+            }
+        };
+
+        var rightColumnPanel = new StackPanel
+        {
+            Spacing = 12,
+            Children =
+            {
+                statusSection,
+                toolchainSection,
+                configSection
+            }
+        };
+
+        Grid.SetColumn(leftColumnPanel, 0);
+        Grid.SetColumn(rightColumnPanel, 2);
+        columnsGrid.Children.Add(leftColumnPanel);
+        columnsGrid.Children.Add(rightColumnPanel);
+
         // -- Layout ------------------------------------------------------
         var mainPanel = new StackPanel
         {
             Margin = new Thickness(20),
-            Spacing = 8,
+            Spacing = 10,
             Children =
             {
                 header,
                 _statusBanner,
                 _searchBox,
                 _quickActionsRow,
-                statusSection,
-                toolchainSection,
-                containersSection,
-                imagesSection,
-                configSection,
-                telemetrySection
+                kpiGrid,
+                columnsGrid
             }
         };
 
@@ -793,6 +854,22 @@ public partial class DockerDiagnosticsView : UserControl
                     ToolTip.SetTip(_headerTitle, null);
                     PopulateStatus(true, info);
 
+                    // Update KPI Metrics (Online state)
+                    if (_metricDaemonStatusText != null) _metricDaemonStatusText.Text = "Online";
+                    if (_metricDaemonDetailText != null) _metricDaemonDetailText.Text = $"{info.Name ?? "Connected"} ({_strategy.DetectedRuntime})";
+                    if (_metricDaemonBorder != null) _metricDaemonBorder.Background = GreenColor;
+
+                    var running = containers.Count(c => string.Equals(c.State, "running", StringComparison.OrdinalIgnoreCase));
+                    if (_metricContainersText != null) _metricContainersText.Text = $"{running} Running";
+                    if (_metricContainersDetailText != null) _metricContainersDetailText.Text = $"{containers.Count} total containers";
+
+                    if (_metricImagesText != null) _metricImagesText.Text = $"{images.Count} Images";
+                    if (_metricImagesDetailText != null) _metricImagesDetailText.Text = $"{FormatBytesBinary(diskUsage.totalSizeBytes)} total size";
+
+                    if (_metricDiskText != null) _metricDiskText.Text = FormatBytesBinary(diskUsage.reclaimableBytes);
+                    var unusedCount = images.Count(i => i.Containers == 0);
+                    if (_metricDiskDetailText != null) _metricDiskDetailText.Text = $"{unusedCount} unused images";
+
                     if (_wasDockerOnline == false)
                     {
                         ShowTemporaryStatus("Docker Daemon is back online!");
@@ -845,6 +922,21 @@ public partial class DockerDiagnosticsView : UserControl
                     _quickActionsRow.IsEnabled = false;
                     _quickActionsRow.Opacity = 0.5;
                     PopulateStatus(false, null);
+
+                    // Update KPI Metrics (Offline state)
+                    if (_metricDaemonStatusText != null) _metricDaemonStatusText.Text = "Offline";
+                    if (_metricDaemonDetailText != null) _metricDaemonDetailText.Text = "Daemon unreachable";
+                    if (_metricDaemonBorder != null) _metricDaemonBorder.Background = RedColor;
+
+                    if (_metricContainersText != null) _metricContainersText.Text = "—";
+                    if (_metricContainersDetailText != null) _metricContainersDetailText.Text = "No active daemon";
+
+                    if (_metricImagesText != null) _metricImagesText.Text = "—";
+                    if (_metricImagesDetailText != null) _metricImagesDetailText.Text = "No active daemon";
+
+                    if (_metricDiskText != null) _metricDiskText.Text = "—";
+                    if (_metricDiskDetailText != null) _metricDiskDetailText.Text = "No active daemon";
+
                     PopulateConfig(settings);
                     PopulateOfflineSections(); // Clear stale lists and show offline sections
                     _ = PopulateTelemetryAsync();
@@ -1949,5 +2041,65 @@ public partial class DockerDiagnosticsView : UserControl
             return ver != null ? $"v{ver.Major}.{ver.Minor}.{ver.Build}" : "";
         }
         catch { return ""; }
+    }
+
+    private Border CreateMetricCard(string label, string initialVal, string initialDetail, IBrush initialAccent,
+        out TextBlock valText, out TextBlock detailText, out Border accentBar)
+    {
+        var mainPanel = new StackPanel { Spacing = 4 };
+        
+        var labelText = new TextBlock
+        {
+            Text = label,
+            FontSize = 10,
+            FontWeight = FontWeight.Bold,
+            Foreground = MutedColor
+        };
+        
+        valText = new TextBlock
+        {
+            Text = initialVal,
+            FontSize = 16,
+            FontWeight = FontWeight.Bold,
+            Foreground = FontColor
+        };
+        
+        detailText = new TextBlock
+        {
+            Text = initialDetail,
+            FontSize = 10,
+            Foreground = MutedColor
+        };
+
+        mainPanel.Children.Add(labelText);
+        mainPanel.Children.Add(valText);
+        mainPanel.Children.Add(detailText);
+
+        accentBar = new Border
+        {
+            Width = 4,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Background = initialAccent,
+            CornerRadius = new CornerRadius(2, 0, 0, 2)
+        };
+
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
+        Grid.SetColumn(accentBar, 0);
+        Grid.SetColumn(mainPanel, 1);
+        
+        mainPanel.Margin = new Thickness(14, 10, 10, 10);
+        
+        grid.Children.Add(accentBar);
+        grid.Children.Add(mainPanel);
+
+        return new Border
+        {
+            Background = CardBg,
+            CornerRadius = new CornerRadius(6),
+            BorderThickness = new Thickness(1),
+            BorderBrush = Brush.Parse("#2D2D30"),
+            Child = grid,
+            Margin = new Thickness(0, 0, 6, 0)
+        };
     }
 }
