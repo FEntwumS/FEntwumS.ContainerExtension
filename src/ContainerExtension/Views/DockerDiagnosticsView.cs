@@ -95,6 +95,8 @@ public partial class DockerDiagnosticsView : UserControl
     private int _lastContainerFingerprint;
     private int _lastImageFingerprint;
     private bool? _wasDockerOnline;
+    private string? _lastPermanentMessage;
+    private bool _lastPermanentIsError;
 
     /// <summary>
     /// Constructs the Docker Desktop-style dashboard as a <see cref="UserControl"/>.
@@ -795,6 +797,10 @@ public partial class DockerDiagnosticsView : UserControl
                     {
                         ShowTemporaryStatus("Docker Daemon is back online!");
                     }
+                    else if (_wasDockerOnline == null)
+                    {
+                        _statusBanner.IsVisible = false;
+                    }
                     _wasDockerOnline = true;
 
                     // Skip-if-unchanged: compare a lightweight fingerprint of container/image data
@@ -847,7 +853,7 @@ public partial class DockerDiagnosticsView : UserControl
 
                     if (_wasDockerOnline == null || _wasDockerOnline == true)
                     {
-                        ShowTemporaryError("Docker Daemon is offline", ex);
+                        ShowTemporaryError("Docker Daemon is offline", ex, isTemporary: false);
                     }
                     _wasDockerOnline = false;
                 });
@@ -1283,7 +1289,7 @@ public partial class DockerDiagnosticsView : UserControl
         SetOfflineContent(_imagesContent);
     }
 
-    private void ShowTemporaryStatus(string message, bool isError = false)
+    private void ShowTemporaryStatus(string message, bool isError = false, bool isTemporary = true)
     {
         Dispatcher.UIThread.Post(() =>
         {
@@ -1295,29 +1301,50 @@ public partial class DockerDiagnosticsView : UserControl
                 ? new SolidColorBrush(Color.FromArgb(80, 244, 67, 54))
                 : new SolidColorBrush(Color.FromArgb(80, 36, 150, 237));
             _statusBanner.IsVisible = true;
-            _temporaryStatus = message;
+            _temporaryStatus = isTemporary ? message : null;
+            if (!isTemporary)
+            {
+                _lastPermanentMessage = message;
+                _lastPermanentIsError = isError;
+            }
         });
 
-        var weakSelf = new WeakReference<DockerDiagnosticsView>(this);
-        _ = System.Threading.Tasks.Task.Delay(6000).ContinueWith(_ =>
+        if (isTemporary)
         {
-            if (weakSelf.TryGetTarget(out var self))
+            var weakSelf = new WeakReference<DockerDiagnosticsView>(this);
+            _ = System.Threading.Tasks.Task.Delay(6000).ContinueWith(_ =>
             {
-                Dispatcher.UIThread.Post(() =>
+                if (weakSelf.TryGetTarget(out var self))
                 {
-                    if (self._temporaryStatus == message)
+                    Dispatcher.UIThread.Post(() =>
                     {
-                        self._temporaryStatus = null;
-                        self._statusBanner.IsVisible = false;
-                    }
-                });
-            }
-        }, System.Threading.Tasks.TaskScheduler.Default);
+                        if (self._temporaryStatus == message)
+                        {
+                            self._temporaryStatus = null;
+                            if (self._wasDockerOnline == false && self._lastPermanentMessage != null)
+                            {
+                                self._statusBannerText.Text = self._lastPermanentMessage;
+                                self._statusBanner.Background = self._lastPermanentIsError
+                                    ? new SolidColorBrush(Color.FromArgb(30, 244, 67, 54))
+                                    : new SolidColorBrush(Color.FromArgb(30, 36, 150, 237));
+                                self._statusBanner.BorderBrush = self._lastPermanentIsError
+                                    ? new SolidColorBrush(Color.FromArgb(80, 244, 67, 54))
+                                    : new SolidColorBrush(Color.FromArgb(80, 36, 150, 237));
+                            }
+                            else
+                            {
+                                self._statusBanner.IsVisible = false;
+                            }
+                        }
+                    });
+                }
+            }, System.Threading.Tasks.TaskScheduler.Default);
+        }
     }
 
-    private void ShowTemporaryError(string titlePrefix, Exception ex)
+    private void ShowTemporaryError(string titlePrefix, Exception ex, bool isTemporary = true)
     {
-        ShowTemporaryStatus($"{titlePrefix}: {ex.Message}", isError: true);
+        ShowTemporaryStatus($"{titlePrefix}: {ex.Message}", isError: true, isTemporary: isTemporary);
     }
 
     private WrapPanel BuildQuickActionsRow()
