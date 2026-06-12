@@ -59,6 +59,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     public const string LogLevelSetting = "ContainerExtension_LogLevel";
     public const string ShowTimestampsSetting = "ContainerExtension_ShowTimestamps";
     public const string TelemetryRetentionSetting = "ContainerExtension_TelemetryRetention";
+    public const string BypassNamedPipeCheckSetting = "ContainerExtension_BypassNamedPipeCheck";
     public const string PerToolImagePrefix = "ContainerImage_";
     public const string FallbackImage = "hdlc/ghdl:yosys";
 
@@ -78,6 +79,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     public const string SettingsKeyDashboardRefresh = "Dashboard Refresh";
     public const string SettingsKeyRetention = "Retention";
     public const string SettingsKeyRuntimePath = "Runtime Path";
+    public const string SettingsKeyBypassNamedPipeCheck = "Bypass Named Pipe Security";
 
     public static readonly FrozenDictionary<string, string> DefaultToolImages =
       new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -195,6 +197,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, TelemetryRetentionSetting, new ComboBoxSetting("Telemetry Retention", "100", ["None", "25", "50", "100", "250", "500", "1000", "Unlimited"]));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DockerRuntimePathSetting, new FilePathSetting("Container Runtime Path", "", "Absolute path to the container runtime executable.", null, ValidateRuntimePath));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DaemonSocketSetting, new TextBoxSetting("Custom Daemon Socket", "", "Optional: Override DOCKER_HOST.") { Validator = DaemonSocketValidatorInstance });
+        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, BypassNamedPipeCheckSetting, new CheckBoxSetting("Bypass Named Pipe Security Check", false));
 
         IToolService toolService;
         DockerExecutionStrategy dockerStrategy;
