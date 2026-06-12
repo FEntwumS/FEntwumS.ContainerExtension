@@ -2330,13 +2330,28 @@ public partial class DockerDiagnosticsView : UserControl
         };
         mainPanel.Children.Add(errorText);
 
-        // Footer buttons
-        var buttonPanel = new StackPanel
+        // Footer Grid
+        var footerGrid = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
+            Margin = new Thickness(0, 10, 0, 0)
+        };
+
+        var resetBtn = new Button
+        {
+            Content = "Reset to Defaults",
+            Padding = new Thickness(14, 8),
+            CornerRadius = new CornerRadius(4),
+            Background = Brush.Parse("#1AFFFFFF"),
+            Foreground = FontColor,
+            BorderBrush = Brush.Parse("#2D2D30"),
+            BorderThickness = new Thickness(1)
+        };
+
+        var rightButtonPanel = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Spacing = 10,
-            Margin = new Thickness(0, 10, 0, 0)
+            Spacing = 10
         };
 
         var saveBtn = new Button
@@ -2354,6 +2369,42 @@ public partial class DockerDiagnosticsView : UserControl
             Padding = new Thickness(16, 8),
             CornerRadius = new CornerRadius(4)
         };
+
+        rightButtonPanel.Children.Add(cancelBtn);
+        rightButtonPanel.Children.Add(saveBtn);
+
+        Grid.SetColumn(resetBtn, 0);
+        Grid.SetColumn(rightButtonPanel, 2);
+        footerGrid.Children.Add(resetBtn);
+        footerGrid.Children.Add(rightButtonPanel);
+        mainPanel.Children.Add(footerGrid);
+
+        resetBtn.Command = new RelayCommand(() =>
+        {
+            defaultImageTextBox.Text = ContainerExtensionModule.FallbackImage;
+            pullPolicyComboBox.SelectedItem = "if-not-present";
+            platformComboBox.SelectedItem = "auto";
+            networkModeComboBox.SelectedItem = "bridge";
+
+            memSlider.Value = 0;
+            cpuSlider.Value = 0;
+            timeoutSlider.Value = 0;
+
+            autoRemoveCheckBox.IsChecked = true;
+            allowPrivilegedCheckBox.IsChecked = false;
+            prefixTextBox.Text = "containerextension-";
+            extraFlagsTextBox.Text = "";
+
+            logLevelComboBox.SelectedItem = "Verbose";
+            showTimestampsCheckBox.IsChecked = true;
+            refreshComboBox.SelectedItem = "Manual";
+            retentionComboBox.SelectedItem = "100";
+
+            runtimePathTextBox.Text = "";
+            socketTextBox.Text = "";
+            
+            errorText.IsVisible = false;
+        });
 
         saveBtn.Command = new RelayCommand(() =>
         {
@@ -2432,10 +2483,6 @@ public partial class DockerDiagnosticsView : UserControl
         });
 
         cancelBtn.Command = new RelayCommand(() => dialog.Close());
-
-        buttonPanel.Children.Add(cancelBtn);
-        buttonPanel.Children.Add(saveBtn);
-        mainPanel.Children.Add(buttonPanel);
 
         var wrapper = new Border
         {
