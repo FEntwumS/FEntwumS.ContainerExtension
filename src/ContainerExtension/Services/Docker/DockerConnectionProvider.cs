@@ -25,6 +25,7 @@ public sealed class DockerConnectionProvider : IDisposable
     private readonly System.Threading.Lock _systemInfoLock = new();
 
     private Task<SystemInfoResponse?>? _activeSystemInfoTask;
+    private readonly SemaphoreSlim _connectionSemaphore = new(1, 1);
     private volatile bool _disposed;
 
     public bool IsConnected => _lastPingSucceeded && _lastSystemInfoSucceeded && !_disposed;
@@ -143,55 +144,63 @@ public sealed class DockerConnectionProvider : IDisposable
             return false;
         }
 
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
-
+        await _connectionSemaphore.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await _client.System.PingAsync(timeoutCts.Token).ConfigureAwait(false);
-            lock (_stateLock)
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+
+            try
             {
-                if (!_lastStateConnected)
+                await _client.System.PingAsync(timeoutCts.Token).ConfigureAwait(false);
+                lock (_stateLock)
                 {
-                    ContainerTelemetry.TrackError("DockerConnectionProvider", "Daemon ping recovered", null, "Connection restored");
+                    if (!_lastStateConnected)
+                    {
+                        ContainerTelemetry.TrackError("DockerConnectionProvider", "Daemon ping recovered", null, "Connection restored");
+                    }
+                    _lastStateConnected = true;
+                    _lastPingSucceeded = true;
                 }
-                _lastStateConnected = true;
-                _lastPingSucceeded = true;
+                return true;
             }
-            return true;
-        }
-        catch (OperationCanceledException)
-        {
-            lock (_stateLock)
+            catch (OperationCanceledException)
             {
-                _lastPingSucceeded = false;
-            }
-            return false;
-        }
-        catch (ObjectDisposedException)
-        {
-            lock (_stateLock)
-            {
-                _lastPingSucceeded = false;
-            }
-            return false;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            lock (_stateLock)
-            {
-                if (_lastStateConnected)
-                {
-                    _lastStateConnected = false;
-                    _lastPingSucceeded = false;
-                    ContainerTelemetry.TrackError("DockerConnectionProvider", "Daemon ping failed (first failure)", ex);
-                }
-                else
+                lock (_stateLock)
                 {
                     _lastPingSucceeded = false;
                 }
+                return false;
             }
-            return false;
+            catch (ObjectDisposedException)
+            {
+                lock (_stateLock)
+                {
+                    _lastPingSucceeded = false;
+                }
+                return false;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                lock (_stateLock)
+                {
+                    if (_lastStateConnected)
+                    {
+                        _lastStateConnected = false;
+                        _lastPingSucceeded = false;
+                        ContainerTelemetry.TrackError("DockerConnectionProvider", "Daemon ping failed (first failure)", ex);
+                    }
+                    else
+                    {
+                        _lastPingSucceeded = false;
+                    }
+                }
+                return false;
+            }
+        }
+        finally
+        {
+            _connectionSemaphore.Release();
         }
     }
 
@@ -239,57 +248,62 @@ public sealed class DockerConnectionProvider : IDisposable
             return null;
         }
 
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
-
+        await _connectionSemaphore.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var info = await _client.System.GetSystemInfoAsync(timeoutCts.Token).ConfigureAwait(false);
-            lock (_stateLock)
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+
+            try
             {
-                if (!_lastSystemInfoSucceeded)
+                var info = await _client.System.GetSystemInfoAsync(timeoutCts.Token).ConfigureAwait(false);
+                lock (_stateLock)
                 {
-                    ContainerTelemetry.TrackError("DockerConnectionProvider", "GetSystemInfoAsync recovered", null, "Connection restored");
+                    if (!_lastSystemInfoSucceeded)
+                    {
+                        ContainerTelemetry.TrackError("DockerConnectionProvider", "GetSystemInfoAsync recovered", null, "Connection restored");
+                    }
+                    _lastSystemInfoSucceeded = true;
                 }
-                _lastSystemInfoSucceeded = true;
+                lock (_systemInfoLock)
+                {
+                    _cachedSystemInfo = info;
+                    _systemInfoCacheExpiration = Environment.TickCount64 + 10_000; // Cache for 10 seconds
+                }
+                return info;
             }
-            lock (_systemInfoLock)
+            catch (OperationCanceledException)
             {
-                _cachedSystemInfo = info;
-                _systemInfoCacheExpiration = Environment.TickCount64 + 10_000; // Cache for 10 seconds
-            }
-            return info;
-        }
-        catch (OperationCanceledException)
-        {
-            lock (_stateLock)
-            {
-                _lastSystemInfoSucceeded = false;
-            }
-            return null;
-        }
-        catch (ObjectDisposedException)
-        {
-            lock (_stateLock)
-            {
-                _lastSystemInfoSucceeded = false;
-            }
-            return null;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            lock (_stateLock)
-            {
-                if (_lastSystemInfoSucceeded)
+                lock (_stateLock)
                 {
                     _lastSystemInfoSucceeded = false;
-                    ContainerTelemetry.TrackError("DockerConnectionProvider", "GetSystemInfoAsync failed (first failure)", ex);
                 }
+                return null;
             }
-            return null;
+            catch (ObjectDisposedException)
+            {
+                lock (_stateLock)
+                {
+                    _lastSystemInfoSucceeded = false;
+                }
+                return null;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                lock (_stateLock)
+                {
+                    if (_lastSystemInfoSucceeded)
+                    {
+                        _lastSystemInfoSucceeded = false;
+                        ContainerTelemetry.TrackError("DockerConnectionProvider", "GetSystemInfoAsync failed (first failure)", ex);
+                    }
+                }
+                return null;
+            }
         }
         finally
         {
+            _connectionSemaphore.Release();
             lock (_systemInfoLock)
             {
                 _activeSystemInfoTask = null;
@@ -301,6 +315,7 @@ public sealed class DockerConnectionProvider : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _connectionSemaphore.Dispose();
         GC.SuppressFinalize(this);
     }
 }

@@ -73,6 +73,7 @@ public sealed class DockerImageManager
             _cachedImages = null;
             _cacheExpiration = 0;
         }
+        FEntwumS.ContainerExtension.Registry.RegistryClient.InvalidateTagsCache();
     }
 
     public async Task<IList<ImagesListResponse>> ListImagesAsync(CancellationToken ct = default)
@@ -406,7 +407,7 @@ public sealed class DockerImageManager
             };
         }
 
-        using var httpClient = handler != null ? new System.Net.Http.HttpClient(handler) : new System.Net.Http.HttpClient();
+        using var httpClient = handler != null ? new System.Net.Http.HttpClient(handler, disposeHandler: true) : new System.Net.Http.HttpClient();
         httpClient.Timeout = TimeSpan.FromSeconds(5);
         try
         {

@@ -67,7 +67,7 @@ public static partial class RegistryClient
                 EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13
             }
         };
-        var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
+        var client = new HttpClient(handler, disposeHandler: true) { Timeout = TimeSpan.FromSeconds(15) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("ContainerExtension/1.0");
         client.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("br"));
         client.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("gzip"));
@@ -192,6 +192,10 @@ public static partial class RegistryClient
             }
             catch (Exception ex) when (attempt < maxAttempts && (ex is HttpRequestException || ex is TaskCanceledException || ex is System.Net.Sockets.SocketException))
             {
+                if (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
                 await Task.Delay(delayMs, ct).ConfigureAwait(false);
                 delayMs *= 2;
             }
@@ -265,7 +269,8 @@ public static partial class RegistryClient
                 string key = imageReference;
                 task = Task.Run(async () =>
                 {
-                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                    using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    cts.CancelAfter(TimeSpan.FromSeconds(15));
                     var ct = cts.Token;
                     try
                     {
@@ -370,6 +375,14 @@ public static partial class RegistryClient
         }
 
         return cancellationToken.CanBeCanceled ? await task.WaitAsync(cancellationToken).ConfigureAwait(false) : await task.ConfigureAwait(false);
+    }
+
+    public static void InvalidateTagsCache()
+    {
+        lock (CacheEvictionLock)
+        {
+            TagsCache.Clear();
+        }
     }
 
     private static void AddToCache(string key, List<string> tags)

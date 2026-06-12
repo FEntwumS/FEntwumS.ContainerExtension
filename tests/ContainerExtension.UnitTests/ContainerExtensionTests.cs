@@ -2504,6 +2504,36 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.Equal("registry.docker.io", service);
         Assert.Equal("repository:samalba/my-app:pull,push", scope);
     }
+
+    [Fact]
+    public async Task RegistryClient_FetchTagsAsync_LinkedTokenSource_CancelsImmediately()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await FEntwumS.ContainerExtension.Registry.RegistryClient.FetchTagsAsync("ubuntu", cts.Token);
+        });
+    }
+
+    [Fact]
+    public async Task RegistryClient_SendWithRetryAsync_ImmediateAbortOnCancellation()
+    {
+        var method = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetMethod("SendWithRetryAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com");
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            var task = (Task<HttpResponseMessage>)method.Invoke(null, new object[] { req, cts.Token })!;
+            await task;
+        });
+    }
 #pragma warning restore CA1305, CA1307, CA1031, CA1822, CS8019, CA1308
 }
 

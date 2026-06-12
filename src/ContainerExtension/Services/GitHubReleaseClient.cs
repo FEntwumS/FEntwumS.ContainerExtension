@@ -25,7 +25,7 @@ internal static class GitHubReleaseClient
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             AutomaticDecompression = System.Net.DecompressionMethods.Brotli | System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate
         };
-        var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
+        var client = new HttpClient(handler, disposeHandler: true) { Timeout = TimeSpan.FromSeconds(10) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("ContainerExtension/1.0");
         return client;
     });
