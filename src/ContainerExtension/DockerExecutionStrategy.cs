@@ -157,18 +157,30 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                                         return false; // PID reuse detected: process started after pipe connection
                                     }
 
-                                    var name = process.ProcessName;
-                                    if ((name.Contains("docker", StringComparison.OrdinalIgnoreCase) ||
-                                         name.Contains("podman", StringComparison.OrdinalIgnoreCase) ||
-                                         name.Contains("wsl", StringComparison.OrdinalIgnoreCase) ||
-                                         name.Contains("vmmember", StringComparison.OrdinalIgnoreCase) ||
-                                         name.Contains("win-sshproxy", StringComparison.OrdinalIgnoreCase) ||
-                                         name.Contains("System", StringComparison.OrdinalIgnoreCase) ||
-                                         name.Contains("svchost", StringComparison.OrdinalIgnoreCase)) &&
-                                        IsProcessTrusted(pid))
-                                    {
-                                        return true;
-                                    }
+                                     var name = process.ProcessName;
+                                     var isNameWhitelisted = name.Contains("docker", StringComparison.OrdinalIgnoreCase) ||
+                                                             name.Contains("podman", StringComparison.OrdinalIgnoreCase) ||
+                                                             name.Contains("wsl", StringComparison.OrdinalIgnoreCase) ||
+                                                             name.Contains("vmmember", StringComparison.OrdinalIgnoreCase) ||
+                                                             name.Contains("win-sshproxy", StringComparison.OrdinalIgnoreCase) ||
+                                                             name.Contains("System", StringComparison.OrdinalIgnoreCase) ||
+                                                             name.Contains("svchost", StringComparison.OrdinalIgnoreCase) ||
+                                                             name.Contains("rancher", StringComparison.OrdinalIgnoreCase) ||
+                                                             name.Contains("lima", StringComparison.OrdinalIgnoreCase) ||
+                                                             name.Contains("com.docker", StringComparison.OrdinalIgnoreCase) ||
+                                                             name.Contains("orbstack", StringComparison.OrdinalIgnoreCase) ||
+                                                             name.Contains("socat", StringComparison.OrdinalIgnoreCase) ||
+                                                             name.Contains("ssh", StringComparison.OrdinalIgnoreCase);
+
+                                     if (isNameWhitelisted && IsProcessTrusted(pid))
+                                     {
+                                         return true;
+                                     }
+                                     else
+                                     {
+                                         ContainerTelemetry.TrackError("DockerExecutionStrategy",
+                                             $"Named pipe verification failed for pipe '{pipeName}'. Host process: '{name}' (PID: {pid}), Trusted: {IsProcessTrusted(pid)}", null);
+                                     }
                                 }
                                 catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5 || ex.Message.Contains("Access is denied", StringComparison.OrdinalIgnoreCase))
                                 {
