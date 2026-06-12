@@ -113,9 +113,13 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         return false;
     }
 
-    private static bool VerifyWindowsNamedPipe(string pipeName, int timeoutMs = 200)
+    private bool VerifyWindowsNamedPipe(string pipeName, int timeoutMs = 200)
     {
         if (!OperatingSystem.IsWindows())
+        {
+            return true;
+        }
+        if (_settingsService.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false))
         {
             return true;
         }
@@ -609,7 +613,8 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 [ContainerExtensionModule.SettingsKeyExtraLabels] = _settingsService.SafeGetSetting(ContainerExtensionModule.ExtraFlagsSetting, "") is var e && string.IsNullOrWhiteSpace(e) ? "None" : e,
                 [ContainerExtensionModule.SettingsKeyDashboardRefresh] = _settingsService.SafeGetSetting(ContainerExtensionModule.DashboardRefreshSetting, "Manual"),
                 [ContainerExtensionModule.SettingsKeyRetention] = _settingsService.SafeGetSetting(ContainerExtensionModule.TelemetryRetentionSetting, "100"),
-                [ContainerExtensionModule.SettingsKeyRuntimePath] = _settingsService.SafeGetSetting(ContainerExtensionModule.DockerRuntimePathSetting, "") is var r && string.IsNullOrWhiteSpace(r) ? "docker (PATH)" : r
+                [ContainerExtensionModule.SettingsKeyRuntimePath] = _settingsService.SafeGetSetting(ContainerExtensionModule.DockerRuntimePathSetting, "") is var r && string.IsNullOrWhiteSpace(r) ? "docker (PATH)" : r,
+                [ContainerExtensionModule.SettingsKeyBypassNamedPipeCheck] = _settingsService.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false) ? "Bypassed" : "Active"
             };
         }
         finally

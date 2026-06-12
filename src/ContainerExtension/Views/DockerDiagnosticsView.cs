@@ -1389,7 +1389,7 @@ public partial class DockerDiagnosticsView : UserControl
             ("CONTAINER INFO",   [ ContainerExtensionModule.SettingsKeyAutoRemove, ContainerExtensionModule.SettingsKeyNamePrefix, ContainerExtensionModule.SettingsKeyExtraLabels ]),
             ("LOGGING CONFIG",   [ ContainerExtensionModule.SettingsKeyLogLevel, ContainerExtensionModule.SettingsKeyTimestamps ]),
             ("DASHBOARD DATA",   [ ContainerExtensionModule.SettingsKeyDashboardRefresh, ContainerExtensionModule.SettingsKeyRetention ]),
-            ("ADVANCED PATHS",   [ ContainerExtensionModule.SettingsKeyRuntimePath ]),
+            ("ADVANCED PATHS",   [ ContainerExtensionModule.SettingsKeyRuntimePath, ContainerExtensionModule.SettingsKeyBypassNamedPipeCheck ]),
         };
 
         foreach (var (title, keys) in groups)
