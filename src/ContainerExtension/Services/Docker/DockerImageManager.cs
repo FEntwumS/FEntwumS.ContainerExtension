@@ -406,13 +406,20 @@ public sealed class DockerImageManager
             };
         }
 
-        using var httpClient = handler != null ? new System.Net.Http.HttpClient(handler) : new System.Net.Http.HttpClient { BaseAddress = new UriBuilder(endpoint) { Path = "" }.Uri };
+        using var httpClient = handler != null ? new System.Net.Http.HttpClient(handler) : new System.Net.Http.HttpClient();
         httpClient.Timeout = TimeSpan.FromSeconds(5);
         try
         {
-            var url = string.Equals(scheme, "npipe", StringComparison.Ordinal) || string.Equals(scheme, "unix", StringComparison.Ordinal)
-                ? new Uri("http://localhost/system/df")
-                : new Uri(httpClient.BaseAddress!, "system/df");
+            Uri url;
+            if (string.Equals(scheme, "npipe", StringComparison.Ordinal) || string.Equals(scheme, "unix", StringComparison.Ordinal))
+            {
+                url = new Uri("http://localhost/system/df");
+            }
+            else
+            {
+                var httpScheme = string.Equals(scheme, "tcp", StringComparison.Ordinal) ? "http" : scheme;
+                url = new UriBuilder(endpoint) { Scheme = httpScheme, Path = "system/df" }.Uri;
+            }
             using var response = await httpClient.GetAsync(url, ct).ConfigureAwait(false);
             if (response.IsSuccessStatusCode)
             {

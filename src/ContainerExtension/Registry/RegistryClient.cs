@@ -30,6 +30,9 @@ public static partial class RegistryClient
     [System.Text.RegularExpressions.GeneratedRegex(@"(?<type>token|bearer)(?<sep>\s*=\s*|\s+)[a-zA-Z0-9_\-\.\+\/=]+", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
     private static partial System.Text.RegularExpressions.Regex SecretScrubRegex();
 
+    [System.Text.RegularExpressions.GeneratedRegex(@"(?<key>[a-zA-Z0-9_\-\.]+)\s*=\s*""(?<value>[^""]*)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
+    private static partial System.Text.RegularExpressions.Regex ChallengeParameterRegex();
+
     private static readonly string CachedUserName = Environment.UserName;
     private static readonly string CachedUserProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
@@ -709,6 +712,75 @@ public static partial class RegistryClient
             request.Headers.TryAddWithoutValidation("Authorization", authHeader);
         }
         using var response = await SendWithRetryAsync(request, cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            var authHeaderVal = response.Headers.WwwAuthenticate.FirstOrDefault();
+            if (authHeaderVal != null && authHeaderVal.Scheme.Equals("Bearer", StringComparison.OrdinalIgnoreCase))
+            {
+                var parameter = authHeaderVal.Parameter;
+                if (!string.IsNullOrEmpty(parameter))
+                {
+                    string? realm = null;
+                    string? service = null;
+                    string? scope = null;
+                    var matches = ChallengeParameterRegex().Matches(parameter);
+                    foreach (System.Text.RegularExpressions.Match match in matches)
+                    {
+                        var key = match.Groups["key"].Value;
+                        var val = match.Groups["value"].Value;
+                        if (key.Equals("realm", StringComparison.OrdinalIgnoreCase)) realm = val;
+                        else if (key.Equals("service", StringComparison.OrdinalIgnoreCase)) service = val;
+                        else if (key.Equals("scope", StringComparison.OrdinalIgnoreCase)) scope = val;
+                    }
+
+                    if (!string.IsNullOrEmpty(realm))
+                    {
+                        var tokenUrl = realm;
+                        var separator = realm.Contains('?') ? "&" : "?";
+                        if (!string.IsNullOrEmpty(service))
+                        {
+                            tokenUrl += $"{separator}service={Uri.EscapeDataString(service)}";
+                            separator = "&";
+                        }
+                        if (!string.IsNullOrEmpty(scope))
+                        {
+                            tokenUrl += $"{separator}scope={Uri.EscapeDataString(scope)}";
+                        }
+
+                        using var tokenReq = new HttpRequestMessage(HttpMethod.Get, tokenUrl);
+                        if (authHeader != null)
+                        {
+                            tokenReq.Headers.TryAddWithoutValidation("Authorization", authHeader);
+                        }
+
+                        using var tokenResponse = await SendWithRetryAsync(tokenReq, cancellationToken).ConfigureAwait(false);
+                        if (tokenResponse.IsSuccessStatusCode)
+                        {
+                            using var tokenStream = await tokenResponse.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                            var tokenRes = await JsonSerializer.DeserializeAsync(tokenStream, RegistryJsonContext.Default.GhcrTokenResponse, cancellationToken).ConfigureAwait(false);
+                            var tokenVal = tokenRes?.Token ?? tokenRes?.AccessToken;
+                            if (!string.IsNullOrEmpty(tokenVal))
+                            {
+                                using var retryRequest = new HttpRequestMessage(HttpMethod.Get, url);
+                                retryRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                                retryRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenVal);
+                                using var retryResponse = await SendWithRetryAsync(retryRequest, cancellationToken).ConfigureAwait(false);
+                                if (retryResponse.IsSuccessStatusCode)
+                                {
+                                    using var retryStream = await retryResponse.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                                    var retryTagsRes = await JsonSerializer.DeserializeAsync(retryStream, RegistryJsonContext.Default.GhcrTagsResponse, cancellationToken).ConfigureAwait(false);
+                                    if (retryTagsRes?.Tags != null)
+                                    {
+                                        return ProcessRawTags(retryTagsRes.Tags);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         response.EnsureSuccessStatusCode();
         using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         GhcrTagsResponse? tagsRes;
@@ -722,19 +794,23 @@ public static partial class RegistryClient
         }
         if (tagsRes?.Tags != null)
         {
-            var rawTags = tagsRes.Tags;
-            var list = new List<string>(Math.Min(20, rawTags.Count));
-            for (int i = rawTags.Count - 1; i >= 0 && list.Count < 20; i--)
-            {
-                var t = rawTags[i];
-                if (!string.IsNullOrEmpty(t))
-                {
-                    list.Add(t);
-                }
-            }
-            return list;
+            return ProcessRawTags(tagsRes.Tags);
         }
         return [];
+    }
+
+    private static List<string> ProcessRawTags(List<string> rawTags)
+    {
+        var list = new List<string>(Math.Min(20, rawTags.Count));
+        for (int i = rawTags.Count - 1; i >= 0 && list.Count < 20; i--)
+        {
+            var t = rawTags[i];
+            if (!string.IsNullOrEmpty(t))
+            {
+                list.Add(t);
+            }
+        }
+        return list;
     }
 
     private static string ScrubSecrets(string input)
@@ -767,6 +843,7 @@ internal class GhcrTagsResponse { [JsonPropertyName("tags")] public List<string>
 internal class GhcrTokenResponse
 {
     [JsonPropertyName("token")] public string? Token { get; set; }
+    [JsonPropertyName("access_token")] public string? AccessToken { get; set; }
     [JsonPropertyName("expires_in")] public int? ExpiresIn { get; set; }
     [JsonPropertyName("issued_at")] public string? IssuedAt { get; set; }
 }

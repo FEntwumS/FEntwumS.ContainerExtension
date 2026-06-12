@@ -247,6 +247,28 @@ public sealed class DockerContainerManager
         }
     }
 
+    public async Task RestartContainerAsync(string containerId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(containerId))
+        {
+            throw new ArgumentException("Container ID cannot be null or whitespace.", nameof(containerId));
+        }
+        ValidateContainerName(containerId);
+        try
+        {
+            await _client.Containers.RestartContainerAsync(
+              containerId, new ContainerRestartParameters { WaitBeforeKillSeconds = 5 }, ct).ConfigureAwait(false);
+        }
+        catch (DockerApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            // Not found, ignore or propagate? Let's propagate or ignore if it's already gone. Propagating or ignoring is fine, let's ignore to match Start/Stop behaviors.
+        }
+        finally
+        {
+            InvalidateCache();
+        }
+    }
+
     public async Task RemoveContainerAsync(string containerId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(containerId))

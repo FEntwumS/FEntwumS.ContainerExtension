@@ -510,34 +510,42 @@ public partial class DockerDiagnosticsView : UserControl
                 // Ignore errors during cancellation/disposal of the previous detach task
             }
 
-            _detachCleanupCts = new CancellationTokenSource();
-            var token = _detachCleanupCts.Token;
+            var cts = new CancellationTokenSource();
+            _detachCleanupCts = cts;
+            var token = cts.Token;
 
             _ = Task.Delay(1500, token).ContinueWith(t =>
             {
-                if (t.IsCanceled) return;
-
-                Dispatcher.UIThread.Post(() =>
+                try
                 {
-                    if (token.IsCancellationRequested) return;
+                    if (t.IsCanceled) return;
 
-                    var windowsToClose = _openLogWindows.Values.ToList();
-                    _openLogWindows.Clear();
-                    foreach (var w in windowsToClose)
+                    Dispatcher.UIThread.Post(() =>
                     {
-                        if (w != null)
+                        if (token.IsCancellationRequested) return;
+
+                        var windowsToClose = _openLogWindows.Values.ToList();
+                        _openLogWindows.Clear();
+                        foreach (var w in windowsToClose)
                         {
-                            try
+                            if (w != null)
                             {
-                                w.Close();
-                            }
-                            catch (Exception ex)
-                            {
-                                ContainerTelemetry.TrackError("DockerDiagnosticsView", "CloseOrphanLogWindow", ex);
+                                try
+                                {
+                                    w.Close();
+                                }
+                                catch (Exception ex)
+                                {
+                                    ContainerTelemetry.TrackError("DockerDiagnosticsView", "CloseOrphanLogWindow", ex);
+                                }
                             }
                         }
-                    }
-                });
+                    });
+                }
+                finally
+                {
+                    cts.Dispose();
+                }
             }, TaskScheduler.Default);
         };
     }

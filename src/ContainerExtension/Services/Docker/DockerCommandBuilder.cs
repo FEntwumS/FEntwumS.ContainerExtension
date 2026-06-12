@@ -138,7 +138,8 @@ internal static class DockerCommandBuilder
       ISettingsService? settingsService,
       string? uid,
       string? gid,
-      Action<ToolCommand, string> sdkLog)
+      Action<ToolCommand, string> sdkLog,
+      double? remoteCpuCores = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(image);
         ArgumentNullException.ThrowIfNull(command);
@@ -512,10 +513,11 @@ internal static class DockerCommandBuilder
         }
 
         var cpuCores = settingsService.SafeGetSetting<double>(ContainerExtensionModule.CpuLimitSetting, 0);
-        var hostCores = (double)Environment.ProcessorCount;
         if (cpuCores > 0 && !double.IsNaN(cpuCores) && !double.IsInfinity(cpuCores))
         {
-            var boundedCpus = Math.Clamp(cpuCores, 0, hostCores);
+            var boundedCpus = remoteCpuCores.HasValue
+                ? Math.Clamp(cpuCores, 0, remoteCpuCores.Value)
+                : cpuCores;
             createParams.HostConfig.NanoCPUs = (long)Math.Round(boundedCpus * 1_000_000_000);
         }
 
@@ -756,6 +758,7 @@ internal static class DockerCommandBuilder
             }
 
             var envVars = new List<string>();
+            var keyIndices = new Dictionary<string, int>(StringComparer.Ordinal);
             using (var fs = new FileStream(envPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             using (var reader = new StreamReader(fs, Encoding.UTF8))
             {
@@ -967,7 +970,16 @@ internal static class DockerCommandBuilder
 
                     value = SanitizeEnvValue(value);
 
-                    envVars.Add($"{key}={value}");
+                    var envVarEntry = $"{key}={value}";
+                    if (keyIndices.TryGetValue(key, out var existingIndex))
+                    {
+                        envVars[existingIndex] = envVarEntry;
+                    }
+                    else
+                    {
+                        keyIndices.Add(key, envVars.Count);
+                        envVars.Add(envVarEntry);
+                    }
                 }
             }
 
