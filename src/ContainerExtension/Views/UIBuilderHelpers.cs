@@ -164,6 +164,14 @@ public static class UIBuilderHelpers
         {
             block.Text = text;
             block.Foreground = foreground;
+            if (!isHeader && !string.IsNullOrEmpty(text))
+            {
+                ToolTip.SetTip(block, text);
+            }
+            else
+            {
+                ToolTip.SetTip(block, null);
+            }
             return;
         }
 
@@ -176,8 +184,13 @@ public static class UIBuilderHelpers
             FontWeight = isHeader ? FontWeight.Bold : FontWeight.Normal,
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = halign,
-            TextWrapping = isHeader ? TextWrapping.Wrap : TextWrapping.NoWrap
+            TextWrapping = isHeader ? TextWrapping.Wrap : TextWrapping.NoWrap,
+            TextTrimming = isHeader ? TextTrimming.None : TextTrimming.CharacterEllipsis
         };
+        if (!isHeader && !string.IsNullOrEmpty(text))
+        {
+            ToolTip.SetTip(block, text);
+        }
         Grid.SetColumn(block, col);
         grid.Children.Add(block);
     }

@@ -290,7 +290,7 @@ public partial class DockerDiagnosticsView : UserControl
         _containersContent.Children.Add(CreateLoadingText("Loading containers..."));
         var containersScroll = new ScrollViewer
         {
-            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
             Content = _containersContent
         };
@@ -301,7 +301,7 @@ public partial class DockerDiagnosticsView : UserControl
         _imagesContent.Children.Add(CreateLoadingText("Loading images..."));
         var imagesScroll = new ScrollViewer
         {
-            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
             Content = _imagesContent
         };

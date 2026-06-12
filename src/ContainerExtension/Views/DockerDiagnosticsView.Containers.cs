@@ -1011,7 +1011,7 @@ public partial class DockerDiagnosticsView
           [("NAME", "name"), ("IMAGE", "image"), ("STATUS", "status")],
           _containerSort,
           OnContainerSort,
-          "160,8,180,8,150,8,Auto",
+          "2*,8,2.2*,8,1.8*,8,Auto",
           ThreeColumnIndices));
         newChildren.Add(CreateSeparator());
 
@@ -1246,7 +1246,7 @@ public partial class DockerDiagnosticsView
     {
         var grid = existingGrid ?? new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("160,8,180,8,150,8,Auto"),
+            ColumnDefinitions = new ColumnDefinitions("2*,8,2.2*,8,1.8*,8,Auto"),
             Margin = new Thickness(0, isHeader ? 0 : 1)
         };
 
