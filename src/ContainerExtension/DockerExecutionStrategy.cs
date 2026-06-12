@@ -176,14 +176,19 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                                                              name.Contains("socat", StringComparison.OrdinalIgnoreCase) ||
                                                              name.Contains("ssh", StringComparison.OrdinalIgnoreCase);
 
-                                     if (isNameWhitelisted && IsProcessTrusted(pid))
+                                     if (IsProcessTrusted(pid))
                                      {
+                                         if (!isNameWhitelisted)
+                                         {
+                                             ContainerTelemetry.TrackError("DockerExecutionStrategy",
+                                                 $"Named pipe host process '{name}' (PID: {pid}) is trusted but not in default whitelist. Allowing connection.", null);
+                                         }
                                          return true;
                                      }
                                      else
                                      {
                                          ContainerTelemetry.TrackError("DockerExecutionStrategy",
-                                             $"Named pipe verification failed for pipe '{pipeName}'. Host process: '{name}' (PID: {pid}), Trusted: {IsProcessTrusted(pid)}", null);
+                                             $"Named pipe verification failed for pipe '{pipeName}'. Host process: '{name}' (PID: {pid}) is NOT trusted.", null);
                                      }
                                 }
                                 catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5 || ex.Message.Contains("Access is denied", StringComparison.OrdinalIgnoreCase))
@@ -445,7 +450,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             }
             if (!VerifyWindowsNamedPipe(pipeName))
             {
-                throw new DockerExecutionException($"Insecure named pipe connection detected for '{pipeName}'. Connection aborted.");
+                throw new DockerExecutionException($"Insecure named pipe connection detected for '{pipeName}'. Connection aborted. If this is a false positive, you can bypass this check in OneWare Studio Settings under 'Binary Management' -> 'Container Engine' -> check 'Bypass Named Pipe Security Check'.");
             }
         }
 
@@ -2208,7 +2213,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 }
                 if (!VerifyWindowsNamedPipe(pipeName))
                 {
-                    throw new DockerExecutionException($"Insecure or unreachable named pipe connection detected for '{pipeName}'.");
+                    throw new DockerExecutionException($"Insecure or unreachable named pipe connection detected for '{pipeName}'. If this is a false positive, you can bypass this check in OneWare Studio Settings under 'Binary Management' -> 'Container Engine' -> check 'Bypass Named Pipe Security Check'.");
                 }
             }
 
