@@ -2114,16 +2114,20 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             return (true, string.Empty);
         }
 
-        var executable = command.Executable ?? command.ToolName;
+        var executable = (command.Executable ?? command.ToolName ?? string.Empty).Trim('\r', '\n', ' ', '\t');
+        executable = Services.Docker.DockerCommandBuilder.HealEscapedPaths(executable);
 
         if (!string.IsNullOrEmpty(executable))
         {
-            if (executable.AsSpan().ContainsAny(DockerCommandBuilder.ShellSpecialChars))
+            var normalized = executable.Replace('\\', '/');
+            var exeName = System.IO.Path.GetFileName(normalized);
+
+            if (exeName.AsSpan().ContainsAny(DockerCommandBuilder.ShellSpecialChars))
             {
                 throw new ArgumentException("Command executable contains prohibited shell control characters.", nameof(command));
             }
 
-            foreach (var ch in executable)
+            foreach (var ch in exeName)
             {
                 if (char.IsControl(ch))
                 {

@@ -145,15 +145,16 @@ internal static class DockerCommandBuilder
         ArgumentNullException.ThrowIfNull(command);
         sdkLog ??= (_, _) => { };
 
-        var rawExePath = command.Executable;
+        var rawExePath = command.Executable?.Trim('\r', '\n', ' ', '\t');
         if (string.IsNullOrWhiteSpace(rawExePath))
         {
-            rawExePath = command.ToolName;
+            rawExePath = command.ToolName?.Trim('\r', '\n', ' ', '\t');
         }
         if (string.IsNullOrWhiteSpace(rawExePath))
         {
             rawExePath = "container-run";
         }
+        rawExePath = HealEscapedPaths(rawExePath);
         var executablePath = NormalizeSeparators(rawExePath);
         var executable = Path.GetFileName(executablePath);
         var resolvedWorkingDir = string.IsNullOrWhiteSpace(command.WorkingDirectory) ? Directory.GetCurrentDirectory() : command.WorkingDirectory;
@@ -1268,6 +1269,19 @@ internal static class DockerCommandBuilder
         if (hasCr) result = result.Replace("\r", "", StringComparison.Ordinal);
         if (hasBackslash) result = result.Replace('\\', '/');
         return result;
+    }
+
+    internal static string HealEscapedPaths(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return path;
+        return path
+            .Replace("\u0008", "/b", StringComparison.Ordinal)
+            .Replace("\t", "/t", StringComparison.Ordinal)
+            .Replace("\n", "/n", StringComparison.Ordinal)
+            .Replace("\r", "/r", StringComparison.Ordinal)
+            .Replace("\v", "/v", StringComparison.Ordinal)
+            .Replace("\f", "/f", StringComparison.Ordinal)
+            .Replace("\a", "/a", StringComparison.Ordinal);
     }
 
     internal static string MapCommandScriptPaths(string script, string workingDirFull, string workingDirCanonical)
