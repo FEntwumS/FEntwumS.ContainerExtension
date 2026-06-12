@@ -62,7 +62,7 @@ public partial class DockerDiagnosticsView
                 try
                 {
                     // Compute a simple fingerprint to prevent layout thrashing on every tick
-                    var fp = HashCode.Combine(totalRuns, _searchFilter ?? string.Empty, retentionStr);
+                    var fp = HashCode.Combine(totalRuns, _searchFilter ?? string.Empty, retentionStr, _historySort.column, _historySort.ascending);
                     if (entries.Count > 0)
                     {
                         fp = HashCode.Combine(fp, entries[0].Timestamp);
