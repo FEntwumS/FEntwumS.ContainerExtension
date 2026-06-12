@@ -1391,19 +1391,23 @@ public partial class DockerDiagnosticsView : UserControl
                     throw new InvalidOperationException("Could not determine executing plugin directory.");
                 }
 
-                var dockerfilePath = Path.Combine(assemblyDir, "docker", "oss-cad-suite", "Dockerfile");
-                if (!File.Exists(dockerfilePath))
+                string? current = assemblyDir;
+                string? dockerfilePath = null;
+                for (int i = 0; i < 6; i++)
                 {
-                    // If not found in the bin output, check the relative source location for local development:
-                    var devPath = Path.GetFullPath(Path.Combine(assemblyDir, "..", "..", "..", "..", "docker", "oss-cad-suite", "Dockerfile"));
-                    if (File.Exists(devPath))
+                    if (string.IsNullOrEmpty(current)) break;
+                    var candidate = Path.Combine(current, "docker", "oss-cad-suite", "Dockerfile");
+                    if (File.Exists(candidate))
                     {
-                        dockerfilePath = devPath;
+                        dockerfilePath = candidate;
+                        break;
                     }
-                    else
-                    {
-                        throw new FileNotFoundException($"Local Dockerfile not found at '{dockerfilePath}'.");
-                    }
+                    current = Path.GetDirectoryName(current);
+                }
+
+                if (dockerfilePath == null)
+                {
+                    throw new FileNotFoundException($"Local Dockerfile not found in plugin directory or parent workspace paths. (Checked from base '{assemblyDir}')");
                 }
 
                 var buildContextDir = Path.GetDirectoryName(dockerfilePath);
