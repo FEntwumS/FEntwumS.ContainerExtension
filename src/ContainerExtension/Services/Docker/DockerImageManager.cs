@@ -160,7 +160,7 @@ public sealed class DockerImageManager
     public async Task<(int pulled, int failed)> UpdateAllImagesAsync(Action<string>? progress = null, CancellationToken ct = default)
     {
         using var activity = ImageActivitySource.StartActivity("DockerImageManager.UpdateAllImages");
-        
+
         // Host disk space check: require at least 1 GB of free space
         if (!CheckFreeDiskSpace(1024 * 1024 * 1024, out var spaceError))
         {
@@ -179,7 +179,7 @@ public sealed class DockerImageManager
 
             var platformRaw = SafeGetSetting<string>(ContainerExtensionModule.PlatformSetting, "auto");
             var platform = string.IsNullOrWhiteSpace(platformRaw) ? "auto" : (platformRaw.Contains(' ') ? platformRaw.Trim() : platformRaw);
-            
+
             var targets = new List<string>();
             var processedImageIds = new HashSet<string>(images.Count, StringComparer.Ordinal);
             foreach (var img in images)

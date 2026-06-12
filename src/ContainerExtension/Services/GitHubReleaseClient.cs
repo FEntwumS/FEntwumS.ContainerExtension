@@ -47,7 +47,7 @@ internal static class GitHubReleaseClient
         var client = HttpClientLazy.Value;
         using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com/repos/YosysHQ/oss-cad-suite-build/releases/latest");
         request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-        
+
         try
         {
             using var response = await client.SendAsync(request, ct).ConfigureAwait(false);
@@ -56,7 +56,7 @@ internal static class GitHubReleaseClient
                 throw new InvalidOperationException("GitHub API rate limit exceeded or access forbidden. Please check your internet connection or try again later.");
             }
             response.EnsureSuccessStatusCode();
-            
+
             using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             var res = await JsonSerializer.DeserializeAsync(stream, GitHubJsonContext.Default.GitHubReleaseResponse, ct).ConfigureAwait(false);
             var tag = res?.TagName?.Trim();

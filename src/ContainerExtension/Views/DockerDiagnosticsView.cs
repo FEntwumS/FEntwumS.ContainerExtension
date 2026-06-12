@@ -1582,22 +1582,22 @@ public partial class DockerDiagnosticsView : UserControl
                     throw new InvalidOperationException("Could not determine build context directory.");
                 }
                 var tag = "fentwums/oss-cad-suite:local";
-                var arch = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64 
-                    ? "linux-arm64" 
+                var arch = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64
+                    ? "linux-arm64"
                     : "linux-x64";
                 var extraArgs = $"--build-arg ARCH={arch} ";
 
                 if (selection == "latest")
                 {
                     ShowTemporaryStatus("Querying latest release tag from GitHub...");
-                    
+
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                     var latestTag = await ContainerExtension.Services.GitHubReleaseClient.GetLatestReleaseTagAsync(cts.Token).ConfigureAwait(true);
                     if (string.IsNullOrWhiteSpace(latestTag))
                     {
                         throw new InvalidOperationException("Failed to fetch the latest release tag from GitHub.");
                     }
-                    
+
                     var dateStr = latestTag.Replace("-", "", StringComparison.Ordinal);
                     extraArgs += $"--build-arg RELEASE_TAG={latestTag} --build-arg RELEASE_DATE={dateStr} ";
                     ShowTemporaryStatus($"Building newest release tag '{latestTag}' ({arch}) in terminal...");
@@ -1887,7 +1887,7 @@ public partial class DockerDiagnosticsView : UserControl
         };
 
         var mainPanel = new StackPanel { Spacing = 16 };
-        
+
         var headerPanel = new StackPanel { Spacing = 6 };
         var titleText = new TextBlock
         {
@@ -1962,7 +1962,7 @@ public partial class DockerDiagnosticsView : UserControl
             Padding = new Thickness(24),
             Child = mainPanel
         };
-        
+
         dialog.Content = wrapper;
         dialog.Closed += (s, e) => { tcs.TrySetResult(false); };
 
@@ -2211,7 +2211,8 @@ public partial class DockerDiagnosticsView : UserControl
         var currentMem = _settingsService.SafeGetSetting<double>(ContainerExtensionModule.MemoryLimitSetting, 0);
         var memValueText = new TextBlock { Text = currentMem == 0 ? "Unlimited" : $"{currentMem:N0} MB", Width = 90, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center, FontSize = 12, FontFamily = MonoFont };
         var memSlider = new Slider { Minimum = 0, Maximum = totalRam, Value = currentMem, SmallChange = 256, LargeChange = 1024, TickFrequency = 256, IsSnapToTickEnabled = true, VerticalAlignment = VerticalAlignment.Center };
-        memSlider.ValueChanged += (s, e) => {
+        memSlider.ValueChanged += (s, e) =>
+        {
             var val = Math.Round(memSlider.Value);
             memValueText.Text = val == 0 ? "Unlimited" : $"{val:N0} MB";
         };
@@ -2226,7 +2227,8 @@ public partial class DockerDiagnosticsView : UserControl
         var currentCpu = _settingsService.SafeGetSetting<double>(ContainerExtensionModule.CpuLimitSetting, 0);
         var cpuValueText = new TextBlock { Text = currentCpu == 0 ? "Unlimited" : $"{currentCpu:F1} Cores", Width = 90, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center, FontSize = 12, FontFamily = MonoFont };
         var cpuSlider = new Slider { Minimum = 0, Maximum = totalCores, Value = currentCpu, SmallChange = 0.5, LargeChange = 1.0, TickFrequency = 0.5, IsSnapToTickEnabled = true, VerticalAlignment = VerticalAlignment.Center };
-        cpuSlider.ValueChanged += (s, e) => {
+        cpuSlider.ValueChanged += (s, e) =>
+        {
             var val = Math.Round(cpuSlider.Value * 2.0) / 2.0;
             cpuValueText.Text = val == 0 ? "Unlimited" : $"{val:F1} Cores";
         };
@@ -2240,7 +2242,8 @@ public partial class DockerDiagnosticsView : UserControl
         var currentTimeout = _settingsService.SafeGetSetting<double>(ContainerExtensionModule.TimeoutSetting, 0);
         var timeoutValueText = new TextBlock { Text = currentTimeout == 0 ? "No timeout" : $"{currentTimeout:N0} min", Width = 90, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center, FontSize = 12, FontFamily = MonoFont };
         var timeoutSlider = new Slider { Minimum = 0, Maximum = 480, Value = currentTimeout, SmallChange = 5, LargeChange = 30, TickFrequency = 5, IsSnapToTickEnabled = true, VerticalAlignment = VerticalAlignment.Center };
-        timeoutSlider.ValueChanged += (s, e) => {
+        timeoutSlider.ValueChanged += (s, e) =>
+        {
             var val = Math.Round(timeoutSlider.Value);
             timeoutValueText.Text = val == 0 ? "No timeout" : $"{val:N0} min";
         };
@@ -2441,7 +2444,7 @@ public partial class DockerDiagnosticsView : UserControl
 
             runtimePathTextBox.Text = "";
             socketTextBox.Text = "";
-            
+
             errorText.IsVisible = false;
         });
 
@@ -2597,7 +2600,7 @@ public partial class DockerDiagnosticsView : UserControl
         out TextBlock valText, out TextBlock detailText, out Border accentBar)
     {
         var mainPanel = new StackPanel { Spacing = 4 };
-        
+
         var labelText = new TextBlock
         {
             Text = label,
@@ -2605,7 +2608,7 @@ public partial class DockerDiagnosticsView : UserControl
             FontWeight = FontWeight.Bold,
             Foreground = MutedColor
         };
-        
+
         valText = new TextBlock
         {
             Text = initialVal,
@@ -2613,7 +2616,7 @@ public partial class DockerDiagnosticsView : UserControl
             FontWeight = FontWeight.Bold,
             Foreground = FontColor
         };
-        
+
         detailText = new TextBlock
         {
             Text = initialDetail,
@@ -2636,9 +2639,9 @@ public partial class DockerDiagnosticsView : UserControl
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
         Grid.SetColumn(accentBar, 0);
         Grid.SetColumn(mainPanel, 1);
-        
+
         mainPanel.Margin = new Thickness(14, 10, 10, 10);
-        
+
         grid.Children.Add(accentBar);
         grid.Children.Add(mainPanel);
 
