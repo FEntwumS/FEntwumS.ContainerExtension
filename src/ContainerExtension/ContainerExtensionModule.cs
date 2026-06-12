@@ -106,6 +106,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     public const string DashboardTitle = "Container Dashboard";
 
     private static double _cachedHostMemoryMb = -1.0;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> PathValidationCache = new(StringComparer.Ordinal);
 
     internal static double GetHostMemoryMB()
     {
@@ -578,7 +579,17 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         {
             return true;
         }
+        if (PathValidationCache.TryGetValue(path, out var cached))
+        {
+            return cached;
+        }
+        var res = ValidateRuntimePathInternal(path);
+        PathValidationCache[path] = res;
+        return res;
+    }
 
+    private static bool ValidateRuntimePathInternal(string path)
+    {
         if (System.IO.File.Exists(path))
         {
             return true;

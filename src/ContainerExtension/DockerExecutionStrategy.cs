@@ -518,16 +518,24 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             }
         }
         _client = config.CreateClient(apiVersion);
-
-        _connectionProvider = new DockerConnectionProvider(_client);
-        _imageManager = new DockerImageManager(_client, _settingsService);
-        _containerManager = new DockerContainerManager(_client);
-
-        if (Interlocked.CompareExchange(ref _staticClientForCleanup, _client, null) is null)
+        try
         {
-            AppDomain.CurrentDomain.ProcessExit += CleanupDanglingContainers;
-            _cancelKeyPressHandler = (s, e) => CleanupDanglingContainers(s, e);
-            Console.CancelKeyPress += _cancelKeyPressHandler;
+            _connectionProvider = new DockerConnectionProvider(_client);
+            _imageManager = new DockerImageManager(_client, _settingsService);
+            _containerManager = new DockerContainerManager(_client);
+
+            if (Interlocked.CompareExchange(ref _staticClientForCleanup, _client, null) is null)
+            {
+                AppDomain.CurrentDomain.ProcessExit += CleanupDanglingContainers;
+                _cancelKeyPressHandler = (s, e) => CleanupDanglingContainers(s, e);
+                Console.CancelKeyPress += _cancelKeyPressHandler;
+            }
+        }
+        catch
+        {
+            _connectionProvider?.Dispose();
+            _client.Dispose();
+            throw;
         }
     }
 
