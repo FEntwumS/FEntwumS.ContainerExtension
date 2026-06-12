@@ -2306,7 +2306,7 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.NotNull(task);
         _ = await task.ConfigureAwait(true);
 
-        Assert.Single(dnsCache);
+        Assert.Equal(46, dnsCache.Count);
         Assert.True(dnsCache.ContainsKey("localhost"));
     }
 

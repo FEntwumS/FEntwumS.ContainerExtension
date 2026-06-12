@@ -43,14 +43,31 @@ public partial class DockerDiagnosticsView
             {
                 if (existingWindow != null)
                 {
-                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    bool success = false;
+                    try
                     {
-                        existingWindow.Show();
-                        existingWindow.Activate();
-                        existingWindow.Focus();
-                    });
+                        await Dispatcher.UIThread.InvokeAsync(() =>
+                        {
+                            existingWindow.Show();
+                            existingWindow.Activate();
+                            existingWindow.Focus();
+                        });
+                        success = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "LogsCommand_ReopenDisposedWindow", ex);
+                        _openLogWindows.TryRemove(logContainerId, out _);
+                    }
+                    if (success)
+                    {
+                        return;
+                    }
                 }
-                return;
+                else
+                {
+                    return;
+                }
             }
             _openLogWindows[logContainerId] = null!;
 

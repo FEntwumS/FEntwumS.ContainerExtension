@@ -82,7 +82,26 @@ public static partial class RegistryClient
         {
             if (DnsCache.Count >= 50)
             {
-                DnsCache.Clear();
+                var currentTicks = Environment.TickCount64;
+                var expiredKeys = DnsCache.Where(kvp => (currentTicks - kvp.Value.cacheTimeTicks) >= 60_000)
+                                          .Select(kvp => kvp.Key)
+                                          .ToList();
+                foreach (var k in expiredKeys)
+                {
+                    DnsCache.TryRemove(k, out _);
+                }
+
+                if (DnsCache.Count >= 50)
+                {
+                    var oldestKeys = DnsCache.OrderBy(kvp => kvp.Value.cacheTimeTicks)
+                                             .Take(DnsCache.Count - 45)
+                                             .Select(kvp => kvp.Key)
+                                             .ToList();
+                    foreach (var k in oldestKeys)
+                    {
+                        DnsCache.TryRemove(k, out _);
+                    }
+                }
             }
             DnsCache[host] = (ips, Environment.TickCount64);
         }
@@ -249,8 +268,12 @@ public static partial class RegistryClient
                     {
                         var parts = ParseImageReference(key);
 
-                        if (parts.Registry.Contains("http:", StringComparison.OrdinalIgnoreCase) ||
-                            parts.Registry.Contains("http", StringComparison.OrdinalIgnoreCase))
+                        bool isLoopback = string.Equals(parts.Registry, "localhost", StringComparison.OrdinalIgnoreCase) ||
+                                          parts.Registry.StartsWith("localhost:", StringComparison.OrdinalIgnoreCase) ||
+                                          parts.Registry.StartsWith("127.0.0.1", StringComparison.OrdinalIgnoreCase);
+
+                        if (!isLoopback && (parts.Registry.Contains("http:", StringComparison.OrdinalIgnoreCase) ||
+                                            parts.Registry.Contains("http", StringComparison.OrdinalIgnoreCase)))
                         {
                             throw new RegistryConnectionException("Non-SSL / HTTP registries are strictly prohibited.");
                         }
@@ -272,14 +295,22 @@ public static partial class RegistryClient
                         }
 
                         List<string> result;
-                        if (GhcrRegistries.Contains(parts.Registry))
+                        if (string.IsNullOrEmpty(parts.Registry) ||
+                            string.Equals(parts.Registry, "docker.io", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(parts.Registry, "registry-1.docker.io", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(parts.Registry, "index.docker.io", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(parts.Registry, "hub.docker.com", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string ns = string.IsNullOrEmpty(parts.Namespace) ? "library" : parts.Namespace;
+                            result = await FetchDockerHubTagsAsync(ns, parts.Repository, ct).ConfigureAwait(false);
+                        }
+                        else if (GhcrRegistries.Contains(parts.Registry))
                         {
                             result = await FetchGhcrTagsAsync(parts.Namespace, parts.Repository, ct).ConfigureAwait(false);
                         }
                         else
                         {
-                            string ns = string.IsNullOrEmpty(parts.Namespace) ? "library" : parts.Namespace;
-                            result = await FetchDockerHubTagsAsync(ns, parts.Repository, ct).ConfigureAwait(false);
+                            result = await FetchGenericV2TagsAsync(parts.Registry, parts.Namespace, parts.Repository, ct).ConfigureAwait(false);
                         }
 
                         AddToCache(key, result);
@@ -291,7 +322,6 @@ public static partial class RegistryClient
                     }
                     catch (TimeoutException ex)
                     {
-                        AddToCache(key, []);
                         var scrubbedMsg = ScrubSecrets(ex.Message);
                         global::ContainerExtension.ContainerTelemetry.TrackError("RegistryClient", $"HTTP request timed out: {scrubbedMsg}", ex);
                         return [];
@@ -305,20 +335,22 @@ public static partial class RegistryClient
                     }
                     catch (HttpRequestException ex)
                     {
-                        AddToCache(key, []);
-                        if (ex.StatusCode != System.Net.HttpStatusCode.NotFound && ex.StatusCode != System.Net.HttpStatusCode.Unauthorized)
+                        if (ex.StatusCode == System.Net.HttpStatusCode.NotFound || ex.StatusCode == System.Net.HttpStatusCode.Unauthorized || ex.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                        {
+                            AddToCache(key, []);
+                        }
+                        else
                         {
                             var scrubbedMsg = ScrubSecrets(ex.Message);
-                            global::ContainerExtension.ContainerTelemetry.TrackError("RegistryClient", $"HTTP request failed: {scrubbedMsg}", null);
+                            global::ContainerExtension.ContainerTelemetry.TrackError("RegistryClient", $"HTTP request failed (transient): {scrubbedMsg}", null);
                         }
                         return [];
                     }
                     catch (Exception ex) when (ex is not OutOfMemoryException)
                     {
-                        AddToCache(key, []);
                         var scrubbedMsg = ScrubSecrets(ex.Message);
                         var scrubbedEx = new RegistryConnectionException(scrubbedMsg, ex);
-                        global::ContainerExtension.ContainerTelemetry.TrackError("RegistryClient", "Global fetch trap triggered", scrubbedEx);
+                        global::ContainerExtension.ContainerTelemetry.TrackError("RegistryClient", "Global fetch trap triggered (transient)", scrubbedEx);
                         return [];
                     }
                     finally
@@ -594,6 +626,114 @@ public static partial class RegistryClient
             return list;
         }
 
+        return [];
+    }
+
+    private static string? GetDockerAuthHeader(string registry)
+    {
+        try
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var configPath = Path.Combine(home, ".docker", "config.json");
+            if (!File.Exists(configPath))
+            {
+                return null;
+            }
+            using (var fs = new FileStream(configPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var doc = JsonDocument.Parse(fs))
+            {
+                var root = doc.RootElement;
+                if (root.TryGetProperty("auths", out var auths))
+                {
+                    foreach (var prop in auths.EnumerateObject())
+                    {
+                        var key = prop.Name;
+                        bool match = false;
+                        if (string.Equals(registry, "hub.docker.com", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(registry, "docker.io", StringComparison.OrdinalIgnoreCase) ||
+                            string.IsNullOrEmpty(registry))
+                        {
+                            match = key.Contains("docker.io") || key.Contains("docker.com");
+                        }
+                        else
+                        {
+                            var cleanKey = key;
+                            if (cleanKey.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                            {
+                                cleanKey = cleanKey[8..];
+                            }
+                            else if (cleanKey.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+                            {
+                                cleanKey = cleanKey[7..];
+                            }
+                            cleanKey = cleanKey.TrimEnd('/');
+                            match = string.Equals(cleanKey, registry, StringComparison.OrdinalIgnoreCase);
+                        }
+                        if (match && prop.Value.TryGetProperty("auth", out var authProp))
+                        {
+                            var authVal = authProp.GetString();
+                            if (!string.IsNullOrEmpty(authVal))
+                            {
+                                return "Basic " + authVal;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Ignore
+        }
+        return null;
+    }
+
+    private static async Task<List<string>> FetchGenericV2TagsAsync(string registry, string ns, string repo, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(repo)) return [];
+        var registryHost = string.IsNullOrEmpty(registry) ? "registry-1.docker.io" : registry;
+        var scheme = "https";
+        if (string.Equals(registryHost, "localhost", StringComparison.OrdinalIgnoreCase) ||
+            registryHost.StartsWith("localhost:", StringComparison.OrdinalIgnoreCase) ||
+            registryHost.StartsWith("127.0.0.1", StringComparison.OrdinalIgnoreCase))
+        {
+            scheme = "http";
+        }
+        var scopeRepo = string.IsNullOrEmpty(ns) ? repo : $"{ns}/{repo}";
+        var url = $"{scheme}://{registryHost}/v2/{scopeRepo}/tags/list";
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        var authHeader = GetDockerAuthHeader(registryHost);
+        if (authHeader != null)
+        {
+            request.Headers.TryAddWithoutValidation("Authorization", authHeader);
+        }
+        using var response = await SendWithRetryAsync(request, cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        GhcrTagsResponse? tagsRes;
+        try
+        {
+            tagsRes = await JsonSerializer.DeserializeAsync(stream, RegistryJsonContext.Default.GhcrTagsResponse, cancellationToken).ConfigureAwait(false);
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+        if (tagsRes?.Tags != null)
+        {
+            var rawTags = tagsRes.Tags;
+            var list = new List<string>(Math.Min(20, rawTags.Count));
+            for (int i = rawTags.Count - 1; i >= 0 && list.Count < 20; i--)
+            {
+                var t = rawTags[i];
+                if (!string.IsNullOrEmpty(t))
+                {
+                    list.Add(t);
+                }
+            }
+            return list;
+        }
         return [];
     }
 

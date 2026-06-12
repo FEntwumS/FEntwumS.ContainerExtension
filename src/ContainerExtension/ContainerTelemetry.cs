@@ -411,33 +411,6 @@ public static partial class ContainerTelemetry
     private static readonly SearchValues<byte> WhiteSpaceBytes = SearchValues.Create(" \t\r\n"u8);
     private static bool IsBytesWhiteSpace(ReadOnlySpan<byte> span)
     {
-        if (System.Numerics.Vector.IsHardwareAccelerated && span.Length >= System.Numerics.Vector<byte>.Count)
-        {
-            var vSpace = new System.Numerics.Vector<byte>((byte)' ');
-            var vTab = new System.Numerics.Vector<byte>((byte)'\t');
-            var vCr = new System.Numerics.Vector<byte>((byte)'\r');
-            var vLf = new System.Numerics.Vector<byte>((byte)'\n');
-            int i = 0;
-            int limit = span.Length - System.Numerics.Vector<byte>.Count;
-            for (; i <= limit; i += System.Numerics.Vector<byte>.Count)
-            {
-                var v = new System.Numerics.Vector<byte>(span.Slice(i));
-                var eqSpace = System.Numerics.Vector.Equals(v, vSpace);
-                var eqTab = System.Numerics.Vector.Equals(v, vTab);
-                var eqCr = System.Numerics.Vector.Equals(v, vCr);
-                var eqLf = System.Numerics.Vector.Equals(v, vLf);
-                var isWS = eqSpace | eqTab | eqCr | eqLf;
-                if (isWS != System.Numerics.Vector<byte>.AllBitsSet)
-                {
-                    return false;
-                }
-            }
-            if (i < span.Length)
-            {
-                return !span.Slice(i).ContainsAnyExcept(WhiteSpaceBytes);
-            }
-            return true;
-        }
         return !span.ContainsAnyExcept(WhiteSpaceBytes);
     }
 
@@ -614,7 +587,7 @@ public static partial class ContainerTelemetry
             {
                 try
                 {
-                    acquired = mutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
+                    acquired = mutex?.WaitOne(TimeSpan.FromSeconds(10)) ?? true;
                 }
                 catch (AbandonedMutexException)
                 {
@@ -815,7 +788,7 @@ public static partial class ContainerTelemetry
             {
                 try
                 {
-                    acquired = mutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
+                    acquired = mutex?.WaitOne(TimeSpan.FromSeconds(10)) ?? true;
                 }
                 catch (AbandonedMutexException)
                 {
@@ -1609,56 +1582,12 @@ public static partial class ContainerTelemetry
                 return;
             }
 
-            var q = new Queue<string>(maxEntries);
-            int readDelay = 15;
-            bool readSuccess = false;
-            for (int attempt = 0; attempt < 5; attempt++)
-            {
-                if (Volatile.Read(ref _isShutdown) == 1)
-                {
-                    return;
-                }
-                try
-                {
-                    using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-                    using (var reader = new StreamReader(stream))
-                    {
-                        string? line;
-                        while ((line = reader.ReadLine()) != null)
-                        {
-                            if (line.Length > 65536)
-                            {
-                                line = line[..65536];
-                            }
-                            if (line.AsSpan().IsWhiteSpace())
-                            {
-                                continue;
-                            }
-                            q.Enqueue(line);
-                            if (q.Count > maxEntries)
-                            {
-                                q.Dequeue();
-                            }
-                        }
-                    }
-                    readSuccess = true;
-                    break;
-                }
-                catch (IOException)
-                {
-                    if (attempt == 4)
-                    {
-                        break;
-                    }
-                    Thread.Sleep(readDelay);
-                    readDelay *= 2;
-                }
-            }
-
-            if (!readSuccess)
+            var q = ReadLastLinesSafe(path, maxEntries);
+            if (q.Count == 0)
             {
                 return;
             }
+            // ReadLastLinesSafe already returns chronological order (oldest first) because it calls results.Reverse() internally.
 
             var tempPath = path + ".tmp";
             try
@@ -1750,13 +1679,13 @@ public static partial class ContainerTelemetry
                             }
                             catch (Exception)
                             {
-                                // Best-effort file permission enforcement 
+                                // Ignore
                             }
                         }
                     }
                     catch
                     {
-                        // Ignore
+                        // Best-effort fallback
                     }
                 }
             }

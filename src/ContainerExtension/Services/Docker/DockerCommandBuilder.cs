@@ -1427,6 +1427,28 @@ internal static class DockerCommandBuilder
         return false;
     }
 
+    private static string? FindProjectFile(string startDir)
+    {
+        try
+        {
+            var current = new DirectoryInfo(startDir);
+            while (current != null && current.Exists)
+            {
+                var files = current.GetFiles("*.fpgaproj");
+                if (files.Length > 0)
+                {
+                    return files[0].FullName;
+                }
+                current = current.Parent;
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Ignore
+        }
+        return null;
+    }
+
     private static string? FindLibraryForUnit(string workingDir, string unitName)
     {
         try
@@ -1436,14 +1458,8 @@ internal static class DockerCommandBuilder
                 return null;
             }
 
-            var projFiles = Directory.GetFiles(workingDir, "*.fpgaproj");
-            if (projFiles.Length == 0)
-            {
-                return null;
-            }
-
-            var projFile = projFiles[0];
-            if (!File.Exists(projFile))
+            var projFile = FindProjectFile(workingDir);
+            if (projFile == null || !File.Exists(projFile))
             {
                 return null;
             }
@@ -1494,14 +1510,8 @@ internal static class DockerCommandBuilder
                 return null;
             }
 
-            var projFiles = Directory.GetFiles(workingDir, "*.fpgaproj");
-            if (projFiles.Length == 0)
-            {
-                return null;
-            }
-
-            var projFile = projFiles[0];
-            if (!File.Exists(projFile))
+            var projFile = FindProjectFile(workingDir);
+            if (projFile == null || !File.Exists(projFile))
             {
                 return null;
             }

@@ -797,6 +797,58 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                rUpper.IndexOf("SSH_AUTH_SOCK".AsSpan(), StringComparison.Ordinal) >= 0;
     }
 
+    private static async Task<(bool live, string? errorMessage)> IsUnixSocketLiveAndWritableAsync(string path, CancellationToken ct = default)
+    {
+        if (!File.Exists(path))
+        {
+            return (false, null);
+        }
+        try
+        {
+            using var socket = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.Unix, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Unspecified);
+            var ep = new System.Net.Sockets.UnixDomainSocketEndPoint(path);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(1000);
+            try
+            {
+                await socket.ConnectAsync(ep, timeoutCts.Token).ConfigureAwait(false);
+                return (true, null);
+            }
+            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
+            {
+                return (false, $"Timeout connecting to UNIX socket '{path}'.");
+            }
+        }
+        catch (System.Net.Sockets.SocketException ex)
+        {
+            var nativeCode = ex.NativeErrorCode;
+            var socketCode = ex.SocketErrorCode;
+            string? errorMessage;
+            if (socketCode == System.Net.Sockets.SocketError.AccessDenied ||
+                nativeCode == 13 ||
+                nativeCode == 1 ||
+                nativeCode == 10013)
+            {
+                errorMessage = $"Access Denied: Current user does not have permission to access socket '{path}'. Ensure correct group membership (e.g. 'docker').";
+            }
+            else if (socketCode == System.Net.Sockets.SocketError.ConnectionRefused ||
+                     nativeCode == 111 ||
+                     nativeCode == 61)
+            {
+                errorMessage = $"Connection Refused: Docker daemon socket at '{path}' is not running or active.";
+            }
+            else
+            {
+                errorMessage = $"Socket Error ({socketCode}, Native: {nativeCode}): {ex.Message}";
+            }
+            return (false, errorMessage);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return (false, $"Unknown connection failure for socket '{path}': {ex.Message}");
+        }
+    }
+
     private static bool IsUnixSocketLiveAndWritable(string path, out string? errorMessage, CancellationToken ct = default)
     {
         errorMessage = null;
@@ -909,7 +961,8 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                     blockedPaths = new[]
                     {
                         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows)),
-                        @"C:\Windows"
+                        @"C:\Windows",
+                        @"\\.\pipe"
                     };
                 }
                 else
@@ -917,6 +970,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                     blockedPaths = new[]
                     {
                         "/etc",
+                        "/var/run",
                         "/var/run/docker.sock",
                         "/var/run/containerd",
                         "/proc",
@@ -1305,8 +1359,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 }
                 try
                 {
-                    await readOutTask.ConfigureAwait(false);
-                    await readErrTask.ConfigureAwait(false);
+                    await Task.WhenAny(Task.WhenAll(readOutTask, readErrTask), Task.Delay(500, CancellationToken.None)).ConfigureAwait(false);
                 }
                 catch
                 {
@@ -2064,7 +2117,8 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             if (_daemonUri.Scheme.Equals("unix", StringComparison.OrdinalIgnoreCase))
             {
                 var socketPath = _daemonUri.LocalPath;
-                if (!IsUnixSocketLiveAndWritable(socketPath, out var socketErr, ct))
+                var (live, socketErr) = await IsUnixSocketLiveAndWritableAsync(socketPath, ct).ConfigureAwait(false);
+                if (!live)
                 {
                     throw new DockerExecutionException(socketErr ?? $"Docker socket at '{socketPath}' is not active or readable.");
                 }
