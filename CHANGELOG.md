@@ -4,6 +4,21 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-06-12
+
+### Added
+- **Sanitized Environment Values**: Sanitize env values in `.env` files to prevent nested command injection (strips backticks and `$()` command substitutions).
+- **fpgaproj-based GHDL Library Mapping**: Custom GHDL library mappings from `.fpgaproj` configuration files are now parsed and respected in `--work` arguments.
+- **Deduplicated Disk Usage**: Integrated a raw socket HTTP client fallback querying the Docker daemon's `/system/df` endpoint to report accurate copy-on-write disk usage instead of raw summation.
+- **Fractional CPU Cores Support**: CPU limits settings slider now supports snapping and saving in `0.5` fractional core steps (e.g. 1.5 cores).
+
+### Fixed
+- **Settings Dialog UI & DPI Polish**: Redesigned settings dialog layout with a dynamic resizable Grid (header, scroll area, error label, footer) and auto-size margins/heights to prevent clipping on High-DPI screens. Displays dialog modally via `ShowDialog(parent)`.
+- **Auto-Hiding Validation Errors**: Hooked text-changed and value-changed events recursively on input controls to hide stale validation labels immediately as the user edits fields.
+- **Parallel Image Pull Optimization**: Refactored the sequential update loop to fetch image updates in parallel (bounded by `PullSemaphore` limit 2).
+- **Win32 Named Pipe Trust Validation**: Hardened Windows Named Pipe process trust validation to fail-closed on Win32 API errors.
+- **Exit Teardown Robustness**: Replaced ThreadPool-based asynchronous calls in the process exit handler with a fast synchronous clean-up task to prevent hangs and orphan containers during IDE exit.
+
 ## [1.0.2] - 2026-06-12
 
 ### Added

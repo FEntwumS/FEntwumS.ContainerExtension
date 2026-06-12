@@ -83,9 +83,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             using var hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
             if (hProcess == null || hProcess.IsInvalid)
             {
-                var err = System.Runtime.InteropServices.Marshal.GetLastPInvokeError();
-                if (err == 5) return true; // ERROR_ACCESS_DENIED implies higher privilege (e.g. SYSTEM)
-                return false;
+                return false; // Fail closed
             }
 
             if (OpenProcessToken(hProcess, TOKEN_QUERY, out var hToken))
@@ -102,11 +100,6 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                     bool isCurrentUser = identity.User != null && currentIdentity.User != null && identity.User.Equals(currentIdentity.User);
                     return isAdmin || isSystem || isCurrentUser;
                 }
-            }
-            else
-            {
-                var err = System.Runtime.InteropServices.Marshal.GetLastPInvokeError();
-                if (err == 5) return true; // ERROR_ACCESS_DENIED
             }
         }
         catch (PlatformNotSupportedException)
@@ -318,14 +311,27 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             {
                 if (uriText.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
                 {
-                    Console.WriteLine("[WARN] Insecure HTTP custom daemon socket requested. Upgrading to https://");
-                    uriText = "https" + uriText[4..];
+                    bool isLocal = uriText.Contains("localhost", StringComparison.OrdinalIgnoreCase) ||
+                                   uriText.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                                   uriText.Contains("[::1]", StringComparison.Ordinal);
+                    if (!isLocal)
+                    {
+                        Console.WriteLine("[WARN] Insecure HTTP custom daemon socket requested. Upgrading to https://");
+                        uriText = "https" + uriText[4..];
+                    }
                 }
                 uri = new Uri(uriText);
                 if (uri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase))
                 {
-                    Console.WriteLine("[WARN] Insecure HTTP custom daemon socket scheme. Upgrading to HTTPS.");
-                    uri = new UriBuilder(uri) { Scheme = "https" }.Uri;
+                    bool isLocal = uri.Host != null && (
+                                   uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                                   uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                                   uri.Host.Equals("::1", StringComparison.Ordinal));
+                    if (!isLocal)
+                    {
+                        Console.WriteLine("[WARN] Insecure HTTP custom daemon socket scheme. Upgrading to HTTPS.");
+                        uri = new UriBuilder(uri) { Scheme = "https" }.Uri;
+                    }
                 }
 
                 if (uri.Scheme.Equals("ssh", StringComparison.OrdinalIgnoreCase))
@@ -355,35 +361,6 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                         var warningMsg = $"[SECURITY WARNING] Connecting to a remote Docker daemon at '{uri.Host}'. Outbound traffic may expose credentials.";
                         Console.Error.WriteLine(warningMsg);
                         ContainerTelemetry.TrackError("DockerExecutionStrategy", "RemoteDaemonWarning", null, warningMsg);
-
-                        SafeInvoke(() =>
-                        {
-                            try
-                            {
-                                var warningWindow = new Avalonia.Controls.Window
-                                {
-                                    Title = "Security Warning",
-                                    Width = 400,
-                                    Height = 150,
-                                    WindowStartupLocation = Avalonia.Controls.WindowStartupLocation.CenterScreen,
-                                    CanResize = false,
-                                    Topmost = true
-                                };
-                                var panel = new Avalonia.Controls.StackPanel { Margin = new Avalonia.Thickness(16), Spacing = 12 };
-                                panel.Children.Add(new Avalonia.Controls.TextBlock
-                                {
-                                    Text = $"You are connecting to a custom remote daemon at '{uri.Host}'. Make sure you trust this connection.",
-                                    TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-                                    FontSize = 12
-                                });
-                                var okBtn = new Avalonia.Controls.Button { Content = "OK", Width = 60, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
-                                okBtn.Click += (s, e) => warningWindow.Close();
-                                panel.Children.Add(okBtn);
-                                warningWindow.Content = panel;
-                                warningWindow.Show();
-                            }
-                            catch { /* Ignore if UI service not available yet */ }
-                        });
                     }
                 }
                 runtime = uriText.Contains("podman", StringComparison.OrdinalIgnoreCase) ? "podman" : "docker (custom)";
@@ -1461,63 +1438,30 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             return;
         }
 
-        var channel = Channel.CreateUnbounded<(string id, bool shouldRemove)>(new UnboundedChannelOptions
-        {
-            SingleWriter = true,
-            SingleReader = false
-        });
-
-        var count = ActiveContainers.Count;
-        if (count == 0)
+        var keys = ActiveContainers.Keys;
+        if (keys.Count == 0)
         {
             return;
         }
-        var workerCount = Math.Clamp(count, 1, 4);
-        var workers = new Task[workerCount];
 
-        for (int i = 0; i < workerCount; i++)
-        {
-            workers[i] = Task.Run(async () =>
-            {
-                var reader = channel.Reader;
-                await foreach (var item in reader.ReadAllAsync().ConfigureAwait(false))
-                {
-                    try
-                    {
-                        await _staticClientForCleanup.Containers.StopContainerAsync(item.id, new ContainerStopParameters { WaitBeforeKillSeconds = 2 }).ConfigureAwait(false);
-                        if (item.shouldRemove)
-                        {
-                            await _staticClientForCleanup.Containers.RemoveContainerAsync(item.id, new ContainerRemoveParameters { Force = true }).ConfigureAwait(false);
-                        }
-                    }
-                    catch
-                    {
-                        // Best effort on exit
-                    }
-                }
-            });
-        }
-
-        var writer = channel.Writer;
-        var keys = ActiveContainers.Keys;
         foreach (var key in keys)
         {
             if (ActiveContainers.TryRemove(key, out var shouldAutoRemove))
             {
-                writer.TryWrite((key, shouldAutoRemove));
+                try
+                {
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    _staticClientForCleanup.Containers.StopContainerAsync(key, new ContainerStopParameters { WaitBeforeKillSeconds = 1 }, cts.Token).GetAwaiter().GetResult();
+                    if (shouldAutoRemove)
+                    {
+                        _staticClientForCleanup.Containers.RemoveContainerAsync(key, new ContainerRemoveParameters { Force = true }, cts.Token).GetAwaiter().GetResult();
+                    }
+                }
+                catch (Exception)
+                {
+                    // Best effort on exit
+                }
             }
-        }
-        writer.Complete();
-
-        try
-        {
-#pragma warning disable VSTHRD002
-            Task.WaitAll(workers, 3000);
-#pragma warning restore VSTHRD002
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            ContainerTelemetry.TrackError("DockerExecutionStrategy", "Orphan cleanup error", ex);
         }
     }
 
@@ -1722,13 +1666,27 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
 
             try
             {
-                await _client.Images.CreateImageAsync(pullParams, null, progressHandler, ct).ConfigureAwait(false);
+                try
+                {
+                    await _client.Images.CreateImageAsync(pullParams, null, progressHandler, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && !string.IsNullOrWhiteSpace(pullParams.Platform))
+                {
+                    SdkLog(command, $"[Docker Pull Warning] Pull failed with platform '{pullParams.Platform}': {ex.Message}. Falling back to default host architecture.");
+                    pullParams.Platform = null;
+                    await _client.Images.CreateImageAsync(pullParams, null, progressHandler, ct).ConfigureAwait(false);
+                }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && !string.IsNullOrWhiteSpace(pullParams.Platform))
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                SdkLog(command, $"[Docker Pull Warning] Pull failed with platform '{pullParams.Platform}': {ex.Message}. Falling back to default host architecture.");
-                pullParams.Platform = null;
-                await _client.Images.CreateImageAsync(pullParams, null, progressHandler, ct).ConfigureAwait(false);
+                if (imageExistsLocally)
+                {
+                    SdkLog(command, $"[Docker Pull Warning] Pull failed for '{image}': {ex.Message}. Falling back to cached local version.");
+                }
+                else
+                {
+                    throw;
+                }
             }
 
             SdkLog(command, $"[Docker SDK] Pull complete for '{image}'.");

@@ -22,10 +22,23 @@ public partial class DockerDiagnosticsView
 {
     private int _lastTelemetryFingerprint;
     private int _currentTelemetryToken;
+    private long _lastTelemetryPopulationTime;
 
     /// <summary>Populates the Execution History section with a tabular display of the last 10 telemetry entries and aggregate stats.</summary>
     private async Task PopulateTelemetryAsync()
     {
+        var now = Environment.TickCount64;
+        var last = Volatile.Read(ref _lastTelemetryPopulationTime);
+        if (now - last < 250)
+        {
+            await Task.Delay(250).ConfigureAwait(false);
+            if (Environment.TickCount64 - Volatile.Read(ref _lastTelemetryPopulationTime) < 250)
+            {
+                return;
+            }
+        }
+        Volatile.Write(ref _lastTelemetryPopulationTime, Environment.TickCount64);
+
         var localToken = System.Threading.Interlocked.Increment(ref _currentTelemetryToken);
         try
         {

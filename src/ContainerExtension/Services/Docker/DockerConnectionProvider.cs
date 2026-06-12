@@ -132,9 +132,12 @@ public sealed class DockerConnectionProvider : IDisposable
             return false;
         }
 
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+
         try
         {
-            await _client.System.PingAsync(ct).ConfigureAwait(false);
+            await _client.System.PingAsync(timeoutCts.Token).ConfigureAwait(false);
             lock (_stateLock)
             {
                 if (!_lastStateConnected)
@@ -225,9 +228,12 @@ public sealed class DockerConnectionProvider : IDisposable
             return null;
         }
 
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+
         try
         {
-            var info = await _client.System.GetSystemInfoAsync(ct).ConfigureAwait(false);
+            var info = await _client.System.GetSystemInfoAsync(timeoutCts.Token).ConfigureAwait(false);
             lock (_stateLock)
             {
                 if (!_lastSystemInfoSucceeded)

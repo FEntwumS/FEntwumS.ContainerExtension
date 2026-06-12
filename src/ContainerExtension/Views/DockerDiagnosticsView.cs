@@ -2103,13 +2103,19 @@ public partial class DockerDiagnosticsView : UserControl
         var dialog = new Window
         {
             Title = "Configure Container Engine Settings",
+            MinWidth = 520,
+            MinHeight = 500,
             Width = 520,
             Height = 650,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = true
         };
 
-        var mainPanel = new StackPanel { Spacing = 16 };
+        var mainGrid = new Grid
+        {
+            RowDefinitions = new RowDefinitions("Auto,*,Auto,Auto"),
+            RowSpacing = 16
+        };
 
         var headerPanel = new StackPanel { Spacing = 6 };
         var titleText = new TextBlock
@@ -2129,7 +2135,8 @@ public partial class DockerDiagnosticsView : UserControl
         };
         headerPanel.Children.Add(titleText);
         headerPanel.Children.Add(separator);
-        mainPanel.Children.Add(headerPanel);
+        Grid.SetRow(headerPanel, 0);
+        mainGrid.Children.Add(headerPanel);
 
         var formPanel = new StackPanel { Spacing = 12 };
 
@@ -2137,7 +2144,7 @@ public partial class DockerDiagnosticsView : UserControl
         formPanel.Children.Add(CreateFormSectionHeader("IMAGE & EXECUTION"));
 
         var defaultImage = _settingsService.SafeGetSetting(ContainerExtensionModule.DefaultImageSetting, ContainerExtensionModule.FallbackImage);
-        var defaultImageTextBox = new TextBox { Text = defaultImage, FontSize = 12, Height = 28, VerticalContentAlignment = VerticalAlignment.Center };
+        var defaultImageTextBox = new TextBox { Text = defaultImage, FontSize = 12, MinHeight = 28, VerticalContentAlignment = VerticalAlignment.Center };
         formPanel.Children.Add(CreateFormItem("Default Toolchain Image", "The default container image to pull and use for all tools.", defaultImageTextBox));
 
         var pullPolicy = _settingsService.SafeGetSetting(ContainerExtensionModule.PullPolicySetting, "if-not-present");
@@ -2190,11 +2197,11 @@ public partial class DockerDiagnosticsView : UserControl
 
         var totalCores = (double)Environment.ProcessorCount;
         var currentCpu = _settingsService.SafeGetSetting<double>(ContainerExtensionModule.CpuLimitSetting, 0);
-        var cpuValueText = new TextBlock { Text = currentCpu == 0 ? "Unlimited" : $"{currentCpu:N0} Cores", Width = 90, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center, FontSize = 12, FontFamily = MonoFont };
-        var cpuSlider = new Slider { Minimum = 0, Maximum = totalCores, Value = currentCpu, SmallChange = 1, LargeChange = 2, TickFrequency = 1, IsSnapToTickEnabled = true, VerticalAlignment = VerticalAlignment.Center };
+        var cpuValueText = new TextBlock { Text = currentCpu == 0 ? "Unlimited" : $"{currentCpu:F1} Cores", Width = 90, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center, FontSize = 12, FontFamily = MonoFont };
+        var cpuSlider = new Slider { Minimum = 0, Maximum = totalCores, Value = currentCpu, SmallChange = 0.5, LargeChange = 1.0, TickFrequency = 0.5, IsSnapToTickEnabled = true, VerticalAlignment = VerticalAlignment.Center };
         cpuSlider.ValueChanged += (s, e) => {
-            var val = Math.Round(cpuSlider.Value);
-            cpuValueText.Text = val == 0 ? "Unlimited" : $"{val:N0} Cores";
+            var val = Math.Round(cpuSlider.Value * 2.0) / 2.0;
+            cpuValueText.Text = val == 0 ? "Unlimited" : $"{val:F1} Cores";
         };
         var cpuGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,12,Auto") };
         Grid.SetColumn(cpuSlider, 0);
@@ -2229,11 +2236,11 @@ public partial class DockerDiagnosticsView : UserControl
         formPanel.Children.Add(CreateFormItem("Allow Privileged Mode", "Runs containers with privileged capabilities (required in some complex mounting setups).", allowPrivilegedCheckBox));
 
         var namePrefix = _settingsService.SafeGetSetting(ContainerExtensionModule.ContainerNamePrefixSetting, "containerextension-");
-        var prefixTextBox = new TextBox { Text = namePrefix, FontSize = 12, Height = 28, VerticalContentAlignment = VerticalAlignment.Center };
+        var prefixTextBox = new TextBox { Text = namePrefix, FontSize = 12, MinHeight = 28, VerticalContentAlignment = VerticalAlignment.Center };
         formPanel.Children.Add(CreateFormItem("Container Name Prefix", "Prefix assigned to all containers spawned by this extension.", prefixTextBox));
 
         var extraFlags = _settingsService.SafeGetSetting(ContainerExtensionModule.ExtraFlagsSetting, "");
-        var extraFlagsTextBox = new TextBox { Text = extraFlags, FontSize = 12, Height = 28, VerticalContentAlignment = VerticalAlignment.Center };
+        var extraFlagsTextBox = new TextBox { Text = extraFlags, FontSize = 12, MinHeight = 28, VerticalContentAlignment = VerticalAlignment.Center };
         formPanel.Children.Add(CreateFormItem("Extra Container Labels", "Additional labels applied to containers (format: key=value,key2=value2).", extraFlagsTextBox));
 
         // 4. LOGGING & DASHBOARD
@@ -2277,7 +2284,7 @@ public partial class DockerDiagnosticsView : UserControl
         formPanel.Children.Add(CreateFormSectionHeader("ADVANCED PATHS"));
 
         var runtimePath = _settingsService.SafeGetSetting(ContainerExtensionModule.DockerRuntimePathSetting, "");
-        var runtimePathTextBox = new TextBox { Text = runtimePath, FontSize = 12, Height = 28, VerticalContentAlignment = VerticalAlignment.Center };
+        var runtimePathTextBox = new TextBox { Text = runtimePath, FontSize = 12, MinHeight = 28, VerticalContentAlignment = VerticalAlignment.Center };
         var browseBtn = new Button { Content = "Browse...", FontSize = 11, Padding = new Thickness(10, 4) };
         browseBtn.Command = new AsyncRelayCommand(async () =>
         {
@@ -2309,15 +2316,15 @@ public partial class DockerDiagnosticsView : UserControl
         formPanel.Children.Add(CreateFormItem("Container Runtime Path", "Explicit path to docker or podman binary (leave empty for system auto-detection).", runtimeGrid));
 
         var customSocket = _settingsService.SafeGetSetting(ContainerExtensionModule.DaemonSocketSetting, "");
-        var socketTextBox = new TextBox { Text = customSocket, FontSize = 12, Height = 28, VerticalContentAlignment = VerticalAlignment.Center };
+        var socketTextBox = new TextBox { Text = customSocket, FontSize = 12, MinHeight = 28, VerticalContentAlignment = VerticalAlignment.Center };
         formPanel.Children.Add(CreateFormItem("Custom Daemon Socket", "Overrides the standard DOCKER_HOST endpoint (e.g. unix:///var/run/docker.sock).", socketTextBox));
 
         var scroll = new ScrollViewer
         {
-            Content = formPanel,
-            MaxHeight = 450
+            Content = formPanel
         };
-        mainPanel.Children.Add(scroll);
+        Grid.SetRow(scroll, 1);
+        mainGrid.Children.Add(scroll);
 
         // Validation Error Label
         var errorText = new TextBlock
@@ -2328,7 +2335,11 @@ public partial class DockerDiagnosticsView : UserControl
             Margin = new Thickness(0, 4, 0, 4),
             IsVisible = false
         };
-        mainPanel.Children.Add(errorText);
+        Grid.SetRow(errorText, 2);
+        mainGrid.Children.Add(errorText);
+
+        // Register error cleaner to auto-hide error text on any user edit
+        RegisterErrorCleaner(formPanel, errorText);
 
         // Footer Grid
         var footerGrid = new Grid
@@ -2377,7 +2388,8 @@ public partial class DockerDiagnosticsView : UserControl
         Grid.SetColumn(rightButtonPanel, 2);
         footerGrid.Children.Add(resetBtn);
         footerGrid.Children.Add(rightButtonPanel);
-        mainPanel.Children.Add(footerGrid);
+        Grid.SetRow(footerGrid, 3);
+        mainGrid.Children.Add(footerGrid);
 
         resetBtn.Command = new RelayCommand(() =>
         {
@@ -2455,7 +2467,7 @@ public partial class DockerDiagnosticsView : UserControl
                 _settingsService.SetSettingValue(ContainerExtensionModule.NetworkModeSetting, networkModeComboBox.SelectedItem as string ?? "");
 
                 _settingsService.SetSettingValue(ContainerExtensionModule.MemoryLimitSetting, Math.Round(memSlider.Value));
-                _settingsService.SetSettingValue(ContainerExtensionModule.CpuLimitSetting, Math.Round(cpuSlider.Value));
+                _settingsService.SetSettingValue(ContainerExtensionModule.CpuLimitSetting, Math.Round(cpuSlider.Value * 2.0) / 2.0);
                 _settingsService.SetSettingValue(ContainerExtensionModule.TimeoutSetting, Math.Round(timeoutSlider.Value));
 
                 _settingsService.SetSettingValue(ContainerExtensionModule.AutoRemoveSetting, autoRemoveCheckBox.IsChecked == true);
@@ -2487,7 +2499,7 @@ public partial class DockerDiagnosticsView : UserControl
         var wrapper = new Border
         {
             Padding = new Thickness(24),
-            Child = mainPanel
+            Child = mainGrid
         };
 
         dialog.Content = wrapper;
@@ -2500,6 +2512,45 @@ public partial class DockerDiagnosticsView : UserControl
         else
         {
             dialog.Show();
+        }
+    }
+
+    private static void RegisterErrorCleaner(Avalonia.Controls.Control control, Avalonia.Controls.TextBlock errorText)
+    {
+        if (control is Avalonia.Controls.TextBox tb)
+        {
+            tb.TextChanged += (s, e) => errorText.IsVisible = false;
+        }
+        else if (control is Avalonia.Controls.ComboBox cb)
+        {
+            cb.SelectionChanged += (s, e) => errorText.IsVisible = false;
+        }
+        else if (control is Avalonia.Controls.Slider sl)
+        {
+            sl.ValueChanged += (s, e) => errorText.IsVisible = false;
+        }
+        else if (control is Avalonia.Controls.CheckBox chk)
+        {
+            chk.IsCheckedChanged += (s, e) => errorText.IsVisible = false;
+        }
+        else if (control is Avalonia.Controls.Panel panel)
+        {
+            foreach (var child in panel.Children)
+            {
+                RegisterErrorCleaner(child, errorText);
+            }
+        }
+        else if (control is Avalonia.Controls.ContentControl cc && cc.Content is Avalonia.Controls.Control childControl)
+        {
+            RegisterErrorCleaner(childControl, errorText);
+        }
+        else if (control is Avalonia.Controls.ScrollViewer sv && sv.Content is Avalonia.Controls.Control svChild)
+        {
+            RegisterErrorCleaner(svChild, errorText);
+        }
+        else if (control is Avalonia.Controls.Border border && border.Child is Avalonia.Controls.Control borderChild)
+        {
+            RegisterErrorCleaner(borderChild, errorText);
         }
     }
 

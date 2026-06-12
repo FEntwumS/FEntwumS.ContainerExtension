@@ -147,7 +147,8 @@ internal sealed class ResourceThresholdValidation : ISettingValidation
 
         if (numericValue > _total)
         {
-            warningMessage = string.Create(CultureInfo.InvariantCulture, $"Value {numericValue:N0} exceeds host {_resourceName} capacity ({_total:N0}). Use a value between 0 and {_total:N0}.");
+            var format = _resourceKind == ResourceKind.Cpu ? "F1" : "N0";
+            warningMessage = string.Create(CultureInfo.InvariantCulture, $"Value {numericValue.ToString(format, CultureInfo.InvariantCulture)} exceeds host {_resourceName} capacity ({_total.ToString(format, CultureInfo.InvariantCulture)}). Use a value between 0 and {_total.ToString(format, CultureInfo.InvariantCulture)}.");
             return false;
         }
 
@@ -174,7 +175,7 @@ internal sealed partial class DockerImageFormatValidation : ISettingValidation
         _allowEmpty = allowEmpty;
     }
 
-    [GeneratedRegex(@"^[a-zA-Z0-9][a-zA-Z0-9._\-]*(:\d{1,5})?(/[a-zA-Z0-9._\-]+)*(:[a-zA-Z0-9._\-]+)?(@sha256:[a-fA-F0-9]{64})?$", RegexOptions.ExplicitCapture | RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(@"^[a-zA-Z0-9][a-zA-Z0-9._\-]*(:\d{1,5})?(/[a-zA-Z0-9._\-]+)*(:[a-zA-Z0-9._\-]+)?(@sha256:[a-fA-F0-9]{64})?$", RegexOptions.ExplicitCapture | RegexOptions.IgnoreCase | RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]
     private static partial Regex ImagePatternRegex();
 
     public bool Validate(object? value, out string? warningMessage)

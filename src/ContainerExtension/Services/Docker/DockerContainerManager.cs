@@ -83,7 +83,7 @@ public sealed class DockerContainerManager
             }
 
             var containers = await _client.Containers.ListContainersAsync(
-              new ContainersListParameters { All = true, Limit = 50 }, ct).ConfigureAwait(false);
+              new ContainersListParameters { All = true, Limit = 250 }, ct).ConfigureAwait(false);
 
             lock (_containersCacheLock)
             {
@@ -117,25 +117,46 @@ public sealed class DockerContainerManager
     public async ValueTask<string> GetContainerStateAsync(string containerId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(containerId)) return "unknown";
-        var containers = await ListContainersAsync(ct).ConfigureAwait(false);
-        if (containers == null || containers.Count == 0)
+        IList<ContainerListResponse>? cached = null;
+        lock (_containersCacheLock)
+        {
+            if (_cachedContainers != null && Environment.TickCount64 < _containersCacheExpiration)
+            {
+                cached = _cachedContainers;
+            }
+        }
+        if (cached != null)
+        {
+            foreach (var c in cached)
+            {
+                if (c != null && string.Equals(c.ID, containerId, StringComparison.Ordinal))
+                {
+                    return c.State ?? "unknown";
+                }
+            }
+        }
+        try
+        {
+            var inspect = await InspectContainerAsync(containerId, ct).ConfigureAwait(false);
+            return inspect?.State?.Status ?? "unknown";
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
             return "unknown";
         }
-        foreach (var c in containers)
-        {
-            if (string.Equals(c.ID, containerId, StringComparison.Ordinal))
-            {
-                return c.State ?? "unknown";
-            }
-        }
-        return "unknown";
     }
 
     public async Task<ContainerInspectResponse?> InspectContainerAsync(string containerId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(containerId)) return null;
-        ValidateContainerName(containerId);
+        try
+        {
+            ValidateContainerName(containerId);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
         try
         {
             var res = await _client.Containers.InspectContainerAsync(containerId, ct).ConfigureAwait(false);
@@ -330,10 +351,13 @@ public sealed class DockerContainerManager
             containerLock.RefCount++;
         }
         bool acquired = false;
-        var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(8192);
-        var charBuf = System.Buffers.ArrayPool<char>.Shared.Rent(System.Text.Encoding.UTF8.GetMaxCharCount(buffer.Length));
+        byte[]? buffer = null;
+        char[]? charBuf = null;
         try
         {
+            buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(8192);
+            charBuf = System.Buffers.ArrayPool<char>.Shared.Rent(System.Text.Encoding.UTF8.GetMaxCharCount(buffer.Length));
+
             await containerLock.Semaphore.WaitAsync(ct).ConfigureAwait(false);
             acquired = true;
 
@@ -349,24 +373,14 @@ public sealed class DockerContainerManager
             while (!ct.IsCancellationRequested)
             {
                 global::Docker.DotNet.MultiplexedStream.ReadResult result;
-                int retryCount = 0;
-                while (true)
+                try
                 {
-                    try
-                    {
-                        result = await stream.ReadOutputAsync(buffer, 0, buffer.Length, ct).ConfigureAwait(false);
-                        break;
-                    }
-                    catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException && ex is not ObjectDisposedException)
-                    {
-                        if (retryCount >= 3)
-                        {
-                            ContainerTelemetry.TrackError("DockerContainerManager", "StreamContainerLogsAsync read failed after retries", ex);
-                            throw;
-                        }
-                        retryCount++;
-                        await Task.Delay(TimeSpan.FromMilliseconds(100 << retryCount), ct).ConfigureAwait(false);
-                    }
+                    result = await stream.ReadOutputAsync(buffer, 0, buffer.Length, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException && ex is not ObjectDisposedException)
+                {
+                    ContainerTelemetry.TrackError("DockerContainerManager", "StreamContainerLogsAsync read failed", ex);
+                    throw;
                 }
 
                 if (result.EOF)
@@ -432,8 +446,14 @@ public sealed class DockerContainerManager
         }
         finally
         {
-            System.Buffers.ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
-            System.Buffers.ArrayPool<char>.Shared.Return(charBuf, clearArray: true);
+            if (buffer != null)
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+            }
+            if (charBuf != null)
+            {
+                System.Buffers.ArrayPool<char>.Shared.Return(charBuf, clearArray: true);
+            }
             if (acquired)
             {
                 containerLock.Semaphore.Release();

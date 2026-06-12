@@ -734,6 +734,24 @@ public sealed class ContainerExtensionTests : IDisposable
         finally { Directory.Delete(dir, true); }
     }
 
+    [Fact]
+    public void ParseEnvFile_CommandInjectionSanitised()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"container_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, ".env"), "SAFE=value\nUNSAFE_BACKTICK=echo `whoami`\nUNSAFE_SUB=test$(rm -rf /)end\n");
+            var result = DockerCommandBuilder.ParseEnvFile(dir);
+            Assert.NotNull(result);
+            Assert.Equal(3, result!.Count);
+            Assert.Contains("SAFE=value", result);
+            Assert.Contains("UNSAFE_BACKTICK=echo whoami", result);
+            Assert.Contains("UNSAFE_SUB=testend", result);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
     // =======================================================================
     //  Resource Profile Telemetry Tests (OOM Analyzer)
     // =======================================================================

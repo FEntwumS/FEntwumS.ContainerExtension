@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
@@ -27,13 +28,33 @@ public sealed class DockerImageManager
 
     private readonly DockerClient _client;
     private readonly ISettingsService _settingsService;
-
-
+    private readonly SemaphoreSlim _listImagesSemaphore = new(1, 1);
 
     public DockerImageManager(DockerClient client, ISettingsService settingsService)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
+    }
+
+    private static bool CheckFreeDiskSpace(long requiredBytes, out string? errorMessage)
+    {
+        errorMessage = null;
+        try
+        {
+            var path = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (string.IsNullOrEmpty(path)) path = "/";
+            var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(path)) ?? "/");
+            if (drive.AvailableFreeSpace < requiredBytes)
+            {
+                errorMessage = $"Insufficient disk space on host system. Free: {drive.AvailableFreeSpace / (1024.0 * 1024.0 * 1024.0):N1} GB, Required: {requiredBytes / (1024.0 * 1024.0 * 1024.0):N1} GB.";
+                return false;
+            }
+        }
+        catch (Exception)
+        {
+            // Fail open
+        }
+        return true;
     }
 
     private T SafeGetSetting<T>(string key, T fallback)
@@ -64,8 +85,17 @@ public sealed class DockerImageManager
             }
         }
 
+        await _listImagesSemaphore.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            lock (_cacheLock)
+            {
+                if (_cachedImages != null && Environment.TickCount64 < _cacheExpiration)
+                {
+                    return _cachedImages;
+                }
+            }
+
             var images = await _client.Images.ListImagesAsync(
               new ImagesListParameters { All = false }, ct).ConfigureAwait(false);
             lock (_cacheLock)
@@ -90,6 +120,10 @@ public sealed class DockerImageManager
                 }
             }
             return Array.Empty<ImagesListResponse>();
+        }
+        finally
+        {
+            _listImagesSemaphore.Release();
         }
     }
 
@@ -126,7 +160,15 @@ public sealed class DockerImageManager
     public async Task<(int pulled, int failed)> UpdateAllImagesAsync(Action<string>? progress = null, CancellationToken ct = default)
     {
         using var activity = ImageActivitySource.StartActivity("DockerImageManager.UpdateAllImages");
-        int pulled = 0, failed = 0;
+        
+        // Host disk space check: require at least 1 GB of free space
+        if (!CheckFreeDiskSpace(1024 * 1024 * 1024, out var spaceError))
+        {
+            progress?.Invoke($"[ERROR] Pull aborted: {spaceError}");
+            ContainerTelemetry.TrackError("DockerImageManager", "UpdateAllImagesAsync aborted due to low disk space", null, spaceError);
+            return (0, 1);
+        }
+
         try
         {
             var images = await ListImagesAsync(ct).ConfigureAwait(false);
@@ -137,8 +179,9 @@ public sealed class DockerImageManager
 
             var platformRaw = SafeGetSetting<string>(ContainerExtensionModule.PlatformSetting, "auto");
             var platform = string.IsNullOrWhiteSpace(platformRaw) ? "auto" : (platformRaw.Contains(' ') ? platformRaw.Trim() : platformRaw);
+            
+            var targets = new List<string>();
             var processedImageIds = new HashSet<string>(images.Count, StringComparer.Ordinal);
-
             foreach (var img in images)
             {
                 if (img == null || img.RepoTags == null || !processedImageIds.Add(img.ID))
@@ -146,51 +189,58 @@ public sealed class DockerImageManager
                     continue;
                 }
 
-                string? targetTag = null;
                 foreach (var tag in img.RepoTags)
                 {
                     if (tag != null && !tag.Contains("<none>") && !tag.Contains("..") && !tag.Contains("\\"))
                     {
-                        targetTag = tag;
-                        break;
-                    }
-                }
-
-                if (targetTag != null)
-                {
-                    try
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        progress?.Invoke($"Pulling {targetTag}...");
-                        var pullParams = new ImagesCreateParameters { FromImage = targetTag };
-                        if (!string.IsNullOrWhiteSpace(platform) && !string.Equals(platform, "auto", StringComparison.OrdinalIgnoreCase))
-                        {
-                            pullParams.Platform = platform;
-                        }
-
-                        await PullSemaphore.WaitAsync(ct).ConfigureAwait(false);
-                        try
-                        {
-                            await _client.Images.CreateImageAsync(
-                              pullParams, null, EmptyProgress<JSONMessage>.Instance, ct).ConfigureAwait(false);
-                        }
-                        finally
-                        {
-                            PullSemaphore.Release();
-                        }
-                        pulled++;
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex) when (ex is not OutOfMemoryException)
-                    {
-                        ContainerTelemetry.TrackError("DockerImageManager", $"Re-pull failed for '{targetTag}' due to connection loss or registry failure", ex);
-                        failed++;
+                        targets.Add(tag);
                     }
                 }
             }
+
+            if (targets.Count == 0)
+            {
+                return (0, 0);
+            }
+
+            int pulledCount = 0;
+            int failedCount = 0;
+
+            var tasks = targets.Select(async targetTag =>
+            {
+                await PullSemaphore.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    ct.ThrowIfCancellationRequested();
+                    progress?.Invoke($"Pulling {targetTag}...");
+                    var pullParams = new ImagesCreateParameters { FromImage = targetTag };
+                    if (!string.IsNullOrWhiteSpace(platform) && !string.Equals(platform, "auto", StringComparison.OrdinalIgnoreCase))
+                    {
+                        pullParams.Platform = platform;
+                    }
+
+                    await _client.Images.CreateImageAsync(
+                      pullParams, null, EmptyProgress<JSONMessage>.Instance, ct).ConfigureAwait(false);
+
+                    Interlocked.Increment(ref pulledCount);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    ContainerTelemetry.TrackError("DockerImageManager", $"Re-pull failed for '{targetTag}' due to connection loss or registry failure", ex);
+                    Interlocked.Increment(ref failedCount);
+                }
+                finally
+                {
+                    PullSemaphore.Release();
+                }
+            });
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+            return (pulledCount, failedCount);
         }
         catch (OperationCanceledException)
         {
@@ -199,12 +249,12 @@ public sealed class DockerImageManager
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             ContainerTelemetry.TrackError("DockerImageManager", "UpdateAllImagesAsync failed", ex);
+            return (0, 1);
         }
         finally
         {
             InvalidateCache();
         }
-        return (pulled, failed);
     }
 
     public async Task<int> PruneDanglingImagesAsync(CancellationToken ct = default)
@@ -285,7 +335,112 @@ public sealed class DockerImageManager
 
     public async Task<(int imageCount, long totalSizeBytes, long reclaimableBytes)> GetDiskUsageSummaryAsync(CancellationToken ct = default)
     {
+        var rawResult = await GetSystemDiskUsageRawAsync(ct).ConfigureAwait(false);
+        if (rawResult != null)
+        {
+            return rawResult.Value;
+        }
+
         var images = await ListImagesAsync(ct).ConfigureAwait(false);
         return ComputeDiskUsage(images, ct);
+    }
+
+#pragma warning disable IL2026, IL3050
+    private async Task<(int imageCount, long totalSizeBytes, long reclaimableBytes)?> GetSystemDiskUsageRawAsync(CancellationToken ct)
+    {
+        var endpoint = _client?.Configuration?.EndpointBaseUri;
+        if (endpoint == null) return null;
+
+        var scheme = endpoint.Scheme.ToLowerInvariant();
+        System.Net.Http.SocketsHttpHandler? handler = null;
+        if (string.Equals(scheme, "npipe", StringComparison.Ordinal))
+        {
+            handler = new System.Net.Http.SocketsHttpHandler
+            {
+                ConnectCallback = async (context, token) =>
+                {
+                    var pipeName = endpoint.LocalPath;
+                    var serverName = ".";
+                    if (pipeName.StartsWith(@"\\", StringComparison.Ordinal))
+                    {
+                        var parts = pipeName.Split('\\', StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length >= 3)
+                        {
+                            serverName = parts[0];
+                            pipeName = parts[parts.Length - 1];
+                        }
+                    }
+                    var pipe = new System.IO.Pipes.NamedPipeClientStream(serverName, pipeName, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
+                    await pipe.ConnectAsync(token).ConfigureAwait(false);
+                    return pipe;
+                }
+            };
+        }
+        else if (string.Equals(scheme, "unix", StringComparison.Ordinal))
+        {
+            var socketPath = endpoint.LocalPath;
+            handler = new System.Net.Http.SocketsHttpHandler
+            {
+                ConnectCallback = async (context, token) =>
+                {
+                    var socket = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.Unix, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Unspecified);
+                    await socket.ConnectAsync(new System.Net.Sockets.UnixDomainSocketEndPoint(socketPath), token).ConfigureAwait(false);
+                    return new System.Net.Sockets.NetworkStream(socket, ownsSocket: true);
+                }
+            };
+        }
+
+        using var httpClient = handler != null ? new System.Net.Http.HttpClient(handler) : new System.Net.Http.HttpClient { BaseAddress = new UriBuilder(endpoint) { Path = "" }.Uri };
+        try
+        {
+            var url = string.Equals(scheme, "npipe", StringComparison.Ordinal) || string.Equals(scheme, "unix", StringComparison.Ordinal)
+                ? new Uri("http://localhost/system/df")
+                : new Uri(httpClient.BaseAddress!, "system/df");
+            using var response = await httpClient.GetAsync(url, ct).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+            {
+                var contentStream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+                var systemDf = await System.Text.Json.JsonSerializer.DeserializeAsync<SystemDfResponse>(contentStream, cancellationToken: ct).ConfigureAwait(false);
+                if (systemDf != null)
+                {
+                    long totalSize = systemDf.LayersSize;
+                    if (totalSize == 0 && systemDf.Images != null)
+                    {
+                        totalSize = systemDf.Images.Sum(i => i.Size);
+                    }
+                    int imageCount = systemDf.Images?.Count ?? 0;
+                    long reclaimable = 0;
+                    if (systemDf.Images != null)
+                    {
+                        foreach (var img in systemDf.Images)
+                        {
+                            if (img.Containers == 0)
+                            {
+                                reclaimable += img.Size;
+                            }
+                        }
+                    }
+                    return (imageCount, totalSize, reclaimable);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
+        {
+            // Fallback
+        }
+        return null;
+    }
+#pragma warning restore IL2026, IL3050
+
+    internal sealed class SystemDfResponse
+    {
+        public long LayersSize { get; set; } = 0;
+        public List<SystemDfImage>? Images { get; set; } = null;
+    }
+
+    internal sealed class SystemDfImage
+    {
+        public int Containers { get; set; } = 0;
+        public long Size { get; set; } = 0;
     }
 }

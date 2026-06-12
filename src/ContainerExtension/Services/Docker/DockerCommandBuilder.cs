@@ -24,7 +24,7 @@ internal static class DockerCommandBuilder
     private const string ContainerWorkDir = "/workspace";
     internal static readonly SearchValues<char> ShellSpecialChars = SearchValues.Create(";&|<>*?[]{}()$\\'\"#~`! \t\n\r");
     private static readonly SearchValues<char> DangerousEnvKeyChars = SearchValues.Create("&|;`$()<>\n\r\\ \t");
-    private static readonly Dictionary<string, (List<string>? vars, DateTime lastWrite)> EnvCache = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, (List<string>? vars, DateTime lastWrite, DateTime lastAccess)> EnvCache = new(StringComparer.Ordinal);
     private static readonly System.Threading.Lock EnvCacheLock = new();
 
     private static bool ToolRequiresWriteAccess(ToolCommand command)
@@ -397,7 +397,8 @@ internal static class DockerCommandBuilder
                 {
                     var normalized = a.Replace('\\', '/');
                     var libName = Path.GetFileName(normalized.TrimEnd('/'));
-                    mapped = string.IsNullOrWhiteSpace(libName) ? "work" : libName;
+                    var mappedLib = FindLibraryForDirectory(workingDirFull, normalized);
+                    mapped = !string.IsNullOrWhiteSpace(mappedLib) ? mappedLib : (string.IsNullOrWhiteSpace(libName) ? "work" : libName);
                 }
                 else if (isGhdlMakeOrElabOrRun && (a.EndsWith(".vhd", StringComparison.OrdinalIgnoreCase) || a.EndsWith(".vhdl", StringComparison.OrdinalIgnoreCase)))
                 {
@@ -732,6 +733,7 @@ internal static class DockerCommandBuilder
             {
                 if (EnvCache.TryGetValue(envPath, out var cached) && cached.lastWrite == currentWriteTime)
                 {
+                    EnvCache[envPath] = (cached.vars, cached.lastWrite, DateTime.UtcNow);
                     return cached.vars;
                 }
             }
@@ -740,10 +742,10 @@ internal static class DockerCommandBuilder
             {
                 lock (EnvCacheLock)
                 {
-                    EnvCache[envPath] = (null, currentWriteTime);
+                    EnvCache[envPath] = (null, currentWriteTime, DateTime.UtcNow);
                     if (EnvCache.Count > 100)
                     {
-                        var keysToRemove = EnvCache.OrderBy(kvp => { return kvp.Value.lastWrite; }).Take(10).Select(kvp => { return kvp.Key; }).ToList();
+                        var keysToRemove = EnvCache.OrderBy(kvp => { return kvp.Value.lastAccess; }).Take(10).Select(kvp => { return kvp.Key; }).ToList();
                         foreach (var k in keysToRemove)
                         {
                             EnvCache.Remove(k);
@@ -963,16 +965,18 @@ internal static class DockerCommandBuilder
                         value = value[1..^1];
                     }
 
+                    value = SanitizeEnvValue(value);
+
                     envVars.Add($"{key}={value}");
                 }
             }
 
             lock (EnvCacheLock)
             {
-                EnvCache[envPath] = (envVars, currentWriteTime);
+                EnvCache[envPath] = (envVars, currentWriteTime, DateTime.UtcNow);
                 if (EnvCache.Count > 100)
                 {
-                    var keysToRemove = EnvCache.OrderBy(kvp => { return kvp.Value.lastWrite; }).Take(10).Select(kvp => { return kvp.Key; }).ToList();
+                    var keysToRemove = EnvCache.OrderBy(kvp => { return kvp.Value.lastAccess; }).Take(10).Select(kvp => { return kvp.Key; }).ToList();
                     foreach (var k in keysToRemove)
                     {
                         EnvCache.Remove(k);
@@ -1071,11 +1075,9 @@ internal static class DockerCommandBuilder
                     {
                         var normalized = suffix.Replace('\\', '/');
                         var libName = Path.GetFileName(normalized.TrimEnd('/'));
-                        if (string.IsNullOrWhiteSpace(libName))
-                        {
-                            libName = "work";
-                        }
-                        return prefix + libName;
+                        var mappedLib = FindLibraryForDirectory(workingDirFull, normalized);
+                        var finalLibName = !string.IsNullOrWhiteSpace(mappedLib) ? mappedLib : (string.IsNullOrWhiteSpace(libName) ? "work" : libName);
+                        return prefix + finalLibName;
                     }
 
                     var mappedSuffix = MapPathToContainerInternal(suffix, workingDirCanonical);
@@ -1481,5 +1483,87 @@ internal static class DockerCommandBuilder
             // Ignore exceptions to remain robust
         }
         return null;
+    }
+
+    private static string? FindLibraryForDirectory(string workingDir, string dirPath)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(workingDir) || string.IsNullOrWhiteSpace(dirPath))
+            {
+                return null;
+            }
+
+            var projFiles = Directory.GetFiles(workingDir, "*.fpgaproj");
+            if (projFiles.Length == 0)
+            {
+                return null;
+            }
+
+            var projFile = projFiles[0];
+            if (!File.Exists(projFile))
+            {
+                return null;
+            }
+
+            var targetDir = dirPath.Replace('\\', '/').Trim('/');
+            var targetDirName = Path.GetFileName(targetDir);
+
+            using (var fs = new FileStream(projFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var document = JsonDocument.Parse(fs))
+            {
+                var root = document.RootElement;
+                foreach (var property in root.EnumerateObject())
+                {
+                    var propName = property.Name;
+                    if (propName.StartsWith("GHDL-LIB_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var libName = propName["GHDL-LIB_".Length..];
+                        if (property.Value.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var fileEl in property.Value.EnumerateArray())
+                            {
+                                var filePath = fileEl.GetString();
+                                if (filePath != null)
+                                {
+                                    var normalizedPath = filePath.Replace('\\', '/');
+                                    if (normalizedPath.Contains("/" + targetDirName + "/", StringComparison.OrdinalIgnoreCase) ||
+                                        normalizedPath.StartsWith(targetDirName + "/", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        return libName;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Ignore exceptions to remain robust
+        }
+        return null;
+    }
+
+    private static string SanitizeEnvValue(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return value;
+        var result = value.Replace("`", "", StringComparison.Ordinal);
+        while (true)
+        {
+            int start = result.IndexOf("$(", StringComparison.Ordinal);
+            if (start < 0) break;
+            int end = result.IndexOf(')', start);
+            if (end < 0)
+            {
+                result = result.Remove(start, 2);
+            }
+            else
+            {
+                result = result.Remove(start, end - start + 1);
+            }
+        }
+        return result;
     }
 }
