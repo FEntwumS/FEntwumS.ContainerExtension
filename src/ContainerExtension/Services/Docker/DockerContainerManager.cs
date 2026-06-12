@@ -327,8 +327,8 @@ public sealed class DockerContainerManager
         }
         finally
         {
-            System.Buffers.ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
-            System.Buffers.ArrayPool<char>.Shared.Return(charBuf, clearArray: true);
+            System.Buffers.ArrayPool<byte>.Shared.Return(buffer, clearArray: false);
+            System.Buffers.ArrayPool<char>.Shared.Return(charBuf, clearArray: false);
         }
     }
 
@@ -448,11 +448,11 @@ public sealed class DockerContainerManager
         {
             if (buffer != null)
             {
-                System.Buffers.ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+                System.Buffers.ArrayPool<byte>.Shared.Return(buffer, clearArray: false);
             }
             if (charBuf != null)
             {
-                System.Buffers.ArrayPool<char>.Shared.Return(charBuf, clearArray: true);
+                System.Buffers.ArrayPool<char>.Shared.Return(charBuf, clearArray: false);
             }
             if (acquired)
             {

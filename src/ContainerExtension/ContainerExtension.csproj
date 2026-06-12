@@ -9,7 +9,7 @@
         <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
         <SelfContained>false</SelfContained>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
-        <NoWarn>$(NoWarn);CS1591;MA0051;S3358;MA0048;MA0016;MA0011;MA0009;S1075;S3903;S3267;S3010;S2930;S2696;S125;S1244;S1118;MA0134;MA0047;S1905;S3168;S6966</NoWarn>
+        <NoWarn>$(NoWarn);CS1591;MA0051;S3358;MA0048;MA0016;MA0011;MA0009;S1075;S3903;S3267;S3010;S2696;S125;S1244;S1118;MA0134;MA0047;S1905;S3168;S6966</NoWarn>
         <AnalysisLevel>latest-All</AnalysisLevel>
         <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     </PropertyGroup>

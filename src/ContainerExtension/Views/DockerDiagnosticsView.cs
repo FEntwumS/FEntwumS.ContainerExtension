@@ -71,6 +71,7 @@ public partial class DockerDiagnosticsView : UserControl
 
     // Auto-refresh state
     private CancellationTokenSource? _refreshCts;
+    private CancellationTokenSource? _detachCleanupCts;
     private DispatcherTimer? _autoRefreshTimer;
     private readonly DispatcherTimer _searchDebounceTimer;
     private readonly Border _refreshIndicator;
@@ -476,7 +477,20 @@ public partial class DockerDiagnosticsView : UserControl
             });
             StartAutoRefreshTimer();
         });
-        AttachedToVisualTree += (_, _) => { attachCmd.Execute(null); };
+        AttachedToVisualTree += (_, _) =>
+        {
+            try
+            {
+                _detachCleanupCts?.Cancel();
+                _detachCleanupCts?.Dispose();
+            }
+            catch (Exception)
+            {
+                // Ignore errors during cleanup of pending detach task
+            }
+            _detachCleanupCts = null;
+            attachCmd.Execute(null);
+        };
         DetachedFromVisualTree += (_, _) =>
         {
             StopAutoRefreshTimer();
@@ -486,23 +500,45 @@ public partial class DockerDiagnosticsView : UserControl
             _isVisibleSubscription?.Dispose();
             _isVisibleSubscription = null;
 
-            // Close any orphan container log windows spawned from this dashboard
-            var windowsToClose = _openLogWindows.Values.ToList();
-            _openLogWindows.Clear();
-            foreach (var w in windowsToClose)
+            try
             {
-                if (w != null)
-                {
-                    try
-                    {
-                        w.Close();
-                    }
-                    catch (Exception ex)
-                    {
-                        ContainerTelemetry.TrackError("DockerDiagnosticsView", "CloseOrphanLogWindow", ex);
-                    }
-                }
+                _detachCleanupCts?.Cancel();
+                _detachCleanupCts?.Dispose();
             }
+            catch (Exception)
+            {
+                // Ignore errors during cancellation/disposal of the previous detach task
+            }
+
+            _detachCleanupCts = new CancellationTokenSource();
+            var token = _detachCleanupCts.Token;
+
+            _ = Task.Delay(1500, token).ContinueWith(t =>
+            {
+                if (t.IsCanceled) return;
+
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (token.IsCancellationRequested) return;
+
+                    var windowsToClose = _openLogWindows.Values.ToList();
+                    _openLogWindows.Clear();
+                    foreach (var w in windowsToClose)
+                    {
+                        if (w != null)
+                        {
+                            try
+                            {
+                                w.Close();
+                            }
+                            catch (Exception ex)
+                            {
+                                ContainerTelemetry.TrackError("DockerDiagnosticsView", "CloseOrphanLogWindow", ex);
+                            }
+                        }
+                    }
+                });
+            }, TaskScheduler.Default);
         };
     }
 
@@ -829,9 +865,17 @@ public partial class DockerDiagnosticsView : UserControl
             _secondsUntilRefresh = _refreshIntervalSeconds;
 
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(
-                _refreshCts?.Token ?? CancellationToken.None,
-                timeoutCts.Token);
+            var refreshCts = _refreshCts;
+            CancellationToken refreshCt = default;
+            try
+            {
+                refreshCt = refreshCts?.Token ?? default;
+            }
+            catch (ObjectDisposedException)
+            {
+                refreshCt = default;
+            }
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(refreshCt, timeoutCts.Token);
             var ct = cts.Token;
 
             // Read settings snapshot (always available, synchronous)
@@ -1002,9 +1046,19 @@ public partial class DockerDiagnosticsView : UserControl
         });
 
         List<string> tags = new();
+        var refreshCts = _refreshCts;
+        CancellationToken refreshCt = default;
         try
         {
-            tags = await FEntwumS.ContainerExtension.Registry.RegistryClient.FetchTagsAsync(currentImage, _refreshCts?.Token ?? default).ConfigureAwait(false);
+            refreshCt = refreshCts?.Token ?? default;
+        }
+        catch (ObjectDisposedException)
+        {
+            refreshCt = default;
+        }
+        try
+        {
+            tags = await FEntwumS.ContainerExtension.Registry.RegistryClient.FetchTagsAsync(currentImage, refreshCt).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

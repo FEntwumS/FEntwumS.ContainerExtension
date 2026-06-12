@@ -371,8 +371,16 @@ public sealed class DockerImageManager
                         }
                     }
                     var pipe = new System.IO.Pipes.NamedPipeClientStream(serverName, pipeName, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
-                    await pipe.ConnectAsync(token).ConfigureAwait(false);
-                    return pipe;
+                    try
+                    {
+                        await pipe.ConnectAsync(token).ConfigureAwait(false);
+                        return pipe;
+                    }
+                    catch
+                    {
+                        await pipe.DisposeAsync().ConfigureAwait(false);
+                        throw;
+                    }
                 }
             };
         }
@@ -384,13 +392,22 @@ public sealed class DockerImageManager
                 ConnectCallback = async (context, token) =>
                 {
                     var socket = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.Unix, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Unspecified);
-                    await socket.ConnectAsync(new System.Net.Sockets.UnixDomainSocketEndPoint(socketPath), token).ConfigureAwait(false);
-                    return new System.Net.Sockets.NetworkStream(socket, ownsSocket: true);
+                    try
+                    {
+                        await socket.ConnectAsync(new System.Net.Sockets.UnixDomainSocketEndPoint(socketPath), token).ConfigureAwait(false);
+                        return new System.Net.Sockets.NetworkStream(socket, ownsSocket: true);
+                    }
+                    catch
+                    {
+                        socket.Dispose();
+                        throw;
+                    }
                 }
             };
         }
 
         using var httpClient = handler != null ? new System.Net.Http.HttpClient(handler) : new System.Net.Http.HttpClient { BaseAddress = new UriBuilder(endpoint) { Path = "" }.Uri };
+        httpClient.Timeout = TimeSpan.FromSeconds(5);
         try
         {
             var url = string.Equals(scheme, "npipe", StringComparison.Ordinal) || string.Equals(scheme, "unix", StringComparison.Ordinal)
@@ -400,7 +417,7 @@ public sealed class DockerImageManager
             if (response.IsSuccessStatusCode)
             {
                 var contentStream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-                var systemDf = await System.Text.Json.JsonSerializer.DeserializeAsync<SystemDfResponse>(contentStream, cancellationToken: ct).ConfigureAwait(false);
+                var systemDf = await System.Text.Json.JsonSerializer.DeserializeAsync(contentStream, DockerImageJsonContext.Default.SystemDfResponse, cancellationToken: ct).ConfigureAwait(false);
                 if (systemDf != null)
                 {
                     long totalSize = systemDf.LayersSize;
@@ -430,17 +447,20 @@ public sealed class DockerImageManager
         }
         return null;
     }
-#pragma warning restore IL2026, IL3050
+} // Close DockerImageManager class
 
-    internal sealed class SystemDfResponse
-    {
-        public long LayersSize { get; set; } = 0;
-        public List<SystemDfImage>? Images { get; set; } = null;
-    }
-
-    internal sealed class SystemDfImage
-    {
-        public int Containers { get; set; } = 0;
-        public long Size { get; set; } = 0;
-    }
+internal sealed class SystemDfResponse
+{
+    public long LayersSize { get; set; } = 0;
+    public List<SystemDfImage>? Images { get; set; } = null;
 }
+
+internal sealed class SystemDfImage
+{
+    public int Containers { get; set; } = 0;
+    public long Size { get; set; } = 0;
+}
+
+[System.Text.Json.Serialization.JsonSerializable(typeof(SystemDfResponse))]
+[System.Text.Json.Serialization.JsonSerializable(typeof(SystemDfImage))]
+internal partial class DockerImageJsonContext : System.Text.Json.Serialization.JsonSerializerContext { }
