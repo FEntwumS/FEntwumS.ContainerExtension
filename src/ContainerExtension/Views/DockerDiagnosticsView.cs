@@ -1424,6 +1424,8 @@ public partial class DockerDiagnosticsView : UserControl
     {
         SetOfflineContent(_containersContent);
         SetOfflineContent(_imagesContent);
+        _lastContainerFingerprint = 0;
+        _lastImageFingerprint = 0;
     }
 
     private void ShowTemporaryStatus(string message, bool isError = false, bool isTemporary = true)
