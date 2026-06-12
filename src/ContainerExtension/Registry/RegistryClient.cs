@@ -58,7 +58,6 @@ public static partial class RegistryClient
             KeepAlivePingDelay = TimeSpan.FromSeconds(60),
             KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
             AllowAutoRedirect = false,
-            MaxAutomaticRedirections = 0,
             AutomaticDecompression = System.Net.DecompressionMethods.Brotli | System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate,
             SslOptions = new System.Net.Security.SslClientAuthenticationOptions
             {

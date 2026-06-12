@@ -1415,9 +1415,11 @@ public partial class DockerDiagnosticsView : UserControl
                 {
                     throw new InvalidOperationException("Could not determine build context directory.");
                 }
-
                 var tag = "fentwums/oss-cad-suite:local";
-                var extraArgs = "";
+                var arch = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64 
+                    ? "linux-arm64" 
+                    : "linux-x64";
+                var extraArgs = $"--build-arg ARCH={arch} ";
 
                 if (selection == "latest")
                 {
@@ -1431,12 +1433,12 @@ public partial class DockerDiagnosticsView : UserControl
                     }
                     
                     var dateStr = latestTag.Replace("-", "", StringComparison.Ordinal);
-                    extraArgs = $"--build-arg RELEASE_TAG={latestTag} --build-arg RELEASE_DATE={dateStr} ";
-                    ShowTemporaryStatus($"Building newest release tag '{latestTag}' in terminal...");
+                    extraArgs += $"--build-arg RELEASE_TAG={latestTag} --build-arg RELEASE_DATE={dateStr} ";
+                    ShowTemporaryStatus($"Building newest release tag '{latestTag}' ({arch}) in terminal...");
                 }
                 else
                 {
-                    ShowTemporaryStatus("Building pinned release version in terminal...");
+                    ShowTemporaryStatus($"Building pinned release version ({arch}) in terminal...");
                 }
 
                 var commandLine = $"{runtimePath} build {extraArgs}-t {tag} -f \"{dockerfilePath}\" \"{buildContextDir}\"";
@@ -1712,18 +1714,67 @@ public partial class DockerDiagnosticsView : UserControl
         var dialog = new Window
         {
             Title = title,
-            Width = 350,
-            Height = 160,
+            Width = 420,
+            SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false
         };
 
-        var panel = new StackPanel { Margin = new Thickness(16), Spacing = 12 };
-        panel.Children.Add(new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, FontSize = 12 });
+        var mainPanel = new StackPanel { Spacing = 16 };
+        
+        var headerPanel = new StackPanel { Spacing = 6 };
+        var titleText = new TextBlock
+        {
+            Text = title,
+            FontSize = 15,
+            FontWeight = FontWeight.Bold,
+            Foreground = Brush.Parse("#E05252") // Warning/Danger Red
+        };
+        var separator = new Border
+        {
+            Height = 2,
+            Background = Brush.Parse("#E05252"),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Width = 60,
+            Margin = new Thickness(0, 2, 0, 8)
+        };
+        headerPanel.Children.Add(titleText);
+        headerPanel.Children.Add(separator);
+        mainPanel.Children.Add(headerPanel);
 
-        var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Margin = new Thickness(0, 12, 0, 0) };
-        var yesBtn = new Button { Content = "Yes", Width = 60, Padding = new Thickness(8, 4) };
-        var noBtn = new Button { Content = "No", Width = 60, Padding = new Thickness(8, 4) };
+        var msgText = new TextBlock
+        {
+            Text = message,
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 12.5,
+            LineHeight = 18,
+            Opacity = 0.9
+        };
+        mainPanel.Children.Add(msgText);
+
+        var buttonPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 10,
+            Margin = new Thickness(0, 10, 0, 0)
+        };
+
+        var yesBtn = new Button
+        {
+            Content = "Yes, Prune",
+            FontWeight = FontWeight.SemiBold,
+            Background = Brush.Parse("#D32F2F"), // Accent Red
+            Foreground = Brushes.White,
+            Padding = new Thickness(16, 8),
+            CornerRadius = new CornerRadius(4)
+        };
+        var noBtn = new Button
+        {
+            Content = "Cancel",
+            Padding = new Thickness(16, 8),
+            CornerRadius = new CornerRadius(4)
+        };
 
         yesBtn.Command = new RelayCommand(() =>
         {
@@ -1736,11 +1787,17 @@ public partial class DockerDiagnosticsView : UserControl
             dialog.Close();
         });
 
-        buttonPanel.Children.Add(yesBtn);
-        buttonPanel.Children.Add(noBtn);
-        panel.Children.Add(buttonPanel);
-        dialog.Content = panel;
+        buttonPanel.Children.Add(noBtn); // Cancel on the left
+        buttonPanel.Children.Add(yesBtn); // Dangerous action on the right
+        mainPanel.Children.Add(buttonPanel);
 
+        var wrapper = new Border
+        {
+            Padding = new Thickness(24),
+            Child = mainPanel
+        };
+        
+        dialog.Content = wrapper;
         dialog.Closed += (s, e) => { tcs.TrySetResult(false); };
 
         var owner = TopLevel.GetTopLevel(this) as Window;
@@ -1762,32 +1819,82 @@ public partial class DockerDiagnosticsView : UserControl
         var dialog = new Window
         {
             Title = "Build Local Image",
-            Width = 420,
-            Height = 200,
+            Width = 460,
+            SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false
         };
 
-        var panel = new StackPanel { Margin = new Thickness(16), Spacing = 12 };
-        panel.Children.Add(new TextBlock 
-        { 
-            Text = "How would you like to build the local FPGA toolchain image?", 
-            TextWrapping = TextWrapping.Wrap, 
-            FontSize = 12,
-            FontWeight = FontWeight.SemiBold
-        });
-        panel.Children.Add(new TextBlock 
-        { 
-            Text = "• Build Pinned: Builds the stable version defined in the repository.\n• Build Latest: Fetches and builds the latest nightly release from YosysHQ.", 
-            TextWrapping = TextWrapping.Wrap, 
-            FontSize = 11,
-            Opacity = 0.7
-        });
+        var mainPanel = new StackPanel { Spacing = 16 };
 
-        var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8, Margin = new Thickness(0, 12, 0, 0) };
-        var pinnedBtn = new Button { Content = "Build Pinned", Padding = new Thickness(8, 4) };
-        var latestBtn = new Button { Content = "Build Latest", Padding = new Thickness(8, 4) };
-        var cancelBtn = new Button { Content = "Cancel", Width = 60, Padding = new Thickness(8, 4) };
+        var headerPanel = new StackPanel { Spacing = 6 };
+        var titleText = new TextBlock
+        {
+            Text = "Build Local FPGA Toolchain Image",
+            FontSize = 15,
+            FontWeight = FontWeight.Bold,
+            Foreground = Brush.Parse("#007ACC") // Info Blue
+        };
+        var separator = new Border
+        {
+            Height = 2,
+            Background = Brush.Parse("#007ACC"),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Width = 60,
+            Margin = new Thickness(0, 2, 0, 8)
+        };
+        headerPanel.Children.Add(titleText);
+        headerPanel.Children.Add(separator);
+        mainPanel.Children.Add(headerPanel);
+
+        var msgText = new TextBlock
+        {
+            Text = "How would you like to build the local FPGA toolchain image?",
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 13,
+            FontWeight = FontWeight.SemiBold
+        };
+        mainPanel.Children.Add(msgText);
+
+        var detailsText = new TextBlock
+        {
+            Text = "• Build Pinned: Compiles the stable version defined locally in the repository.\n• Build Latest: Queries the GitHub API to fetch and compile the newest nightly release from YosysHQ.",
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 12,
+            LineHeight = 18,
+            Opacity = 0.75
+        };
+        mainPanel.Children.Add(detailsText);
+
+        var buttonPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 10,
+            Margin = new Thickness(0, 10, 0, 0)
+        };
+
+        var pinnedBtn = new Button
+        {
+            Content = "Build Pinned",
+            Padding = new Thickness(16, 8),
+            CornerRadius = new CornerRadius(4)
+        };
+        var latestBtn = new Button
+        {
+            Content = "Build Latest",
+            FontWeight = FontWeight.SemiBold,
+            Background = Brush.Parse("#007ACC"), // Accent Blue
+            Foreground = Brushes.White,
+            Padding = new Thickness(16, 8),
+            CornerRadius = new CornerRadius(4)
+        };
+        var cancelBtn = new Button
+        {
+            Content = "Cancel",
+            Padding = new Thickness(16, 8),
+            CornerRadius = new CornerRadius(4)
+        };
 
         pinnedBtn.Command = new RelayCommand(() =>
         {
@@ -1805,12 +1912,18 @@ public partial class DockerDiagnosticsView : UserControl
             dialog.Close();
         });
 
+        buttonPanel.Children.Add(cancelBtn);
         buttonPanel.Children.Add(pinnedBtn);
         buttonPanel.Children.Add(latestBtn);
-        buttonPanel.Children.Add(cancelBtn);
-        panel.Children.Add(buttonPanel);
-        dialog.Content = panel;
+        mainPanel.Children.Add(buttonPanel);
 
+        var wrapper = new Border
+        {
+            Padding = new Thickness(24),
+            Child = mainPanel
+        };
+
+        dialog.Content = wrapper;
         dialog.Closed += (s, e) => { tcs.TrySetResult(null); };
 
         var owner = TopLevel.GetTopLevel(this) as Window;
