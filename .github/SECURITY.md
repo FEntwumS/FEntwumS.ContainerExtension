@@ -16,7 +16,7 @@ This project executes user-specified FPGA toolchains inside Docker/Podman contai
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability, please report it responsibly by emailing **<mtorun0x7cd@icloud.com>** instead of opening a public issue.
+If you discover a security vulnerability, please report it responsibly by emailing **<info@mtorun0x7cd.com>** instead of opening a public issue.
 
 You should receive an acknowledgement within **48 hours**. Critical issues affecting container isolation or credential exposure will be prioritized for immediate out-of-band patches.
 
