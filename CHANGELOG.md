@@ -4,6 +4,16 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-06-20
+
+### Added
+- **Dynamic Native Execution Fallback**: Implemented automatic fallback to local host binaries on environment `PATH` when the Docker daemon connection is offline (controlled via the new `Allow Native Fallback` setting).
+- **Log Level Telemetry Filtering**: Added configurable log levels (`Off`, `Errors Only`, `Verbose`) to filter execution telemetry records and reduce disk logging bloat.
+
+### Refactored
+- **Isolated Settings in Benchmark Harness**: Replaced global static dictionaries in `MockSettingsService` with isolated instance-level dictionaries to prevent cross-test state pollution.
+- **Enriched XML Comments**: Added complete triple-slash XML documentation comments across the benchmark harness classes (`Program`, `MockSettingsService`, `TestCommandArgument`) to support zero-warning DocFX site compilation.
+
 ## [1.0.3] - 2026-06-12
 
 ### Added
