@@ -619,7 +619,8 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 [ContainerExtensionModule.SettingsKeyDashboardRefresh] = _settingsService.SafeGetSetting(ContainerExtensionModule.DashboardRefreshSetting, "Manual"),
                 [ContainerExtensionModule.SettingsKeyRetention] = _settingsService.SafeGetSetting(ContainerExtensionModule.TelemetryRetentionSetting, "100"),
                 [ContainerExtensionModule.SettingsKeyRuntimePath] = _settingsService.SafeGetSetting(ContainerExtensionModule.DockerRuntimePathSetting, "") is var r && string.IsNullOrWhiteSpace(r) ? "docker (PATH)" : r,
-                [ContainerExtensionModule.SettingsKeyBypassNamedPipeCheck] = _settingsService.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false) ? "Bypassed" : "Active"
+                [ContainerExtensionModule.SettingsKeyBypassNamedPipeCheck] = _settingsService.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false) ? "Bypassed" : "Active",
+                [ContainerExtensionModule.SettingsKeyAllowNativeFallback] = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowNativeFallbackSetting, false) ? "Enabled" : "Disabled"
             };
         }
         finally
@@ -2209,13 +2210,17 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
 
         try
         {
+            bool isDockerOffline = false;
+            Exception? dockerConnectionEx = null;
+
             if (_daemonUri.Scheme.Equals("unix", StringComparison.OrdinalIgnoreCase))
             {
                 var socketPath = _daemonUri.LocalPath;
                 var (live, socketErr) = await IsUnixSocketLiveAndWritableAsync(socketPath, ct).ConfigureAwait(false);
                 if (!live)
                 {
-                    throw new DockerExecutionException(socketErr ?? $"Docker socket at '{socketPath}' is not active or readable.");
+                    isDockerOffline = true;
+                    dockerConnectionEx = new DockerExecutionException(socketErr ?? $"Docker socket at '{socketPath}' is not active or readable.");
                 }
             }
             else if (_daemonUri.Scheme.Equals("npipe", StringComparison.OrdinalIgnoreCase))
@@ -2231,8 +2236,44 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 }
                 if (!VerifyWindowsNamedPipe(pipeName))
                 {
-                    throw new DockerExecutionException($"Insecure or unreachable named pipe connection detected for '{pipeName}'. If this is a false positive, you can bypass this check in OneWare Studio Settings under 'Binary Management' -> 'Container Engine' -> check 'Bypass Named Pipe Security Check'.");
+                    isDockerOffline = true;
+                    dockerConnectionEx = new DockerExecutionException($"Insecure or unreachable named pipe connection detected for '{pipeName}'. If this is a false positive, you can bypass this check in OneWare Studio Settings under 'Binary Management' -> 'Container Engine' -> check 'Bypass Named Pipe Security Check'.");
                 }
+            }
+            else
+            {
+                try
+                {
+                    var live = await PingAsync(ct).ConfigureAwait(false);
+                    if (!live)
+                    {
+                        isDockerOffline = true;
+                        dockerConnectionEx = new DockerExecutionException("Docker daemon is unreachable.");
+                    }
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    isDockerOffline = true;
+                    dockerConnectionEx = new DockerExecutionException("Docker daemon connection failed.", ex);
+                }
+            }
+
+            if (isDockerOffline)
+            {
+                var allowNative = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowNativeFallbackSetting, false);
+                if (allowNative)
+                {
+                    var resolvedPath = FindExecutableInPath(executable);
+                    if (resolvedPath != null)
+                    {
+                        return await ExecuteNativelyAsync(command, resolvedPath, stopwatch, ct).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        SdkLog(command, $"[Docker SDK Fallback Warning] Allow Native Fallback is enabled, but '{executable}' was not found on the host system PATH.", RankInfo);
+                    }
+                }
+                throw dockerConnectionEx ?? new DockerExecutionException("Docker daemon is offline.");
             }
 
             var resolvedWorkingDir = string.IsNullOrWhiteSpace(command.WorkingDirectory) ? Directory.GetCurrentDirectory() : command.WorkingDirectory;
@@ -2667,5 +2708,156 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         }
 
         return false;
+    }
+
+    public static string? FindExecutableInPath(string executable)
+    {
+        if (string.IsNullOrWhiteSpace(executable)) return null;
+
+        if (Path.IsPathRooted(executable) || executable.Contains('/') || executable.Contains('\\'))
+        {
+            if (File.Exists(executable)) return executable;
+            return null;
+        }
+
+        var pathEnv = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrEmpty(pathEnv)) return null;
+
+        var paths = pathEnv.Split(OperatingSystem.IsWindows() ? ';' : ':');
+        string[] extensions = OperatingSystem.IsWindows() ? ["", ".exe", ".bat", ".cmd", ".com"] : [""];
+
+        foreach (var path in paths)
+        {
+            var cleanedPath = path.Trim('\"');
+            foreach (var ext in extensions)
+            {
+                var fullPath = Path.Combine(cleanedPath, executable + ext);
+                if (File.Exists(fullPath))
+                {
+                    return fullPath;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<(bool success, string output)> ExecuteNativelyAsync(ToolCommand command, string resolvedExecutable, Stopwatch stopwatch, CancellationToken ct)
+    {
+        var executableName = Path.GetFileNameWithoutExtension(resolvedExecutable);
+        var args = command.Arguments != null ? string.Join(" ", command.Arguments) : string.Empty;
+        var workingDir = string.IsNullOrWhiteSpace(command.WorkingDirectory) ? Directory.GetCurrentDirectory() : command.WorkingDirectory;
+
+        SdkLog(command, $"[Docker SDK Fallback] Docker connection failed. Falling back to native execution of '{resolvedExecutable}'...", RankInfo);
+        SdkLog(command, $"[Docker SDK Fallback] Native command: {resolvedExecutable} {args}", RankInfo);
+
+        var processStartInfo = new ProcessStartInfo
+        {
+            FileName = resolvedExecutable,
+            WorkingDirectory = workingDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        if (command.Arguments != null)
+        {
+            foreach (var arg in command.Arguments)
+            {
+                processStartInfo.ArgumentList.Add(arg);
+            }
+        }
+
+        using var process = new Process { StartInfo = processStartInfo };
+        var outputBuilder = new StringBuilder();
+
+        process.OutputDataReceived += (sender, e) =>
+        {
+            if (e.Data != null)
+            {
+                outputBuilder.AppendLine(e.Data);
+                SafeInvoke(() => command.OutputHandler?.Invoke(e.Data));
+            }
+        };
+
+        process.ErrorDataReceived += (sender, e) =>
+        {
+            if (e.Data != null)
+            {
+                outputBuilder.AppendLine(e.Data);
+                SafeInvoke(() => command.ErrorHandler?.Invoke(e.Data));
+            }
+        };
+
+        try
+        {
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            using (ct.Register(() =>
+            {
+                try
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill(true);
+                    }
+                }
+                catch
+                {
+                    // Ignore
+                }
+            }))
+            {
+                await process.WaitForExitAsync(ct).ConfigureAwait(false);
+            }
+
+            var success = process.ExitCode == 0;
+            var elapsedSeconds = stopwatch.Elapsed.TotalSeconds;
+            SdkLog(command, $"[Docker SDK Fallback] Native execution finished. Exit code: {process.ExitCode} (ran {elapsedSeconds:F2}s)", RankInfo);
+
+            var finalOutput = outputBuilder.ToString();
+
+            var maxEntries = 100;
+            var retentionStr = _settingsService.SafeGetSetting<string>(ContainerExtensionModule.TelemetryRetentionSetting, "100");
+            if (!string.Equals(retentionStr, "Unlimited", StringComparison.Ordinal) && int.TryParse(retentionStr, out var parsedRetention))
+            {
+                maxEntries = parsedRetention;
+            }
+            else if (string.Equals(retentionStr, "None", StringComparison.Ordinal))
+            {
+                maxEntries = 0;
+            }
+
+            try
+            {
+                ContainerTelemetry.LogExecution(
+                    image: "native-fallback",
+                    tool: executableName,
+                    durationSeconds: elapsedSeconds,
+                    exitCode: process.ExitCode,
+                    imageDigest: "host-native",
+                    wasCancelled: ct.IsCancellationRequested,
+                    dockerRunCommand: $"[Native] {resolvedExecutable} {args}",
+                    maxEntries: maxEntries,
+                    errorMessage: success ? null : "Native fallback execution failed."
+                );
+            }
+            catch (Exception telemetryEx) when (telemetryEx is not OutOfMemoryException)
+            {
+                System.Diagnostics.Debug.WriteLine($"Telemetry logging failed: {telemetryEx.Message}");
+            }
+
+            return (success, finalOutput);
+        }
+        catch (Exception ex)
+        {
+            var errMsg = $"[Docker SDK Fallback Error] Native execution failed for '{resolvedExecutable}': {ex.Message}";
+            SafeInvoke(() => command.ErrorHandler?.Invoke(errMsg));
+            ContainerTelemetry.TrackError("DockerExecutionStrategy", $"Native fallback execution failed for '{resolvedExecutable}'", ex);
+            return (false, errMsg);
+        }
     }
 }

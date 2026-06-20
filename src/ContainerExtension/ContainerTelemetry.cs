@@ -33,10 +33,28 @@ public static partial class ContainerTelemetry
     private static partial Regex CloudKeyRegex();
 
     public static string TelemetryFilePath => _telemetryPath;
+    
+    public static Func<string> LogLevelChecker { get; set; } = () => "Verbose";
 
-    public static bool IsVerbose { get; set; } = true;
+    private static int CurrentLogLevelRank
+    {
+        get
+        {
+            var level = LogLevelChecker?.Invoke() ?? "Verbose";
+            return level switch
+            {
+                "Off" => 0,
+                "Errors Only" => 1,
+                "Info" => 2,
+                "Verbose" => 3,
+                _ => 3
+            };
+        }
+    }
 
-    private static readonly System.Threading.Channels.Channel<TelemetryErrorEntry> ErrorChannel =
+    public static bool IsVerbose => CurrentLogLevelRank >= 3;
+
+    private static System.Threading.Channels.Channel<TelemetryErrorEntry> ErrorChannel =
         System.Threading.Channels.Channel.CreateUnbounded<TelemetryErrorEntry>(new System.Threading.Channels.UnboundedChannelOptions
         {
             SingleReader = true,
@@ -78,6 +96,13 @@ public static partial class ContainerTelemetry
         _cachedErrorLineCount = -1;
         Volatile.Write(ref _cachedStats, null);
         Volatile.Write(ref _telemetryDirVerified, false);
+
+        ErrorChannel = System.Threading.Channels.Channel.CreateUnbounded<TelemetryErrorEntry>(new System.Threading.Channels.UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false
+        });
+        _ = Task.Run(ProcessErrorChannelAsync);
     }
 
     private sealed class CachedStats(
@@ -588,6 +613,15 @@ public static partial class ContainerTelemetry
         {
             return;
         }
+        var rank = CurrentLogLevelRank;
+        if (rank <= 0)
+        {
+            return;
+        }
+        if (rank == 1 && exitCode == 0 && errorMessage == null && !wasCancelled)
+        {
+            return;
+        }
         if (!IsVerbose && isDebug)
         {
             return;
@@ -760,6 +794,10 @@ public static partial class ContainerTelemetry
         }
         var checker = TelemetryOptedOutChecker;
         if (checker != null && checker())
+        {
+            return;
+        }
+        if (CurrentLogLevelRank <= 0)
         {
             return;
         }

@@ -33,6 +33,7 @@ public sealed class ContainerExtensionTests : IDisposable
         // Isolate telemetry to a temporary directory strictly for this test lifecycle
         _testTelemetryDir = Path.Combine(Path.GetTempPath(), "OneWareTests", Guid.NewGuid().ToString("N"));
         ContainerTelemetry.InitializeTestEnvironment(_testTelemetryDir);
+        ContainerTelemetry.LogLevelChecker = () => "Verbose";
     }
 
     public void Dispose()
@@ -40,6 +41,7 @@ public sealed class ContainerExtensionTests : IDisposable
         // Clean up test environment physical files
         try
         {
+            ContainerTelemetry.LogLevelChecker = () => "Verbose";
             ContainerTelemetry.Shutdown();
             if (Directory.Exists(_testTelemetryDir))
             {
@@ -2550,6 +2552,104 @@ public sealed class ContainerExtensionTests : IDisposable
             await task;
         });
     }
+
+    [Fact]
+    public void FindExecutableInPath_ResolvesGitOnSystem()
+    {
+        var gitPath = DockerExecutionStrategy.FindExecutableInPath("git");
+        Assert.NotNull(gitPath);
+        Assert.True(File.Exists(gitPath));
+    }
+
+    [Fact]
+    public void Telemetry_RespectsLogLevelOff()
+    {
+        ContainerTelemetry.LogLevelChecker = () => "Off";
+        ContainerTelemetry.ClearEntries();
+
+        ContainerTelemetry.LogExecution("test-image", "test-tool", 1.5, 0);
+        ContainerTelemetry.TrackError("test-component", "test-action", new InvalidOperationException("test exception"));
+
+        System.Threading.Thread.Sleep(200);
+
+        var entries = ContainerTelemetry.GetRecentEntries(10);
+        Assert.Empty(entries);
+
+        var errorLogFile = Path.Combine(_testTelemetryDir, "container_errors.jsonl");
+        if (File.Exists(errorLogFile))
+        {
+            var errorsContent = File.ReadAllText(errorLogFile);
+            Assert.True(string.IsNullOrWhiteSpace(errorsContent));
+        }
+    }
+
+    [Fact]
+    public void Telemetry_RespectsLogLevelErrorsOnly()
+    {
+        ContainerTelemetry.LogLevelChecker = () => "Errors Only";
+        ContainerTelemetry.ClearEntries();
+
+        ContainerTelemetry.LogExecution("test-image", "test-tool-success", 1.5, 0);
+        ContainerTelemetry.LogExecution("test-image", "test-tool-fail", 1.5, 1, errorMessage: "Failed");
+        ContainerTelemetry.TrackError("test-component", "test-action", new InvalidOperationException("test exception"));
+
+        System.Threading.Thread.Sleep(200);
+
+        var entries = ContainerTelemetry.GetRecentEntries(10);
+        Assert.NotEmpty(entries);
+        Assert.DoesNotContain(entries, e => e.Tool != null && e.Tool.Equals("test-tool-success", StringComparison.Ordinal));
+        Assert.Contains(entries, e => e.Tool != null && e.Tool.Equals("test-tool-fail", StringComparison.Ordinal));
+
+        var errorLogFile = Path.Combine(_testTelemetryDir, "container_errors.jsonl");
+        Assert.True(File.Exists(errorLogFile));
+        var errorsContent = File.ReadAllText(errorLogFile);
+        Assert.Contains("test exception", errorsContent);
+    }
+
+    [Fact]
+    public void Telemetry_OmitsStackTraceOnNonVerbose()
+    {
+        ContainerTelemetry.LogLevelChecker = () => "Info";
+        ContainerTelemetry.ClearEntries();
+
+        ContainerTelemetry.TrackError("test-component", "test-action", new InvalidOperationException("test stack trace exception"));
+
+        System.Threading.Thread.Sleep(200);
+
+        var errorLogFile = Path.Combine(_testTelemetryDir, "container_errors.jsonl");
+        Assert.True(File.Exists(errorLogFile));
+        var errorsContent = File.ReadAllText(errorLogFile);
+        Assert.Contains("test stack trace exception", errorsContent);
+        Assert.DoesNotContain("\"stack\"", errorsContent);
+    }
+
+    [Fact]
+    public async Task DockerExecutionStrategy_FallsBackToNative_WhenOfflineAndAllowed()
+    {
+        using var provider = new TestServiceProvider();
+        var settings = (MockSettingsService)provider.GetService(typeof(ISettingsService))!;
+
+        settings.SetSettingValue(ContainerExtensionModule.AllowNativeFallbackSetting, true);
+        settings.SetSettingValue(ContainerExtensionModule.DaemonSocketSetting, "unix:///invalid/offline/socket.sock");
+
+        using var strategy = new DockerExecutionStrategy(provider);
+
+        var outputLines = new List<string>();
+        var command = new ToolCommand
+        {
+            Executable = "git",
+            ToolName = "git",
+            WorkingDirectory = Directory.GetCurrentDirectory(),
+            CommandArguments = new List<ICommandArgument> { new TestCommandArgument("--version") },
+            OutputHandler = line => { outputLines.Add(line); return true; }
+        };
+
+        var (success, output) = await strategy.ExecuteAsync(command);
+
+        Assert.True(success);
+        Assert.NotEmpty(outputLines);
+        Assert.Contains(outputLines, line => line.Contains("git version", StringComparison.OrdinalIgnoreCase));
+    }
 #pragma warning restore CA1305, CA1307, CA1031, CA1822, CS8019, CA1308
 }
 
@@ -2573,7 +2673,8 @@ internal sealed class MockSettingsService : ISettingsService
         [ContainerExtensionModule.ExtraFlagsSetting] = "",
         [ContainerExtensionModule.DashboardRefreshSetting] = "Manual",
         [ContainerExtensionModule.ContainerNamePrefixSetting] = "containerextension-",
-        [ContainerExtensionModule.TelemetryRetentionSetting] = "100"
+        [ContainerExtensionModule.TelemetryRetentionSetting] = "100",
+        [ContainerExtensionModule.AllowNativeFallbackSetting] = false
     };
 
     public event EventHandler<SaveEventArgs>? Saved = delegate { };
