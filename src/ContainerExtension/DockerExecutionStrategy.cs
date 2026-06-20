@@ -2710,6 +2710,12 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         return false;
     }
 
+    /// <summary>
+    /// Searches the host system's environment PATH variable to locate the specified executable.
+    /// Supports relative/absolute path checking and handles Windows-specific file extensions.
+    /// </summary>
+    /// <param name="executable">The file name or path of the executable to search for.</param>
+    /// <returns>The resolved absolute path of the executable if found; otherwise, null.</returns>
     public static string? FindExecutableInPath(string executable)
     {
         if (string.IsNullOrWhiteSpace(executable)) return null;
@@ -2742,6 +2748,15 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         return null;
     }
 
+    /// <summary>
+    /// Executes the specified tool command natively on the host operating system.
+    /// Captures standard output and error streams, handles cancellation recursively, and logs execution telemetry.
+    /// </summary>
+    /// <param name="command">The tool command payload detailing working directory and arguments.</param>
+    /// <param name="resolvedExecutable">The absolute host file path of the executable binary.</param>
+    /// <param name="stopwatch">The stopwatch tracking elapsed execution duration.</param>
+    /// <param name="ct">The token used to signal operation cancellation.</param>
+    /// <returns>A tuple indicating success status and accumulated terminal output.</returns>
     private async Task<(bool success, string output)> ExecuteNativelyAsync(ToolCommand command, string resolvedExecutable, Stopwatch stopwatch, CancellationToken ct)
     {
         var executableName = Path.GetFileNameWithoutExtension(resolvedExecutable);

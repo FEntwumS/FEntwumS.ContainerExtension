@@ -60,6 +60,9 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     public const string ShowTimestampsSetting = "ContainerExtension_ShowTimestamps";
     public const string TelemetryRetentionSetting = "ContainerExtension_TelemetryRetention";
     public const string BypassNamedPipeCheckSetting = "ContainerExtension_BypassNamedPipeCheck";
+    /// <summary>
+    /// Preference setting key that controls whether to fall back to host native execution if the Docker daemon is offline.
+    /// </summary>
     public const string AllowNativeFallbackSetting = "ContainerExtension_AllowNativeFallback";
     public const string PerToolImagePrefix = "ContainerImage_";
     public const string FallbackImage = "hdlc/ghdl:yosys";
@@ -81,6 +84,9 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     public const string SettingsKeyRetention = "Retention";
     public const string SettingsKeyRuntimePath = "Runtime Path";
     public const string SettingsKeyBypassNamedPipeCheck = "Bypass Named Pipe Security";
+    /// <summary>
+    /// User-facing label key for the native fallback configuration summary on the diagnostics screen.
+    /// </summary>
     public const string SettingsKeyAllowNativeFallback = "Allow Native Fallback";
 
     public static readonly FrozenDictionary<string, string> DefaultToolImages =

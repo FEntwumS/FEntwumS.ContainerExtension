@@ -34,8 +34,16 @@ public static partial class ContainerTelemetry
 
     public static string TelemetryFilePath => _telemetryPath;
     
+    /// <summary>
+    /// Gets or sets the delegate function used to dynamically resolve the current logging level configuration.
+    /// Default resolves to "Verbose".
+    /// </summary>
     public static Func<string> LogLevelChecker { get; set; } = () => "Verbose";
 
+    /// <summary>
+    /// Evaluates the rank of the current log level based on the configuration checked by <see cref="LogLevelChecker"/>.
+    /// Ranks map as: "Off" => 0, "Errors Only" => 1, "Info" => 2, "Verbose" => 3.
+    /// </summary>
     private static int CurrentLogLevelRank
     {
         get
@@ -52,6 +60,9 @@ public static partial class ContainerTelemetry
         }
     }
 
+    /// <summary>
+    /// Gets a value indicating whether verbose telemetry logging is currently active (rank level 3).
+    /// </summary>
     public static bool IsVerbose => CurrentLogLevelRank >= 3;
 
     private static System.Threading.Channels.Channel<TelemetryErrorEntry> ErrorChannel =
