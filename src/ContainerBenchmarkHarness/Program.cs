@@ -12,11 +12,20 @@ using System.Collections.Generic;
 
 #pragma warning disable CA1303 // Do not pass literals as localized parameters
 #pragma warning disable CA1031 // Do not catch general exception types
+#pragma warning disable CA1822 // Mark members as static
 
 namespace ContainerBenchmarkHarness;
 
+/// <summary>
+/// The main entry point and execution coordinator for the container benchmark harness.
+/// </summary>
 sealed class Program
 {
+    /// <summary>
+    /// The entry point for the benchmark harness application.
+    /// </summary>
+    /// <param name="args">The command-line arguments passed to the harness.</param>
+    /// <returns>An exit code where 0 indicates success and any other value indicates failure.</returns>
     static async Task<int> Main(string[] args)
     {
         if (args.Length < 1)
@@ -74,6 +83,11 @@ sealed class Program
         }
     }
 
+    /// <summary>
+    /// Runs a concurrent telemetry stress test to measure system stability under load.
+    /// </summary>
+    /// <param name="args">The command-line arguments specifying test parameters like processes, threads, and iterations.</param>
+    /// <returns>An exit code where 0 indicates success and any other value indicates failure.</returns>
     private static async Task<int> RunStressTestAsync(string[] args)
     {
         int processes = 1;
@@ -208,38 +222,66 @@ sealed class Program
     }
 }
 
-#pragma warning disable CA1822 // Interface stubs cannot be static
+/// <summary>
+/// A mocked implementation of the OneWare settings service used by the benchmark harness.
+/// Allows setting and querying mock configuration preferences without the full OneWare Studio runtime.
+/// </summary>
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "Instantiated via DI")]
 sealed class MockSettingsService : ISettingsService
 {
-    private static readonly Dictionary<string, object> Defaults = new()
+    private static readonly Dictionary<string, object> DefaultSettings = new(StringComparer.Ordinal)
     {
         [ContainerExtensionModule.AutoRemoveSetting] = true,
         [ContainerExtensionModule.DefaultImageSetting] = ContainerExtensionModule.FallbackImage,
         [ContainerExtensionModule.DockerRuntimePathSetting] = "",
-        [ContainerExtensionModule.MemoryLimitSetting] = 0.0,       // SliderSetting (0 = no limit)
-        [ContainerExtensionModule.CpuLimitSetting] = 0.0,          // SliderSetting (0 = no limit)
+        [ContainerExtensionModule.MemoryLimitSetting] = 0.0,
+        [ContainerExtensionModule.CpuLimitSetting] = 0.0,
         [ContainerExtensionModule.DaemonSocketSetting] = "",
-        [ContainerExtensionModule.PlatformSetting] = "auto",            // ComboBoxSetting
-        [ContainerExtensionModule.TimeoutSetting] = 0.0,            // SliderSetting (0 = no timeout)
-        [ContainerExtensionModule.NetworkModeSetting] = "bridge",   // ComboBoxSetting
-        [ContainerExtensionModule.LogLevelSetting] = "Verbose",      // ComboBoxSetting
-        [ContainerExtensionModule.ShowTimestampsSetting] = true,     // CheckBoxSetting
-        [ContainerExtensionModule.PullPolicySetting] = "if-not-present", // ComboBoxSetting
-        [ContainerExtensionModule.ExtraFlagsSetting] = "",           // TextBoxSetting (container labels)
-        [ContainerExtensionModule.DashboardRefreshSetting] = "Manual", // ComboBoxSetting
-        [ContainerExtensionModule.ContainerNamePrefixSetting] = "containerextension-", // TextBoxSetting
-        [ContainerExtensionModule.TelemetryRetentionSetting] = "100" // ComboBoxSetting
+        [ContainerExtensionModule.PlatformSetting] = "auto",
+        [ContainerExtensionModule.TimeoutSetting] = 0.0,
+        [ContainerExtensionModule.NetworkModeSetting] = "bridge",
+        [ContainerExtensionModule.LogLevelSetting] = "Verbose",
+        [ContainerExtensionModule.ShowTimestampsSetting] = true,
+        [ContainerExtensionModule.PullPolicySetting] = "if-not-present",
+        [ContainerExtensionModule.ExtraFlagsSetting] = "",
+        [ContainerExtensionModule.DashboardRefreshSetting] = "Manual",
+        [ContainerExtensionModule.ContainerNamePrefixSetting] = "containerextension-",
+        [ContainerExtensionModule.TelemetryRetentionSetting] = "100",
+        [ContainerExtensionModule.BypassNamedPipeCheckSetting] = false,
+        [ContainerExtensionModule.AllowNativeFallbackSetting] = false
     };
 
+    private readonly Dictionary<string, object> _settings;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="MockSettingsService"/> class populated with default settings.
+    /// </summary>
+    public MockSettingsService()
+    {
+        _settings = new Dictionary<string, object>(DefaultSettings, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Fired when a setting is saved. Stubbed for compatibility.
+    /// </summary>
     public event EventHandler<SaveEventArgs>? Saved = delegate { };
 
-    // Must check dictionary to ensure SafeGetSetting resolves the defaults accurately
-    public bool HasSetting(string key) => Defaults.ContainsKey(key);
+    /// <summary>
+    /// Checks if a setting is present in the configuration dictionary.
+    /// </summary>
+    /// <param name="key">The configuration key name.</param>
+    /// <returns>True if the key exists; otherwise, false.</returns>
+    public bool HasSetting(string key) => _settings.ContainsKey(key);
 
+    /// <summary>
+    /// Retrieves a typed setting value from the configuration.
+    /// </summary>
+    /// <typeparam name="T">The type of the setting.</typeparam>
+    /// <param name="key">The configuration key name.</param>
+    /// <returns>The typed value if present; otherwise, default.</returns>
     public T GetSettingValue<T>(string key)
     {
-        if (Defaults.TryGetValue(key, out var value))
+        if (_settings.TryGetValue(key, out var value))
         {
             if (value is T typed)
             {
@@ -257,25 +299,47 @@ sealed class MockSettingsService : ISettingsService
         return default(T)!;
     }
 
+    /// <summary>Stubs for categories registration.</summary>
     public void RegisterSettingCategory(string category, int order, string? icon) { }
+    /// <summary>Stubs for subcategories registration.</summary>
     public void RegisterSettingSubCategory(string category, string subCategory, int order, string? icon) { }
+    /// <summary>Stubs for subcategories registration.</summary>
     public void RegisterSettingSubCategory(string category, string subCategory) { }
+    /// <summary>Stubs for registry registration.</summary>
     public void Register<T>(string key, T setting) { }
+    /// <summary>Stubs for setting binding.</summary>
     public IObservable<T> Bind<T>(string key, IObservable<T> observable) => observable;
+    /// <summary>Stubs for setting registration.</summary>
     public void RegisterTitled<T>(string category, string subCategory, string key, string title, string description, T defaultValue) { }
+    /// <summary>Stubs for folder path setting registration.</summary>
     public void RegisterTitledFolderPath(string category, string subCategory, string key, string title, string description, string defaultPath, string? icon, string? placeholder, Func<string, bool>? validator) { }
+    /// <summary>Stubs for file path setting registration.</summary>
     public void RegisterTitledFilePath(string category, string subCategory, string key, string title, string description, string defaultPath, string? icon, string? placeholder, Func<string, bool>? validator, params Avalonia.Platform.Storage.FilePickerFileType[] fileTypes) { }
+    /// <summary>Stubs for slider setting registration.</summary>
     public void RegisterTitledSlider(string category, string subCategory, string key, string title, string description, double defaultValue, double min, double max, double tick) { }
+    /// <summary>Stubs for combo setting registration.</summary>
     public void RegisterTitledCombo<T>(string category, string subCategory, string key, string title, string description, T defaultValue, params T[] options) { }
+    /// <summary>Stubs for search combo setting registration.</summary>
     public void RegisterTitledComboSearch<T>(string category, string subCategory, string key, string title, string description, T defaultValue, params T[] options) { }
+    /// <summary>Stubs for list box setting registration.</summary>
     public void RegisterTitledListBox(string category, string subCategory, string key, string title, string description, params string[] options) { }
+    /// <summary>Stubs for setting registration.</summary>
     public void RegisterSetting(string category, string subCategory, string key, OneWare.Essentials.Models.TitledSetting setting) { }
+    /// <summary>Stubs for setting registration.</summary>
     public void RegisterSetting(string category, string subCategory, string key, object settingModule) { }
+    /// <summary>Stubs for setting updates.</summary>
     public void UpdateSetting(string key, OneWare.Essentials.Models.TitledSetting setting) { }
+    /// <summary>Stubs for custom setting registration.</summary>
     public void RegisterCustom(string category, string subCategory, string key, OneWare.Essentials.Models.CustomSetting setting) { }
+
+    /// <summary>
+    /// Resolves and builds a mocked OneWare Setting wrapper object for a configuration key.
+    /// </summary>
+    /// <param name="key">The configuration key name.</param>
+    /// <returns>A typed OneWare setting descriptor.</returns>
     public OneWare.Essentials.Models.Setting GetSetting(string key)
     {
-        if (Defaults.TryGetValue(key, out var defaultValue))
+        if (_settings.TryGetValue(key, out var defaultValue))
         {
             if (defaultValue is bool b)
             {
@@ -292,24 +356,56 @@ sealed class MockSettingsService : ISettingsService
         }
         return new TextBoxSetting(key, "", null);
     }
+
+    /// <summary>Stubs for combo options retrieval.</summary>
     public T[] GetComboOptions<T>(string key) => Array.Empty<T>();
-    public void SetSettingValue(string key, object value) { }
+
+    /// <summary>
+    /// Modifies a setting value in the configuration dynamically.
+    /// </summary>
+    /// <param name="key">The configuration key name.</param>
+    /// <param name="value">The new setting value.</param>
+    public void SetSettingValue(string key, object value)
+    {
+        _settings[key] = value;
+    }
+
+    /// <summary>Stubs for settings observable binding.</summary>
     public IObservable<T> GetSettingObservable<T>(string key) => System.Reactive.Linq.Observable.Empty<T>();
+    /// <summary>Stubs for settings loading.</summary>
     public void Load(string path) { }
+    /// <summary>Stubs for settings saving.</summary>
     public void Save(string path, bool overrideExisting) { }
+    /// <summary>Stubs for initialization hooks.</summary>
     public void WhenLoaded(Action action) { }
+    /// <summary>Stubs for settings resetting.</summary>
     public void Reset(string key) { }
+    /// <summary>Stubs for settings resetting.</summary>
     public void ResetAll() { }
 }
 #pragma warning restore CA1822
 
+/// <summary>
+/// A mock implementation of <see cref="ICommandArgument"/> used for testing and benchmarking commands.
+/// </summary>
 internal sealed class TestCommandArgument : ICommandArgument
 {
     private string _argument;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TestCommandArgument"/> class with the specified argument.
+    /// </summary>
+    /// <param name="argument">The string argument representation.</param>
     public TestCommandArgument(string argument)
     {
         _argument = argument;
     }
+
+    /// <summary>
+    /// Prepares the command argument for execution on the target operating system, applying path mapping if necessary.
+    /// </summary>
+    /// <param name="osPlatform">The target operating system platform.</param>
+    /// <param name="pathMapper">An optional function to map file paths from host to container.</param>
     public void Prepare(System.Runtime.InteropServices.OSPlatform osPlatform, Func<string, string>? pathMapper = null)
     {
         if (pathMapper != null && ContainerExtension.Services.Docker.DockerCommandBuilder.ShouldMapArgument(_argument))
@@ -321,5 +417,10 @@ internal sealed class TestCommandArgument : ICommandArgument
             }
         }
     }
+
+    /// <summary>
+    /// Gets the string representation of the prepared command argument.
+    /// </summary>
+    /// <returns>The command argument string.</returns>
     public string GetArgument() => _argument;
 }
