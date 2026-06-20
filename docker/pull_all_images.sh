@@ -6,10 +6,31 @@ set -Eeuo pipefail
 trap 'echo -e "\nProcess terminated abnormally." ; exit 1' ERR INT TERM
 
 PLATFORM="linux/amd64"
-DRY_RUN="${1:-}"
+DRY_RUN=""
 TOTAL=0
 FAILED=0
 SUCCEEDED=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry)
+      DRY_RUN="--dry"
+      shift
+      ;;
+    -h|--help)
+      echo "Usage: $0 [--dry]"
+      echo "Options:"
+      echo "  --dry    Dry run: print tool targets and descriptions without pulling images"
+      echo "  --help   Show this help message"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Usage: $0 [--dry]"
+      exit 1
+      ;;
+  esac
+done
 
 # Docker Content Trust
 # export DOCKER_CONTENT_TRUST=1

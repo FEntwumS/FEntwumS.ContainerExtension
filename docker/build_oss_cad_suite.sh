@@ -5,33 +5,50 @@
 set -Eeuo pipefail
 trap 'echo -e "\nCritical failure at line $LINENO"; exit 1' ERR
 
-export DOCKER_BUILDKIT=1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "${SCRIPT_DIR}/oss-cad-suite"
 
-RELEASE_TAG="2026-06-11"
-RELEASE_DATE="20260611"
+NO_CACHE=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --no-cache)
+            NO_CACHE="--no-cache"
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--no-cache]"
+            exit 1
+            ;;
+    esac
+done
+
+RELEASE_TAG="2026-06-20"
+RELEASE_DATE="20260620"
 IMAGE_NAME="fentwums/oss-cad-suite"
 
-# Force linux-x64 for GHDL compatibility
+# Force linux-x64 (linux/amd64) for GHDL compatibility.
+# Upstream oss-cad-suite-build does not compile GHDL in its ARM64 releases.
 ARCH="linux-x64"
+DOCKER_PLATFORM="linux/amd64"
 
 echo "==============================================================="
-echo "Building ${IMAGE_NAME}:${RELEASE_TAG} (linux/amd64) (Hardened)"
+echo "Building ${IMAGE_NAME}:${RELEASE_TAG} (${DOCKER_PLATFORM}) (Hardened)"
 echo "==============================================================="
 
 # Build
-docker build \
-    --platform linux/amd64 \
-    --no-cache \
-    -t "${IMAGE_NAME}:latest" \
-    -t "${IMAGE_NAME}:${RELEASE_TAG}" \
-    --build-arg RELEASE_TAG="${RELEASE_TAG}" \
-    --build-arg RELEASE_DATE="${RELEASE_DATE}" \
-    --build-arg ARCH="${ARCH}" \
-    --build-arg BUILDKIT_INLINE_CACHE=1 \
-    .
+(
+    cd "${SCRIPT_DIR}/oss-cad-suite"
+    docker build \
+        --platform "${DOCKER_PLATFORM}" \
+        ${NO_CACHE} \
+        -t "${IMAGE_NAME}:latest" \
+        -t "${IMAGE_NAME}:${RELEASE_TAG}" \
+        --build-arg RELEASE_TAG="${RELEASE_TAG}" \
+        --build-arg RELEASE_DATE="${RELEASE_DATE}" \
+        --build-arg ARCH="${ARCH}" \
+        .
+)
 
 echo ""
 echo "--------------------------------------------------------------"

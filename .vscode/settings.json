@@ -22,5 +22,19 @@
   "csharp.inlayHints.enableInlayHintsForTypes": true,
   "csharp.semanticHighlighting.enabled": true,
   "dotnet.defaultSolution": "OneWare.ContainerExtension.slnx",
-  "hadolint.requireComments": true
+  "hadolint.requireComments": true,
+  "cSpell.words": [
+    "FEntwumS",
+    "OneWare",
+    "neorv32",
+    "picorv32",
+    "yosys",
+    "nextpnr",
+    "ghdl",
+    "hadolint",
+    "trivy",
+    "axaml",
+    "aarch64",
+    "gitdir"
+  ]
 }

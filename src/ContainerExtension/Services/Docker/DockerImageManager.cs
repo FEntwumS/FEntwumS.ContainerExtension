@@ -42,8 +42,16 @@ public sealed class DockerImageManager
         try
         {
             var path = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            if (string.IsNullOrEmpty(path)) path = "/";
-            var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(path)) ?? "/");
+            if (string.IsNullOrEmpty(path))
+            {
+                path = OperatingSystem.IsWindows() ? "C:\\" : "/";
+            }
+            var root = Path.GetPathRoot(Path.GetFullPath(path));
+            if (string.IsNullOrEmpty(root))
+            {
+                root = OperatingSystem.IsWindows() ? "C:\\" : "/";
+            }
+            var drive = new DriveInfo(root);
             if (drive.AvailableFreeSpace < requiredBytes)
             {
                 errorMessage = $"Insufficient disk space on host system. Free: {drive.AvailableFreeSpace / (1024.0 * 1024.0 * 1024.0):N1} GB, Required: {requiredBytes / (1024.0 * 1024.0 * 1024.0):N1} GB.";

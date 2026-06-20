@@ -1672,7 +1672,14 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 {
                     for (int idx = 0; idx < finalCount; idx++)
                     {
-                        handler!(finalArray[idx]);
+                        try
+                        {
+                            handler!(finalArray[idx]);
+                        }
+                        catch (Exception ex) when (ex is not OutOfMemoryException)
+                        {
+                            ContainerTelemetry.TrackError("DockerExecutionStrategy", "DrainLines callback handler failed", ex);
+                        }
                     }
                 }
                 finally
@@ -1976,7 +1983,8 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 var buffer = new byte[8192];
                 var stdoutBuf = new StringBuilder();
                 var stderrBuf = new StringBuilder();
-                var decoder = Encoding.UTF8.GetDecoder();
+                var stdoutDecoder = Encoding.UTF8.GetDecoder();
+                var stderrDecoder = Encoding.UTF8.GetDecoder();
                 var charBuf = System.Buffers.ArrayPool<char>.Shared.Rent(Encoding.UTF8.GetMaxCharCount(buffer.Length));
 
                 try
@@ -1987,19 +1995,25 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                         var result = await stream.ReadOutputAsync(buffer, 0, buffer.Length, readToken).ConfigureAwait(false);
                         if (result.EOF) break;
 
-                        var charCount = decoder.GetChars(buffer, 0, result.Count, charBuf, 0, flush: false);
-                        var textSpan = charBuf.AsSpan(0, charCount);
-                        lock (outputBuilder)
-                        {
-                            outputBuilder.Append(textSpan);
-                        }
-
+                        int charCount;
                         if (result.Target == MultiplexedStream.TargetStream.StandardError)
                         {
+                            charCount = stderrDecoder.GetChars(buffer, 0, result.Count, charBuf, 0, flush: false);
+                            var textSpan = charBuf.AsSpan(0, charCount);
+                            lock (outputBuilder)
+                            {
+                                outputBuilder.Append(textSpan);
+                            }
                             DrainLines(stderrBuf, textSpan, command.ErrorHandler);
                         }
                         else
                         {
+                            charCount = stdoutDecoder.GetChars(buffer, 0, result.Count, charBuf, 0, flush: false);
+                            var textSpan = charBuf.AsSpan(0, charCount);
+                            lock (outputBuilder)
+                            {
+                                outputBuilder.Append(textSpan);
+                            }
                             DrainLines(stdoutBuf, textSpan, command.OutputHandler);
                         }
                     }

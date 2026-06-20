@@ -5,8 +5,8 @@ FROM ubuntu@sha256:f3d28607ddd78734bb7f71f117f3c6706c666b8b76cbff7c9ff6e5718d46f
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-ARG RELEASE_TAG=2026-06-11
-ARG RELEASE_DATE=20260611
+ARG RELEASE_TAG=2026-06-20
+ARG RELEASE_DATE=20260620
 ARG ARCH=linux-x64
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Download
-RUN wget --retry-connrefused --read-timeout=60 --timeout=30 -O /tmp/oss-cad-suite.tgz \
+RUN wget --progress=dot:giga --retry-connrefused --read-timeout=60 --timeout=30 -O /tmp/oss-cad-suite.tgz \
     "https://github.com/YosysHQ/oss-cad-suite-build/releases/download/${RELEASE_TAG}/oss-cad-suite-${ARCH}-${RELEASE_DATE}.tgz" \
     && mkdir -p /opt \
     && tar xzf /tmp/oss-cad-suite.tgz -C /opt \

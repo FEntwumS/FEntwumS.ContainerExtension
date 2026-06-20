@@ -49,7 +49,7 @@ public partial class DockerDiagnosticsView : UserControl
     private readonly StackPanel _toolchainContent;
     private readonly TextBlock _headerTitle;
     private string _pluginVersion;
-    private readonly WrapPanel _quickActionsRow;
+    private readonly StackPanel _quickActionsRow;
     private readonly ISettingsService _settingsService;
     private readonly TextBox _searchBox;
     private readonly IServiceProvider _serviceProvider;
@@ -262,7 +262,10 @@ public partial class DockerDiagnosticsView : UserControl
         var kpiGrid = new Grid
         {
             Margin = new Thickness(0, 4, 0, 8),
-            ColumnDefinitions = new ColumnDefinitions("*,*,*,*")
+            ColumnDefinitions = new ColumnDefinitions("*,*"),
+            RowDefinitions = new RowDefinitions("Auto,Auto"),
+            RowSpacing = 6,
+            ColumnSpacing = 6
         };
 
         var daemonCard = CreateMetricCard("DAEMON STATUS", "Offline", "Not Connected", RedColor, out _metricDaemonStatusText, out _metricDaemonDetailText, out _metricDaemonBorder);
@@ -270,10 +273,10 @@ public partial class DockerDiagnosticsView : UserControl
         var imagesCard = CreateMetricCard("IMAGES", "0 Images", "0 B total", AccentColor, out _metricImagesText, out _metricImagesDetailText, out _);
         var diskCard = CreateMetricCard("RECLAIMABLE SPACE", "0 B", "No dangling items", AccentColor, out _metricDiskText, out _metricDiskDetailText, out _);
 
-        Grid.SetColumn(daemonCard, 0);
-        Grid.SetColumn(containersCard, 1);
-        Grid.SetColumn(imagesCard, 2);
-        Grid.SetColumn(diskCard, 3);
+        Grid.SetColumn(daemonCard, 0); Grid.SetRow(daemonCard, 0);
+        Grid.SetColumn(containersCard, 1); Grid.SetRow(containersCard, 0);
+        Grid.SetColumn(imagesCard, 0); Grid.SetRow(imagesCard, 1);
+        Grid.SetColumn(diskCard, 1); Grid.SetRow(diskCard, 1);
 
         kpiGrid.Children.Add(daemonCard);
         kpiGrid.Children.Add(containersCard);
@@ -365,39 +368,21 @@ public partial class DockerDiagnosticsView : UserControl
 
         closeBannerBtn.Command = new RelayCommand(() => _statusBanner.IsVisible = false);
 
-        // -- Layout Grid Columns -----------------------------------------
-        var columnsGrid = new Grid
-        {
-            ColumnDefinitions = new ColumnDefinitions("2*,16,*"),
-            Margin = new Thickness(0, 8, 0, 0)
-        };
-
-        var leftColumnPanel = new StackPanel
+        // -- Sections Panel (1-Grid Layout) ------------------------------
+        var sectionsPanel = new StackPanel
         {
             Spacing = 12,
-            Children =
-            {
-                containersSection,
-                imagesSection,
-                telemetrySection
-            }
-        };
-
-        var rightColumnPanel = new StackPanel
-        {
-            Spacing = 12,
+            Margin = new Thickness(0, 8, 0, 0),
             Children =
             {
                 statusSection,
+                containersSection,
+                imagesSection,
+                telemetrySection,
                 toolchainSection,
                 configSection
             }
         };
-
-        Grid.SetColumn(leftColumnPanel, 0);
-        Grid.SetColumn(rightColumnPanel, 2);
-        columnsGrid.Children.Add(leftColumnPanel);
-        columnsGrid.Children.Add(rightColumnPanel);
 
         // -- Layout ------------------------------------------------------
         var mainPanel = new StackPanel
@@ -411,7 +396,7 @@ public partial class DockerDiagnosticsView : UserControl
                 _searchBox,
                 _quickActionsRow,
                 kpiGrid,
-                columnsGrid
+                sectionsPanel
             }
         };
 
@@ -1575,15 +1560,117 @@ public partial class DockerDiagnosticsView : UserControl
         ShowTemporaryStatus($"{titlePrefix}: {ex.Message}", isError: true, isTemporary: isTemporary);
     }
 
-    private WrapPanel BuildQuickActionsRow()
+    private StackPanel BuildQuickActionsRow()
     {
-        var actionsRow = new WrapPanel
+        var actionsPanel = new StackPanel
         {
-            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Spacing = 8,
             Margin = new Thickness(0, 0, 0, 4)
         };
 
-        actionsRow.Children.Add(CreateActionButton("Pull Image", async () =>
+        // Group 1: Toolchain Settings
+        var settingsRow = new WrapPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        
+        settingsRow.Children.Add(CreateActionButton("All to Docker", async () =>
+        {
+            try
+            {
+                var toolService = _serviceProvider.Resolve<IToolService>();
+                if (toolService == null) throw new InvalidOperationException("IToolService is not registered.");
+
+                var allTools = toolService.GetAllTools();
+                var strategyKey = _strategy.GetStrategyKey();
+                int updatedCount = 0;
+
+                foreach (var tool in allTools)
+                {
+                    if (_settingsService.HasSetting(tool.Key) &&
+                        _settingsService.GetSetting(tool.Key) is ComboBoxSetting comboSetting &&
+                        comboSetting.Options.Any(opt => opt is string str && string.Equals(str, strategyKey, StringComparison.Ordinal)))
+                    {
+                        _settingsService.SetSettingValue(tool.Key, strategyKey);
+                        updatedCount++;
+                    }
+                }
+
+                ShowTemporaryStatus($"{ContainerExtensionModule.DashboardTitle} — Configured {updatedCount} tools to Docker");
+                _ = RefreshAllAsync();
+            }
+            catch (Exception ex)
+            {
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_AllToDocker", ex);
+                ShowTemporaryError("⚠️ Action failed", ex);
+            }
+        }, "Switch the execution strategy of all supported FPGA tools to Docker"));
+
+        settingsRow.Children.Add(CreateActionButton("All to Native", async () =>
+        {
+            try
+            {
+                var toolService = _serviceProvider.Resolve<IToolService>();
+                if (toolService == null) throw new InvalidOperationException("IToolService is not registered.");
+
+                var allTools = toolService.GetAllTools();
+                var strategyKey = _strategy.GetStrategyKey();
+                int updatedCount = 0;
+
+                foreach (var tool in allTools)
+                {
+                    if (_settingsService.HasSetting(tool.Key) &&
+                        _settingsService.GetSetting(tool.Key) is ComboBoxSetting comboSetting)
+                    {
+                        var defaultOption = comboSetting.Options.FirstOrDefault(opt => opt is string str && !string.Equals(str, strategyKey, StringComparison.Ordinal)) as string;
+                        if (defaultOption != null)
+                        {
+                            _settingsService.SetSettingValue(tool.Key, defaultOption);
+                            updatedCount++;
+                        }
+                    }
+                }
+
+                ShowTemporaryStatus($"{ContainerExtensionModule.DashboardTitle} — Reset {updatedCount} tools to Native");
+                _ = RefreshAllAsync();
+            }
+            catch (Exception ex)
+            {
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_AllToNative", ex);
+                ShowTemporaryError("⚠️ Action failed", ex);
+            }
+        }, "Reset the execution strategy of all tools to their default native execution"));
+
+        settingsRow.Children.Add(CreateActionButton("Copy Docker Run", async () =>
+        {
+            try
+            {
+                var cmd = _strategy.GenerateDockerRunCommand();
+                var topLevel = TopLevel.GetTopLevel(this);
+                if (topLevel?.Clipboard != null)
+                {
+                    await topLevel.Clipboard.SetTextAsync(cmd).ConfigureAwait(false);
+                    ShowTemporaryStatus("📋 Copied equivalent 'docker run' command to clipboard!");
+                    await Console.Out.WriteLineAsync($"[ContainerExtension] 📋 Copied to clipboard: {cmd}").ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_CopyDockerRun", ex);
+                ShowTemporaryError("⚠️ Copy failed", ex);
+            }
+        }, "Copy an equivalent 'docker run' command to the clipboard for manual debugging"));
+
+        var settingsCard = CreateCard("Quick Settings", settingsRow, defaultExpanded: false);
+        actionsPanel.Children.Add(settingsCard);
+
+        // Group 2: Image Operations
+        var imageRow = new WrapPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+
+        imageRow.Children.Add(CreateActionButton("Pull Image", async () =>
         {
             try
             {
@@ -1600,7 +1687,7 @@ public partial class DockerDiagnosticsView : UserControl
             }
         }, "Download or update the configured default toolchain image"));
 
-        actionsRow.Children.Add(CreateActionButton("Build Local Image", async () =>
+        imageRow.Children.Add(CreateActionButton("Build Local Image", async () =>
         {
             try
             {
@@ -1679,7 +1766,7 @@ public partial class DockerDiagnosticsView : UserControl
             }
         }, "Build the local FPGA toolchain Docker image from source"));
 
-        actionsRow.Children.Add(CreateActionButton("Update All Images", async () =>
+        imageRow.Children.Add(CreateActionButton("Update All Images", async () =>
         {
             try
             {
@@ -1708,7 +1795,7 @@ public partial class DockerDiagnosticsView : UserControl
             }
         }, "Re-pull all local images to their latest tags (cross-platform, no shell required)"));
 
-        actionsRow.Children.Add(CreateActionButton("⚠️ Prune All Images", async () =>
+        imageRow.Children.Add(CreateActionButton("⚠️ Prune All Images", async () =>
         {
             try
             {
@@ -1728,7 +1815,46 @@ public partial class DockerDiagnosticsView : UserControl
             }
         }, "⚠️ Remove ALL unused images (not just dangling). This frees disk space but deleted images must be re-pulled."));
 
-        actionsRow.Children.Add(CreateActionButton("⚠️ Prune System", async () =>
+        var imageCard = CreateCard("Image Operations", imageRow, defaultExpanded: false);
+        actionsPanel.Children.Add(imageCard);
+
+        // Group 3: Engine Diagnostics & Cleanup
+        var engineRow = new WrapPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+
+        engineRow.Children.Add(CreateActionButton("Hello-World Test", async () =>
+        {
+            try
+            {
+                var runtimePath = _strategy.GetRuntimePath();
+                ShowTemporaryStatus("Running Hello-World test in terminal...");
+                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} run --rm hello-world", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_HelloWorldTest", ex);
+                ShowTemporaryError("⚠️ Action failed", ex);
+            }
+        }, "Run a disposable hello-world container to verify Docker is working correctly"));
+
+        engineRow.Children.Add(CreateActionButton("Engine Info", async () =>
+        {
+            try
+            {
+                var runtimePath = _strategy.GetRuntimePath();
+                ShowTemporaryStatus("Querying Engine Info in terminal...");
+                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} info", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(1)).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_EngineInfo", ex);
+                ShowTemporaryError("⚠️ Action failed", ex);
+            }
+        }, "Show detailed Docker engine configuration, storage driver, and runtime info"));
+
+        engineRow.Children.Add(CreateActionButton("⚠️ Prune System", async () =>
         {
             try
             {
@@ -1748,124 +1874,10 @@ public partial class DockerDiagnosticsView : UserControl
             }
         }, "⚠️ Remove ALL stopped containers, dangling images, and unused networks. This cannot be undone."));
 
-        actionsRow.Children.Add(CreateActionButton("Hello-World Test", async () =>
-        {
-            try
-            {
-                var runtimePath = _strategy.GetRuntimePath();
-                ShowTemporaryStatus("Running Hello-World test in terminal...");
-                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} run --rm hello-world", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_HelloWorldTest", ex);
-                ShowTemporaryError("⚠️ Action failed", ex);
-            }
-        }, "Run a disposable hello-world container to verify Docker is working correctly"));
+        var engineCard = CreateCard("Engine & Cleanup", engineRow, defaultExpanded: false);
+        actionsPanel.Children.Add(engineCard);
 
-        actionsRow.Children.Add(CreateActionButton("Engine Info", async () =>
-        {
-            try
-            {
-                var runtimePath = _strategy.GetRuntimePath();
-                ShowTemporaryStatus("Querying Engine Info in terminal...");
-                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} info", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(1)).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_EngineInfo", ex);
-                ShowTemporaryError("⚠️ Action failed", ex);
-            }
-        }, "Show detailed Docker engine configuration, storage driver, and runtime info"));
-
-        actionsRow.Children.Add(CreateActionButton("Copy Docker Run", async () =>
-        {
-            try
-            {
-                var cmd = _strategy.GenerateDockerRunCommand();
-                var topLevel = TopLevel.GetTopLevel(this);
-                if (topLevel?.Clipboard != null)
-                {
-                    await topLevel.Clipboard.SetTextAsync(cmd).ConfigureAwait(false);
-                    ShowTemporaryStatus("📋 Copied equivalent 'docker run' command to clipboard!");
-                    await Console.Out.WriteLineAsync($"[ContainerExtension] 📋 Copied to clipboard: {cmd}").ConfigureAwait(false);
-                }
-            }
-            catch (Exception ex)
-            {
-                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_CopyDockerRun", ex);
-                ShowTemporaryError("⚠️ Copy failed", ex);
-            }
-        }, "Copy an equivalent 'docker run' command to the clipboard for manual debugging"));
-
-        actionsRow.Children.Add(CreateActionButton("All to Docker", async () =>
-        {
-            try
-            {
-                var toolService = _serviceProvider.Resolve<IToolService>();
-                if (toolService == null) throw new InvalidOperationException("IToolService is not registered.");
-
-                var allTools = toolService.GetAllTools();
-                var strategyKey = _strategy.GetStrategyKey();
-                int updatedCount = 0;
-
-                foreach (var tool in allTools)
-                {
-                    if (_settingsService.HasSetting(tool.Key) &&
-                        _settingsService.GetSetting(tool.Key) is ComboBoxSetting comboSetting &&
-                        comboSetting.Options.Any(opt => opt is string str && string.Equals(str, strategyKey, StringComparison.Ordinal)))
-                    {
-                        _settingsService.SetSettingValue(tool.Key, strategyKey);
-                        updatedCount++;
-                    }
-                }
-
-                ShowTemporaryStatus($"{ContainerExtensionModule.DashboardTitle} — Configured {updatedCount} tools to Docker");
-                _ = RefreshAllAsync();
-            }
-            catch (Exception ex)
-            {
-                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_AllToDocker", ex);
-                ShowTemporaryError("⚠️ Action failed", ex);
-            }
-        }, "Switch the execution strategy of all supported FPGA tools to Docker"));
-
-        actionsRow.Children.Add(CreateActionButton("All to Native", async () =>
-        {
-            try
-            {
-                var toolService = _serviceProvider.Resolve<IToolService>();
-                if (toolService == null) throw new InvalidOperationException("IToolService is not registered.");
-
-                var allTools = toolService.GetAllTools();
-                var strategyKey = _strategy.GetStrategyKey();
-                int updatedCount = 0;
-
-                foreach (var tool in allTools)
-                {
-                    if (_settingsService.HasSetting(tool.Key) &&
-                        _settingsService.GetSetting(tool.Key) is ComboBoxSetting comboSetting)
-                    {
-                        var defaultOption = comboSetting.Options.FirstOrDefault(opt => opt is string str && !string.Equals(str, strategyKey, StringComparison.Ordinal)) as string;
-                        if (defaultOption != null)
-                        {
-                            _settingsService.SetSettingValue(tool.Key, defaultOption);
-                            updatedCount++;
-                        }
-                    }
-                }
-
-                ShowTemporaryStatus($"{ContainerExtensionModule.DashboardTitle} — Reset {updatedCount} tools to Native");
-                _ = RefreshAllAsync();
-            }
-            catch (Exception ex)
-            {
-                ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_AllToNative", ex);
-                ShowTemporaryError("⚠️ Action failed", ex);
-            }
-        }, "Reset the execution strategy of all tools to their default native execution"));
-
-        return actionsRow;
+        return actionsPanel;
     }
 
     /// <summary>Updates the header title to include the container count badge.</summary>

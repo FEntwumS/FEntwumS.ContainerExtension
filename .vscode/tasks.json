@@ -67,7 +67,7 @@
                 "${workspaceFolder}/OneWare.ContainerExtension.slnx",
                 "--verify-no-changes"
             ],
-            "problemMatcher": []
+            "problemMatcher": "$msCompile"
         },
         {
             "label": "Fix Formatting",
@@ -88,6 +88,15 @@
                 "${workspaceFolder}/OneWare.ContainerExtension.slnx"
             ],
             "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "Initialize Workspace",
+            "command": "git submodule update --init --recursive && dotnet restore ${workspaceFolder}/OneWare.ContainerExtension.slnx",
+            "type": "shell",
+            "problemMatcher": [],
+            "runOptions": {
+                "runOn": "folderOpen"
+            }
         }
     ]
 }

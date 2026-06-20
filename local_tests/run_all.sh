@@ -1,5 +1,22 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+trap 'echo -e "\nCritical failure at line $LINENO"; exit 1' ERR
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      echo "Usage: $0"
+      echo "Options:"
+      echo "  -h, --help   Show this help message"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Usage: $0"
+      exit 1
+      ;;
+  esac
+done
 
 IMAGE="fentwums/oss-cad-suite:latest"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

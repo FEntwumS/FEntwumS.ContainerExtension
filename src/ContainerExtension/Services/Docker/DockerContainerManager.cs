@@ -389,7 +389,8 @@ public sealed class DockerContainerManager
               new ContainerLogsParameters { ShowStdout = true, ShowStderr = true, Follow = true, Tail = "500" },
               ct).ConfigureAwait(false);
 
-            var decoder = System.Text.Encoding.UTF8.GetDecoder();
+            var stdoutDecoder = System.Text.Encoding.UTF8.GetDecoder();
+            var stderrDecoder = System.Text.Encoding.UTF8.GetDecoder();
             var sb = new System.Text.StringBuilder(1024);
 
             while (!ct.IsCancellationRequested)
@@ -410,6 +411,7 @@ public sealed class DockerContainerManager
                     break;
                 }
 
+                var decoder = result.Target == global::Docker.DotNet.MultiplexedStream.TargetStream.StandardError ? stderrDecoder : stdoutDecoder;
                 var charCount = decoder.GetChars(buffer, 0, result.Count, charBuf, 0, flush: false);
                 int start = 0;
                 for (int i = 0; i < charCount; i++)
@@ -447,10 +449,15 @@ public sealed class DockerContainerManager
                 }
             }
 
-            var remaining = decoder.GetChars(Array.Empty<byte>(), 0, 0, charBuf, 0, flush: true);
-            if (remaining > 0)
+            var remainingStdout = stdoutDecoder.GetChars(Array.Empty<byte>(), 0, 0, charBuf, 0, flush: true);
+            if (remainingStdout > 0)
             {
-                sb.Append(charBuf, 0, remaining);
+                sb.Append(charBuf, 0, remainingStdout);
+            }
+            var remainingStderr = stderrDecoder.GetChars(Array.Empty<byte>(), 0, 0, charBuf, 0, flush: true);
+            if (remainingStderr > 0)
+            {
+                sb.Append(charBuf, 0, remainingStderr);
             }
 
             if (sb.Length > 0)

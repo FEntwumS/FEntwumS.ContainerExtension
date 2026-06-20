@@ -1,0 +1,7 @@
+# Exclude the large submodule from the build context
+oss-cad-suite-build/
+
+# Exclude temp downloads and logs
+*.tgz
+*.log
+.DS_Store
