@@ -1,7 +1,7 @@
 # OneWare Container Extension
 
 A **OneWare Studio** plugin that enables transparent, containerized execution of FPGA toolchains. Built on a modernized infrastructure paradigm.
-Developed as part of the Master's Thesis: *"Design and Implementation of a Modular Architecture for the Transparent Integration of Containerized Execution Environments for Heterogeneous Open-Source Binaries in OneWare Studio"* by **Mert Torun** at TH Köln.
+Developed as part of the Master's Thesis: *"Design and Implementation of a Modular Architecture for the Transparent Integration of Containerized Execution Environments for Heterogeneous Open-Source Binaries in OneWare Studio"* by **[Mert Torun](https://mtorun0x7cd.com)** at TH Köln.
 
 ![Icon](Icon.svg)
 
@@ -69,4 +69,4 @@ Auto-generated API documentation is available via [DocFX](https://dotnet.github.
 
 ## License
 
-[MIT](License.md) (C) 2025 - 2026 Mert Torun
+[MIT](License.md) (C) 2025 - 2026 [Mert Torun](https://mtorun0x7cd.com)

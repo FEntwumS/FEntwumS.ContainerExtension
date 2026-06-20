@@ -2,7 +2,7 @@
 
 A **OneWare Studio** plugin that enables transparent, containerized execution of FPGA toolchains.
 
-Developed as part of the Master's Thesis: "Design and Implementation of a Modular Architecture for the Transparent Integration of Containerized Execution Environments for Heterogeneous Open-Source Binary Toolchains in OneWare Studio" by **Mert Torun** at TH Koeln.
+Developed as part of the Master's Thesis: "Design and Implementation of a Modular Architecture for the Transparent Integration of Containerized Execution Environments for Heterogeneous Open-Source Binary Toolchains in OneWare Studio" by **[Mert Torun](https://mtorun0x7cd.com)** at TH Koeln.
 
 ## Documentation
 

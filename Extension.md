@@ -26,4 +26,4 @@ Provides transparent, containerized execution of FPGA toolchains within OneWare 
 3. Open Settings → Binary Management → Container Engine to configure
 4. Select `DockerExecutionStrategy` as the execution strategy for any tool
 
-Developed by **Mert Torun** as part of a Master's Thesis at TH Köln.
+Developed by **[Mert Torun](https://mtorun0x7cd.com)** as part of a Master's Thesis at TH Köln.
