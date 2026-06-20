@@ -21,6 +21,13 @@ This repository is structured into isolated domains adhering to strict Native-AO
 - **ContainerExtension.UnitTests (Testing boundary)**: Tests and verifies settings validator logic, regexes, and pipeline streaming parsing.
 - **Local Headless EDA Tests (`local_tests/`)**: A 15-phase Bash integration test suite verifying end-to-end containerized EDA workflows (GHDL, Icarus, Verilator, Yosys, NextPNR) directly against the `oss-cad-suite` Docker image.
 
+## Hybrid Strategy & Execution Modes
+
+This extension implements the **Hybrid Strategy Pattern** to coordinate tool execution dynamically based on environment state and user preferences:
+- **Containerized Mode (Default)**: Automatically pulls, executes, and monitors the required toolchains inside isolated, rootless container instances (supporting Docker Desktop, Podman, Colima, and OrbStack).
+- **Dynamic Native Fallback**: If the Docker daemon is offline or unreachable, the execution engine can dynamically fallback to locate and execute native binaries installed on the host's `PATH` (controlled by the `Allow Native Fallback` setting) to prevent workspace disruption.
+- **Observability Log Filtering**: Granular telemetry control settings (`Off`, `Errors Only`, `Verbose`) allow users to filter execution records, dropping successful telemetry in `Errors Only` mode, or removing performance stack traces on lower log levels to optimize local disk writes.
+
 ## Performance & Security Optimizations
 
 - **Compile-Time Engineering**: Static dependencies, source-generated JSON serialize/deserialize, and static regular expressions.
