@@ -28,6 +28,10 @@ sealed class Program
     /// <returns>An exit code where 0 indicates success and any other value indicates failure.</returns>
     static async Task<int> Main(string[] args)
     {
+        // Force compilation of generic list/dictionary constructors for Native-AOT / Newtonsoft.Json
+        _ = new List<string>();
+        _ = new Dictionary<string, string>();
+
         if (args.Length < 1)
         {
             Console.WriteLine("Usage: dotnet run -- <command> [args...]");
@@ -117,108 +121,203 @@ sealed class Program
 
         var pid = Environment.ProcessId;
         var prefix = isChild ? $"[Child {pid}]" : $"[Parent {pid}]";
-
         var childProcs = new List<System.Diagnostics.Process>(processes > 1 ? processes - 1 : 0);
-        if (!isChild && processes > 1)
-        {
-            await Console.Out.WriteLineAsync($"{prefix} Spawning {processes - 1} child processes...").ConfigureAwait(false);
-            var exePath = Environment.ProcessPath;
-            if (string.IsNullOrEmpty(exePath))
-            {
-                await Console.Error.WriteLineAsync($"{prefix} Error: Unable to determine executable path.").ConfigureAwait(false);
-                return 1;
-            }
-
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = exePath,
-                Arguments = $"stress-telemetry --processes {processes} --threads {threads} --iterations {iterations} --child",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            };
-
-            for (int i = 1; i < processes; i++)
-            {
-                var p = System.Diagnostics.Process.Start(psi);
-                if (p != null)
-                {
-                    _ = p.StandardOutput.ReadToEndAsync();
-                    _ = p.StandardError.ReadToEndAsync();
-                    childProcs.Add(p);
-                }
-            }
-        }
-
-        await Console.Out.WriteLineAsync($"{prefix} Starting telemetry stress test: {threads} threads, {iterations} iterations per thread.").ConfigureAwait(false);
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-
-        int successCount = 0;
+        var childTasks = new List<Task>();
+        bool success = false;
         int errorCount = 0;
 
-        var tasks = new Task[threads];
-        for (int t = 0; t < threads; t++)
+        EventHandler processExitHandler = (s, e) => KillChildProcesses(childProcs);
+        ConsoleCancelEventHandler cancelKeyHandler = (s, e) => KillChildProcesses(childProcs);
+
+        try
         {
-            int threadId = t;
-            tasks[t] = Task.Run(async () =>
+            if (!isChild && processes > 1)
             {
-                for (int i = 0; i < iterations; i++)
+                AppDomain.CurrentDomain.ProcessExit += processExitHandler;
+                Console.CancelKeyPress += cancelKeyHandler;
+
+                await Console.Out.WriteLineAsync($"{prefix} Spawning {processes - 1} child processes...").ConfigureAwait(false);
+                var exePath = Environment.ProcessPath;
+                if (string.IsNullOrEmpty(exePath))
                 {
-                    try
+                    await Console.Error.WriteLineAsync($"{prefix} Error: Unable to determine executable path.").ConfigureAwait(false);
+                    return 1;
+                }
+
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = exePath,
+                    Arguments = $"stress-telemetry --processes {processes} --threads {threads} --iterations {iterations} --child",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+
+                for (int i = 1; i < processes; i++)
+                {
+                    var p = System.Diagnostics.Process.Start(psi);
+                    if (p != null)
                     {
-                        ContainerTelemetry.LogExecution(
-                            image: "stress-test-image",
-                            tool: $"stress-test-{pid}-{threadId}",
-                            durationSeconds: 0.042 + (i % 10),
-                            exitCode: 0,
-                            imageDigest: null,
-                            wasCancelled: false,
-                            dockerRunCommand: $"--iter {i}",
-                            peakMemoryBytes: 1024 * 1024,
-                            maxCpuPercent: 5.5,
-                            oomKilled: false,
-                            maxEntries: 10000,
-                            errorMessage: null
-                        );
-                        Interlocked.Increment(ref successCount);
-                    }
-                    catch (Exception ex)
-                    {
-                        Interlocked.Increment(ref errorCount);
-                        await Console.Error.WriteLineAsync($"{prefix} Error on T{threadId} I{i}: {ex.Message}").ConfigureAwait(false);
+                        lock (childProcs)
+                        {
+                            childProcs.Add(p);
+                        }
+                        var localProcess = p;
+                        var processTask = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                                var stdoutTask = localProcess.StandardOutput.ReadToEndAsync(cts.Token);
+                                var stderrTask = localProcess.StandardError.ReadToEndAsync(cts.Token);
+                                var exitTask = localProcess.WaitForExitAsync(cts.Token);
+
+                                await Task.WhenAll(stdoutTask, stderrTask, exitTask).ConfigureAwait(false);
+
+                                if (localProcess.ExitCode != 0)
+                                {
+                                    await Console.Error.WriteLineAsync($"{prefix} Child {localProcess.Id} exited with code {localProcess.ExitCode}").ConfigureAwait(false);
+                                    Interlocked.Increment(ref errorCount);
+                                }
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                await Console.Error.WriteLineAsync($"{prefix} Child {localProcess.Id} hang detected (timed out after 10 seconds).").ConfigureAwait(false);
+                                Interlocked.Increment(ref errorCount);
+                                try { localProcess.Kill(entireProcessTree: true); } catch { }
+                            }
+                            catch (Exception ex)
+                            {
+                                await Console.Error.WriteLineAsync($"{prefix} Child {localProcess.Id} task exception: {ex.Message}").ConfigureAwait(false);
+                            }
+                        });
+                        childTasks.Add(processTask);
                     }
                 }
-            });
+            }
+
+            await Console.Out.WriteLineAsync($"{prefix} Starting telemetry stress test: {threads} threads, {iterations} iterations per thread.").ConfigureAwait(false);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            int successCount = 0;
+
+            var tasks = new Task[threads];
+            for (int t = 0; t < threads; t++)
+            {
+                int threadId = t;
+                tasks[t] = Task.Run(async () =>
+                {
+                    for (int i = 0; i < iterations; i++)
+                    {
+                        try
+                        {
+                            ContainerTelemetry.LogExecution(
+                                image: "stress-test-image",
+                                tool: $"stress-test-{pid}-{threadId}",
+                                durationSeconds: 0.042 + (i % 10),
+                                exitCode: 0,
+                                imageDigest: null,
+                                wasCancelled: false,
+                                dockerRunCommand: $"--iter {i}",
+                                peakMemoryBytes: 1024 * 1024,
+                                maxCpuPercent: 5.5,
+                                oomKilled: false,
+                                maxEntries: 10000,
+                                errorMessage: null
+                            );
+                            Interlocked.Increment(ref successCount);
+                        }
+                        catch (Exception ex)
+                        {
+                            Interlocked.Increment(ref errorCount);
+                            await Console.Error.WriteLineAsync($"{prefix} Error on T{threadId} I{i}: {ex.Message}").ConfigureAwait(false);
+                        }
+                    }
+                });
+            }
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+            sw.Stop();
+
+            await Console.Out.WriteLineAsync($"{prefix} Done in {sw.ElapsedMilliseconds}ms. Success: {successCount}, Errors: {errorCount}").ConfigureAwait(false);
+
+            if (!isChild && childTasks.Count > 0)
+            {
+                await Console.Out.WriteLineAsync($"{prefix} Waiting for {childTasks.Count} child processes to finish...").ConfigureAwait(false);
+                await Task.WhenAll(childTasks).ConfigureAwait(false);
+                await Console.Out.WriteLineAsync($"{prefix} All child processes finished.").ConfigureAwait(false);
+            }
+            success = true;
         }
-
-        await Task.WhenAll(tasks).ConfigureAwait(false);
-        sw.Stop();
-
-        await Console.Out.WriteLineAsync($"{prefix} Done in {sw.ElapsedMilliseconds}ms. Success: {successCount}, Errors: {errorCount}").ConfigureAwait(false);
-
-        if (!isChild && childProcs.Count > 0)
+        finally
         {
-            await Console.Out.WriteLineAsync($"{prefix} Waiting for {childProcs.Count} child processes to finish...").ConfigureAwait(false);
-
-            // Execute parallelized awaits with guaranteed unmanaged OS handle cleanup
-            await Task.WhenAll(childProcs.Select(async cp =>
+            if (!isChild && processes > 1)
             {
-                using (cp) // CRITICAL: Free OS process handle
-                {
-                    await cp.WaitForExitAsync().ConfigureAwait(false);
-                    if (cp.ExitCode != 0)
-                    {
-                        await Console.Error.WriteLineAsync($"{prefix} Child {cp.Id} exited with code {cp.ExitCode}").ConfigureAwait(false);
-                        Interlocked.Increment(ref errorCount);
-                    }
-                }
-            })).ConfigureAwait(false);
+                AppDomain.CurrentDomain.ProcessExit -= processExitHandler;
+                Console.CancelKeyPress -= cancelKeyHandler;
+            }
 
-            await Console.Out.WriteLineAsync($"{prefix} All child processes finished.").ConfigureAwait(false);
+            if (!success && !isChild && childProcs.Count > 0)
+            {
+                await Console.Out.WriteLineAsync($"{prefix} Failure encountered. Cleaning up child processes...").ConfigureAwait(false);
+                KillChildProcesses(childProcs);
+            }
+
+            if (!isChild && childTasks.Count > 0)
+            {
+                try
+                {
+                    await Task.WhenAll(childTasks).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Ignore
+                }
+            }
+
+            List<System.Diagnostics.Process> childProcsCopy;
+            lock (childProcs)
+            {
+                childProcsCopy = new List<System.Diagnostics.Process>(childProcs);
+            }
+            foreach (var cp in childProcsCopy)
+            {
+                try
+                {
+                    cp.Dispose();
+                }
+                catch
+                {
+                    // Ignore
+                }
+            }
         }
 
         return errorCount == 0 ? 0 : 1;
+    }
+
+    private static void KillChildProcesses(List<System.Diagnostics.Process> childProcs)
+    {
+        List<System.Diagnostics.Process> childProcsCopy;
+        lock (childProcs)
+        {
+            childProcsCopy = new List<System.Diagnostics.Process>(childProcs);
+        }
+        foreach (var cp in childProcsCopy)
+        {
+            try
+            {
+                if (!cp.HasExited)
+                {
+                    cp.Kill(entireProcessTree: true);
+                }
+            }
+            catch
+            {
+                // Ignore
+            }
+        }
     }
 }
 

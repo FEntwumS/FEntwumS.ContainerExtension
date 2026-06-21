@@ -1,0 +1,12 @@
+<linker>
+  <assembly fullname="Docker.DotNet" preserve="all" />
+  <assembly fullname="Newtonsoft.Json" preserve="all" />
+  <assembly fullname="System.Collections" preserve="all" />
+  <assembly fullname="System.Runtime" preserve="all" />
+  <assembly fullname="System.Private.CoreLib">
+    <type fullname="System.Collections.Generic.List`1" preserve="all" />
+    <type fullname="System.Collections.Generic.Dictionary`2" preserve="all" />
+    <type fullname="System.Collections.Generic.IList`1" preserve="all" />
+    <type fullname="System.Collections.Generic.IDictionary`2" preserve="all" />
+  </assembly>
+</linker>

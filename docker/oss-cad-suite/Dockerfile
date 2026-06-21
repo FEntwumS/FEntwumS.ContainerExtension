@@ -5,15 +5,15 @@ FROM ubuntu@sha256:f3d28607ddd78734bb7f71f117f3c6706c666b8b76cbff7c9ff6e5718d46f
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-ARG RELEASE_TAG=2026-06-20
-ARG RELEASE_DATE=20260620
-ARG ARCH=linux-x64
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     wget \
     tar \
     && rm -rf /var/lib/apt/lists/*
+
+ARG RELEASE_TAG=2026-06-20
+ARG RELEASE_DATE=20260620
+ARG ARCH=linux-x64
 
 # Download
 RUN wget --progress=dot:giga --retry-connrefused --read-timeout=60 --timeout=30 -O /tmp/oss-cad-suite.tgz \

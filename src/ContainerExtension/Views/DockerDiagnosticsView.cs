@@ -1573,7 +1573,7 @@ public partial class DockerDiagnosticsView : UserControl
         {
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
-        
+
         settingsRow.Children.Add(CreateActionButton("All to Docker", async () =>
         {
             try

@@ -33,7 +33,7 @@ public static partial class ContainerTelemetry
     private static partial Regex CloudKeyRegex();
 
     public static string TelemetryFilePath => _telemetryPath;
-    
+
     /// <summary>
     /// Gets or sets the delegate function used to dynamically resolve the current logging level configuration.
     /// Default resolves to "Verbose".
@@ -100,13 +100,28 @@ public static partial class ContainerTelemetry
         IsTestEnvironment = true;
         lock (MutexLock)
         {
+            if (ProcessMutexLazy.IsValueCreated)
+            {
+                try { ProcessMutexLazy.Value?.Dispose(); } catch { /* Ignore */ }
+            }
             ProcessMutexLazy = new Lazy<Mutex?>(CreateProcessMutex, LazyThreadSafetyMode.ExecutionAndPublication);
+            try { RwLock.Dispose(); } catch { /* Ignore */ }
+            RwLock = new ReaderWriterLockSlim();
         }
         Interlocked.Exchange(ref _isShutdown, 0);
         _cachedLineCount = -1;
         _cachedErrorLineCount = -1;
         Volatile.Write(ref _cachedStats, null);
         Volatile.Write(ref _telemetryDirVerified, false);
+
+        try
+        {
+            ErrorChannel?.Writer.TryComplete();
+        }
+        catch
+        {
+            // Ignore channel completion failures
+        }
 
         ErrorChannel = System.Threading.Channels.Channel.CreateUnbounded<TelemetryErrorEntry>(new System.Threading.Channels.UnboundedChannelOptions
         {
@@ -140,10 +155,11 @@ public static partial class ContainerTelemetry
     private static int _cachedErrorLineCount = -1;
     private static CachedStats? _cachedStats;
     private static int _isShutdown = 0;
+    private static int _activeOperations = 0;
     private static bool _telemetryDirVerified;
     private static readonly System.Threading.Lock VerificationLock = new();
 
-    private static readonly ReaderWriterLockSlim RwLock = new();
+    private static ReaderWriterLockSlim RwLock = new();
     private static Lazy<Mutex?> ProcessMutexLazy = new(CreateProcessMutex, LazyThreadSafetyMode.ExecutionAndPublication);
     private static Mutex? ProcessMutex
     {
@@ -197,6 +213,13 @@ public static partial class ContainerTelemetry
         {
             // Ignore channel completion failures during shutdown
         }
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (Volatile.Read(ref _activeOperations) > 0 && sw.ElapsedMilliseconds < 2000)
+        {
+            Thread.Yield();
+        }
+
         try
         {
             lock (MutexLock)
@@ -207,11 +230,13 @@ public static partial class ContainerTelemetry
                     mutex?.Dispose();
                 }
                 ProcessMutexLazy = new Lazy<Mutex?>(CreateProcessMutex, LazyThreadSafetyMode.ExecutionAndPublication);
+                try { RwLock.Dispose(); } catch { /* Ignore */ }
+                RwLock = new ReaderWriterLockSlim();
             }
         }
         catch (Exception)
         {
-            // Mutex disposal exceptions can be ignored during shutdown
+            // Mutex/Lock disposal exceptions can be ignored during shutdown
         }
     }
 
@@ -220,10 +245,13 @@ public static partial class ContainerTelemetry
         Interlocked.Exchange(ref _isShutdown, 0);
         lock (MutexLock)
         {
-            if (ProcessMutexLazy.IsValueCreated && ProcessMutexLazy.Value == null)
+            try { RwLock.Dispose(); } catch { /* Ignore */ }
+            RwLock = new ReaderWriterLockSlim();
+            if (ProcessMutexLazy.IsValueCreated)
             {
-                ProcessMutexLazy = new Lazy<Mutex?>(CreateProcessMutex, LazyThreadSafetyMode.ExecutionAndPublication);
+                try { ProcessMutexLazy.Value?.Dispose(); } catch { /* Ignore */ }
             }
+            ProcessMutexLazy = new Lazy<Mutex?>(CreateProcessMutex, LazyThreadSafetyMode.ExecutionAndPublication);
         }
     }
 
@@ -249,33 +277,137 @@ public static partial class ContainerTelemetry
 
     private static string GetCanonicalPath(string path)
     {
-        try
+        if (string.IsNullOrWhiteSpace(path))
         {
-            var resolved = Path.GetFullPath(path);
-            var info = new System.IO.DirectoryInfo(resolved);
-            if (info.Exists)
+            throw new ArgumentException("Path cannot be null or empty.", nameof(path));
+        }
+
+        var seenSymlinks = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+        string ResolveCanonicalInternal(string currentPath, int depth)
+        {
+            if (depth > 40)
             {
-                var target = info.LinkTarget;
-                if (!string.IsNullOrEmpty(target))
+                throw new ContainerExtension.DockerExecutionException("Too many levels of symbolic links.");
+            }
+
+            string absolutePath = currentPath;
+            if (!Path.IsPathRooted(absolutePath))
+            {
+                absolutePath = Path.Combine(Directory.GetCurrentDirectory(), absolutePath);
+            }
+
+            string root = Path.GetPathRoot(absolutePath) ?? (OperatingSystem.IsWindows() ? @"C:\" : "/");
+            if (string.IsNullOrEmpty(root))
+            {
+                root = OperatingSystem.IsWindows() ? @"C:\" : "/";
+            }
+
+            string remainder = absolutePath.Substring(root.Length);
+            var separatorChars = new char[] { '/', '\\' };
+            var components = remainder.Split(separatorChars, StringSplitOptions.RemoveEmptyEntries);
+
+            string current = root;
+
+            foreach (var component in components)
+            {
+                if (string.Equals(component, ".", StringComparison.Ordinal))
                 {
-                    return info.ResolveLinkTarget(true)?.FullName ?? info.FullName;
+                    continue;
+                }
+
+                if (string.Equals(component, "..", StringComparison.Ordinal))
+                {
+                    var parent = Path.GetDirectoryName(current);
+                    current = parent ?? root;
+                    continue;
+                }
+
+                string next = Path.Combine(current, component);
+
+                bool isSymlink = false;
+                string? target = null;
+
+                try
+                {
+                    if (Directory.Exists(next))
+                    {
+                        var info = new DirectoryInfo(next);
+                        if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                        {
+                            target = info.LinkTarget;
+                            isSymlink = !string.IsNullOrEmpty(target);
+                        }
+                    }
+                    else if (File.Exists(next))
+                    {
+                        var info = new FileInfo(next);
+                        if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                        {
+                            target = info.LinkTarget;
+                            isSymlink = !string.IsNullOrEmpty(target);
+                        }
+                    }
+                    else
+                    {
+                        var info = new DirectoryInfo(next);
+                        if (info.Exists && info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                        {
+                            target = info.LinkTarget;
+                            isSymlink = !string.IsNullOrEmpty(target);
+                        }
+                        else
+                        {
+                            var fInfo = new FileInfo(next);
+                            if (fInfo.Exists && fInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                            {
+                                target = fInfo.LinkTarget;
+                                isSymlink = !string.IsNullOrEmpty(target);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    // Ignore and treat as non-symlink
+                }
+
+                if (isSymlink && target != null)
+                {
+                    string canonicalSymlink = Path.GetFullPath(next);
+                    if (!seenSymlinks.Add(canonicalSymlink))
+                    {
+                        throw new ContainerExtension.DockerExecutionException($"Circular symbolic link detected: '{next}'");
+                    }
+
+                    try
+                    {
+                        string resolvedTarget;
+                        if (Path.IsPathRooted(target))
+                        {
+                            resolvedTarget = ResolveCanonicalInternal(target, depth + 1);
+                        }
+                        else
+                        {
+                            resolvedTarget = ResolveCanonicalInternal(Path.Combine(current, target), depth + 1);
+                        }
+                        current = resolvedTarget;
+                    }
+                    finally
+                    {
+                        seenSymlinks.Remove(canonicalSymlink);
+                    }
+                }
+                else
+                {
+                    current = next;
                 }
             }
-            var fileInfo = new System.IO.FileInfo(resolved);
-            if (fileInfo.Exists)
-            {
-                var target = fileInfo.LinkTarget;
-                if (!string.IsNullOrEmpty(target))
-                {
-                    return fileInfo.ResolveLinkTarget(true)?.FullName ?? fileInfo.FullName;
-                }
-            }
-            return resolved;
+
+            return Path.GetFullPath(current);
         }
-        catch
-        {
-            return Path.GetFullPath(path);
-        }
+
+        return ResolveCanonicalInternal(path, 0);
     }
 
     private static void EnsureDirectoryAndFileSecure(string dir, string filepath)
@@ -292,8 +424,8 @@ public static partial class ContainerTelemetry
                 return;
             }
 
-            var resolvedDir = Path.GetFullPath(dir);
-            var resolvedFile = Path.GetFullPath(filepath);
+            var resolvedDir = GetCanonicalPath(dir);
+            var resolvedFile = GetCanonicalPath(filepath);
 
             var rootDir = Path.GetPathRoot(resolvedDir);
             if (string.Equals(resolvedDir, rootDir, StringComparison.OrdinalIgnoreCase))
@@ -637,8 +769,14 @@ public static partial class ContainerTelemetry
         {
             return;
         }
+
+        Interlocked.Increment(ref _activeOperations);
         try
         {
+            if (Volatile.Read(ref _isShutdown) == 1)
+            {
+                return;
+            }
             EnsureDirectoryAndFileSecure(_telemetryDir, _telemetryPath);
 
             var entry = new TelemetryEntry
@@ -678,7 +816,8 @@ public static partial class ContainerTelemetry
                     return;
                 }
 
-                RwLock.EnterWriteLock();
+                var localLock = RwLock;
+                localLock.EnterWriteLock();
                 try
                 {
                     EnsureFileLimit(_telemetryPath);
@@ -768,7 +907,7 @@ public static partial class ContainerTelemetry
                 }
                 finally
                 {
-                    RwLock.ExitWriteLock();
+                    localLock.ExitWriteLock();
                 }
             }
             finally
@@ -791,6 +930,10 @@ public static partial class ContainerTelemetry
             Console.Error.WriteLine("[ContainerTelemetry] Error: Insufficient disk space to write telemetry.");
         }
         catch { /* Best-effort execution */ }
+        finally
+        {
+            Interlocked.Decrement(ref _activeOperations);
+        }
     }
 
     /// <summary>
@@ -857,8 +1000,17 @@ public static partial class ContainerTelemetry
 
     private static void WriteErrorEntryToDisk(TelemetryErrorEntry entry)
     {
+        if (Volatile.Read(ref _isShutdown) == 1)
+        {
+            return;
+        }
+        Interlocked.Increment(ref _activeOperations);
         try
         {
+            if (Volatile.Read(ref _isShutdown) == 1)
+            {
+                return;
+            }
             EnsureDirectoryAndFileSecure(_telemetryDir, _errorTelemetryPath);
             EnsureFileLimit(_errorTelemetryPath);
 
@@ -883,7 +1035,8 @@ public static partial class ContainerTelemetry
                     return;
                 }
 
-                RwLock.EnterWriteLock();
+                var localLock = RwLock;
+                localLock.EnterWriteLock();
                 try
                 {
                     bool written = false;
@@ -963,7 +1116,7 @@ public static partial class ContainerTelemetry
                 }
                 finally
                 {
-                    RwLock.ExitWriteLock();
+                    localLock.ExitWriteLock();
                 }
             }
             finally
@@ -989,86 +1142,107 @@ public static partial class ContainerTelemetry
         {
             // Ignored to ensure telemetry failure does not crash the host
         }
+        finally
+        {
+            Interlocked.Decrement(ref _activeOperations);
+        }
     }
 
     public static List<TelemetryEntry> GetRecentEntries(int count = 20)
     {
-        var results = new List<TelemetryEntry>(count > 0 ? count : 20);
+        if (Volatile.Read(ref _isShutdown) == 1)
+        {
+            return [];
+        }
+        Interlocked.Increment(ref _activeOperations);
         try
         {
-            var mutex = ProcessMutex;
-            bool acquired = false;
+            if (Volatile.Read(ref _isShutdown) == 1)
+            {
+                return [];
+            }
+            var results = new List<TelemetryEntry>(count > 0 ? count : 20);
             try
             {
+                var mutex = ProcessMutex;
+                bool acquired = false;
                 try
                 {
-                    acquired = mutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
-                }
-                catch (AbandonedMutexException)
-                {
-                    acquired = true;
-                }
-                catch (Exception)
-                {
-                    acquired = false;
-                }
-                if (!acquired || !File.Exists(_telemetryPath))
-                {
-                    return results;
-                }
+                    try
+                    {
+                        acquired = mutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
+                    }
+                    catch (AbandonedMutexException)
+                    {
+                        acquired = true;
+                    }
+                    catch (Exception)
+                    {
+                        acquired = false;
+                    }
+                    if (!acquired || !File.Exists(_telemetryPath))
+                    {
+                        return results;
+                    }
 
-                List<string> lastLines;
-                RwLock.EnterReadLock();
-                try
-                {
-                    lastLines = ReadLastLinesSafe(_telemetryPath, count);
+                    List<string> lastLines;
+                    var localLock = RwLock;
+                    localLock.EnterReadLock();
+                    try
+                    {
+                        lastLines = ReadLastLinesSafe(_telemetryPath, count);
+                    }
+                    finally
+                    {
+                        localLock.ExitReadLock();
+                    }
+
+                    for (int i = lastLines.Count - 1; i >= 0; i--)
+                    {
+                        var line = lastLines[i];
+                        if (line.AsSpan().IsWhiteSpace())
+                        {
+                            continue;
+                        }
+                        try
+                        {
+                            var entry = JsonSerializer.Deserialize(line, TelemetryJsonContext.Default.TelemetryEntry);
+                            if (entry != null && entry.IsValid())
+                            {
+                                results.Add(entry);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            TrackError("ContainerTelemetry", "Failed to deserialize telemetry line", ex, line);
+                        }
+                    }
                 }
                 finally
                 {
-                    RwLock.ExitReadLock();
-                }
-
-                for (int i = lastLines.Count - 1; i >= 0; i--)
-                {
-                    var line = lastLines[i];
-                    if (line.AsSpan().IsWhiteSpace())
+                    if (acquired && mutex != null)
                     {
-                        continue;
-                    }
-                    try
-                    {
-                        var entry = JsonSerializer.Deserialize(line, TelemetryJsonContext.Default.TelemetryEntry);
-                        if (entry != null && entry.IsValid())
+                        try
                         {
-                            results.Add(entry);
+                            mutex.ReleaseMutex();
+                        }
+                        catch
+                        {
+                            // Ignore disposal race
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        TrackError("ContainerTelemetry", "Failed to deserialize telemetry line", ex, line);
-                    }
                 }
             }
-            finally
+            catch
             {
-                if (acquired && mutex != null)
-                {
-                    try
-                    {
-                        mutex.ReleaseMutex();
-                    }
-                    catch
-                    {
-                        // Ignore disposal race
-                    }
-                }
+                /* Ignored to ensure telemetry read failure does not crash the host */
             }
+            return results;
         }
-        catch
+        finally
         {
-            /* Ignored to ensure telemetry read failure does not crash the host */
+            Interlocked.Decrement(ref _activeOperations);
         }
-        return results;
     }
 
     public static (int totalRuns, double successRate, double avgDuration) GetStats()
@@ -1079,77 +1253,94 @@ public static partial class ContainerTelemetry
 
     public static bool ExportTo(string destinationPath)
     {
+        if (Volatile.Read(ref _isShutdown) == 1)
+        {
+            return false;
+        }
+        Interlocked.Increment(ref _activeOperations);
         try
         {
-            var mutex = ProcessMutex;
-            bool acquired = false;
+            if (Volatile.Read(ref _isShutdown) == 1)
+            {
+                return false;
+            }
             try
             {
+                var mutex = ProcessMutex;
+                bool acquired = false;
                 try
                 {
-                    acquired = mutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
-                }
-                catch (AbandonedMutexException)
-                {
-                    acquired = true;
-                }
-                catch (Exception)
-                {
-                    acquired = false;
-                }
-                if (!acquired || !File.Exists(_telemetryPath))
-                {
-                    return false;
-                }
-
-                RwLock.EnterReadLock();
-                try
-                {
-                    var destDir = Path.GetDirectoryName(destinationPath);
-                    if (!string.IsNullOrEmpty(destDir))
+                    try
                     {
-                        Directory.CreateDirectory(destDir);
+                        acquired = mutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
+                    }
+                    catch (AbandonedMutexException)
+                    {
+                        acquired = true;
+                    }
+                    catch (Exception)
+                    {
+                        acquired = false;
+                    }
+                    if (!acquired || !File.Exists(_telemetryPath))
+                    {
+                        return false;
                     }
 
-                    using var source = new FileStream(_telemetryPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                    using var dest = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+                    var localLock = RwLock;
+                    localLock.EnterReadLock();
+                    try
+                    {
+                        var destDir = Path.GetDirectoryName(destinationPath);
+                        if (!string.IsNullOrEmpty(destDir))
+                        {
+                            Directory.CreateDirectory(destDir);
+                        }
 
-                    var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                    if (string.IsNullOrEmpty(home))
-                    {
-                        source.CopyTo(dest);
+                        using var source = new FileStream(_telemetryPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                        using var dest = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+
+                        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                        if (string.IsNullOrEmpty(home))
+                        {
+                            source.CopyTo(dest);
+                        }
+                        else
+                        {
+                            byte[] homeBytes = System.Text.Encoding.UTF8.GetBytes(home);
+                            byte[] replacementBytes = [(byte)'~'];
+                            CopyStreamWithReplacement(source, dest, homeBytes, replacementBytes);
+                        }
                     }
-                    else
+                    finally
                     {
-                        byte[] homeBytes = System.Text.Encoding.UTF8.GetBytes(home);
-                        byte[] replacementBytes = [(byte)'~'];
-                        CopyStreamWithReplacement(source, dest, homeBytes, replacementBytes);
+                        localLock.ExitReadLock();
                     }
                 }
                 finally
                 {
-                    RwLock.ExitReadLock();
+                    if (acquired && mutex != null)
+                    {
+                        try
+                        {
+                            mutex.ReleaseMutex();
+                        }
+                        catch
+                        {
+                            // Ignore disposal race
+                        }
+                    }
                 }
+                return true;
             }
-            finally
+            catch
             {
-                if (acquired && mutex != null)
-                {
-                    try
-                    {
-                        mutex.ReleaseMutex();
-                    }
-                    catch
-                    {
-                        // Ignore disposal race
-                    }
-                }
+                return false;
             }
-            return true;
         }
-        catch
+        finally
         {
-            return false;
+            Interlocked.Decrement(ref _activeOperations);
         }
     }
 
@@ -1238,104 +1429,121 @@ public static partial class ContainerTelemetry
 
     public static void ClearEntries()
     {
+        if (Volatile.Read(ref _isShutdown) == 1)
+        {
+            return;
+        }
+        Interlocked.Increment(ref _activeOperations);
         try
         {
-            var mutex = ProcessMutex;
-            bool acquired = false;
+            if (Volatile.Read(ref _isShutdown) == 1)
+            {
+                return;
+            }
             try
             {
+                var mutex = ProcessMutex;
+                bool acquired = false;
                 try
-                {
-                    acquired = mutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
-                }
-                catch (AbandonedMutexException)
-                {
-                    acquired = true;
-                }
-                catch (Exception)
-                {
-                    acquired = false;
-                }
-                if (!acquired)
-                {
-                    return;
-                }
-
-                RwLock.EnterWriteLock();
-                try
-                {
-                    // FileMode.Create safely truncates resolving IOException on 0-byte files natively.
-                    if (File.Exists(_telemetryPath))
-                    {
-                        int clearDelay = 15;
-                        for (int attempt = 0; attempt < 5; attempt++)
-                        {
-                            try
-                            {
-                                using (new FileStream(_telemetryPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)) { /* Truncate file */ }
-                                break;
-                            }
-                            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-                            {
-                                if (attempt == 4)
-                                {
-                                    break;
-                                }
-                                Thread.Sleep(clearDelay);
-                                clearDelay *= 2;
-                            }
-                        }
-                    }
-
-                    if (File.Exists(_errorTelemetryPath))
-                    {
-                        int clearErrorDelay = 15;
-                        for (int attempt = 0; attempt < 5; attempt++)
-                        {
-                            try
-                            {
-                                using (new FileStream(_errorTelemetryPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)) { /* Truncate file */ }
-                                break;
-                            }
-                            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-                            {
-                                if (attempt == 4)
-                                {
-                                    break;
-                                }
-                                Thread.Sleep(clearErrorDelay);
-                                clearErrorDelay *= 2;
-                            }
-                        }
-                    }
-
-                    _cachedLineCount = -1;
-                    _cachedErrorLineCount = -1;
-                    Volatile.Write(ref _cachedStats, null);
-                }
-                finally
-                {
-                    RwLock.ExitWriteLock();
-                }
-            }
-            finally
-            {
-                if (acquired && mutex != null)
                 {
                     try
                     {
-                        mutex.ReleaseMutex();
+                        acquired = mutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
                     }
-                    catch
+                    catch (AbandonedMutexException)
                     {
-                        // Ignore disposal race
+                        acquired = true;
+                    }
+                    catch (Exception)
+                    {
+                        acquired = false;
+                    }
+                    if (!acquired)
+                    {
+                        return;
+                    }
+
+                    var localLock = RwLock;
+                    localLock.EnterWriteLock();
+                    try
+                    {
+                        // FileMode.Create safely truncates resolving IOException on 0-byte files natively.
+                        if (File.Exists(_telemetryPath))
+                        {
+                            int clearDelay = 15;
+                            for (int attempt = 0; attempt < 5; attempt++)
+                            {
+                                try
+                                {
+                                    using (new FileStream(_telemetryPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)) { /* Truncate file */ }
+                                    break;
+                                }
+                                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                                {
+                                    if (attempt == 4)
+                                    {
+                                        break;
+                                    }
+                                    Thread.Sleep(clearDelay);
+                                    clearDelay *= 2;
+                                }
+                            }
+                        }
+
+                        if (File.Exists(_errorTelemetryPath))
+                        {
+                            int clearErrorDelay = 15;
+                            for (int attempt = 0; attempt < 5; attempt++)
+                            {
+                                try
+                                {
+                                    using (new FileStream(_errorTelemetryPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)) { /* Truncate file */ }
+                                    break;
+                                }
+                                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                                {
+                                    if (attempt == 4)
+                                    {
+                                        break;
+                                    }
+                                    Thread.Sleep(clearErrorDelay);
+                                    clearErrorDelay *= 2;
+                                }
+                            }
+                        }
+
+                        _cachedLineCount = -1;
+                        _cachedErrorLineCount = -1;
+                        Volatile.Write(ref _cachedStats, null);
+                    }
+                    finally
+                    {
+                        localLock.ExitWriteLock();
+                    }
+                }
+                finally
+                {
+                    if (acquired && mutex != null)
+                    {
+                        try
+                        {
+                            mutex.ReleaseMutex();
+                        }
+                        catch
+                        {
+                            // Ignore disposal race
+                        }
                     }
                 }
             }
+            catch
+            {
+                /* ignore */
+            }
         }
-        catch
+        finally
         {
-            /* ignore */
+            Interlocked.Decrement(ref _activeOperations);
         }
     }
 
@@ -1407,180 +1615,197 @@ public static partial class ContainerTelemetry
     /// <returns>A tuple containing the list of entries and pre-calculated statistics.</returns>
     public static (List<TelemetryEntry> entries, int totalRuns, double successRate, double avgDuration) GetRecentEntriesWithStats(int count = 20)
     {
+        if (Volatile.Read(ref _isShutdown) == 1)
+        {
+            return ([], 0, 0, 0);
+        }
+        Interlocked.Increment(ref _activeOperations);
         try
         {
-            var mutex = ProcessMutex;
-            bool acquired = false;
+            if (Volatile.Read(ref _isShutdown) == 1)
+            {
+                return ([], 0, 0, 0);
+            }
             try
             {
+                var mutex = ProcessMutex;
+                bool acquired = false;
                 try
                 {
-                    acquired = mutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
-                }
-                catch (AbandonedMutexException)
-                {
-                    acquired = true;
-                }
-                catch (Exception)
-                {
-                    acquired = false;
-                }
-                var exists = File.Exists(_telemetryPath);
-                if (!acquired || !exists)
-                {
-                    return ([], 0, 0, 0);
-                }
-
-                var results = new List<TelemetryEntry>(count > 0 ? count : 20);
-                int total = 0, successes = 0, durationCount = 0;
-                double totalDuration = 0;
-                var lastLines = new List<string>(count > 0 ? count : 20);
-
-                var initialWriteTime = exists ? File.GetLastWriteTimeUtc(_telemetryPath) : DateTime.MinValue;
-                var initialLength = exists ? new FileInfo(_telemetryPath).Length : 0;
-                var cache = Volatile.Read(ref _cachedStats);
-                if (cache != null && cache.CachedCount == count && cache.LastFileWriteTime == initialWriteTime && cache.LastFileLength == initialLength && string.Equals(cache.LastFilePath, _telemetryPath, StringComparison.Ordinal))
-                {
-                    return (new List<TelemetryEntry>(cache.Entries), cache.TotalRuns, cache.SuccessRate, cache.AvgDuration);
-                }
-
-                RwLock.EnterReadLock();
-                try
-                {
-                    if (exists)
+                    try
                     {
-                        bool readSuccess = false;
-                        int readDelay = 15;
-                        for (int attempt = 0; attempt < 5; attempt++)
+                        acquired = mutex?.WaitOne(TimeSpan.FromSeconds(3)) ?? true;
+                    }
+                    catch (AbandonedMutexException)
+                    {
+                        acquired = true;
+                    }
+                    catch (Exception)
+                    {
+                        acquired = false;
+                    }
+                    var exists = File.Exists(_telemetryPath);
+                    if (!acquired || !exists)
+                    {
+                        return ([], 0, 0, 0);
+                    }
+
+                    var results = new List<TelemetryEntry>(count > 0 ? count : 20);
+                    int total = 0, successes = 0, durationCount = 0;
+                    double totalDuration = 0;
+                    var lastLines = new List<string>(count > 0 ? count : 20);
+
+                    var initialWriteTime = exists ? File.GetLastWriteTimeUtc(_telemetryPath) : DateTime.MinValue;
+                    var initialLength = exists ? new FileInfo(_telemetryPath).Length : 0;
+                    var cache = Volatile.Read(ref _cachedStats);
+                    if (cache != null && cache.CachedCount == count && cache.LastFileWriteTime == initialWriteTime && cache.LastFileLength == initialLength && string.Equals(cache.LastFilePath, _telemetryPath, StringComparison.Ordinal))
+                    {
+                        return (new List<TelemetryEntry>(cache.Entries), cache.TotalRuns, cache.SuccessRate, cache.AvgDuration);
+                    }
+
+                    var localLock = RwLock;
+                    localLock.EnterReadLock();
+                    try
+                    {
+                        if (exists)
                         {
-                            try
+                            bool readSuccess = false;
+                            int readDelay = 15;
+                            for (int attempt = 0; attempt < 5; attempt++)
                             {
-                                using var stream = new FileStream(_telemetryPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                                var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(32768);
-                                var lineBytes = new List<byte>();
                                 try
                                 {
-                                    int bytesRead;
-                                    while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
+                                    using var stream = new FileStream(_telemetryPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                                    var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(32768);
+                                    var lineBytes = new List<byte>();
+                                    try
                                     {
                                         int start = 0;
-                                        for (int i = 0; i < bytesRead; i++)
+                                        int bytesRead;
+                                        while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
                                         {
-                                            if (buffer[i] == '\n')
+                                            for (int i = 0; i < bytesRead; i++)
                                             {
-                                                ReadOnlySpan<byte> lineSpan;
-                                                if (lineBytes.Count > 0)
+                                                if (buffer[i] == '\n')
                                                 {
-                                                    lineBytes.AddRange(new ReadOnlySpan<byte>(buffer, start, i - start));
-                                                    lineSpan = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(lineBytes);
-                                                }
-                                                else
-                                                {
-                                                    lineSpan = new ReadOnlySpan<byte>(buffer, start, i - start);
-                                                }
+                                                    ReadOnlySpan<byte> lineSpan;
+                                                    if (lineBytes.Count > 0)
+                                                    {
+                                                        lineBytes.AddRange(new ReadOnlySpan<byte>(buffer, start, i - start));
+                                                        lineSpan = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(lineBytes);
+                                                    }
+                                                    else
+                                                    {
+                                                        lineSpan = new ReadOnlySpan<byte>(buffer, start, i - start);
+                                                    }
 
-                                                if (!IsBytesWhiteSpace(lineSpan))
-                                                {
-                                                    total++;
-                                                    ProcessLineStats(lineSpan, ref successes, ref totalDuration, ref durationCount, out _);
-                                                }
+                                                    if (!IsBytesWhiteSpace(lineSpan))
+                                                    {
+                                                        total++;
+                                                        ProcessLineStats(lineSpan, ref successes, ref totalDuration, ref durationCount, out _);
+                                                    }
 
-                                                lineBytes.Clear();
-                                                start = i + 1;
+                                                    lineBytes.Clear();
+                                                    start = i + 1;
+                                                }
+                                            }
+                                            if (start < bytesRead)
+                                            {
+                                                lineBytes.AddRange(new ReadOnlySpan<byte>(buffer, start, bytesRead - start));
                                             }
                                         }
-                                        if (start < bytesRead)
+                                        if (lineBytes.Count > 0)
                                         {
-                                            lineBytes.AddRange(new ReadOnlySpan<byte>(buffer, start, bytesRead - start));
+                                            var lineSpan = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(lineBytes);
+                                            if (!IsBytesWhiteSpace(lineSpan))
+                                            {
+                                                total++;
+                                                ProcessLineStats(lineSpan, ref successes, ref totalDuration, ref durationCount, out _);
+                                            }
                                         }
+                                        readSuccess = true;
                                     }
-                                    if (lineBytes.Count > 0)
+                                    finally
                                     {
-                                        var lineSpan = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(lineBytes);
-                                        if (!IsBytesWhiteSpace(lineSpan))
-                                        {
-                                            total++;
-                                            ProcessLineStats(lineSpan, ref successes, ref totalDuration, ref durationCount, out _);
-                                        }
+                                        System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
                                     }
-                                    readSuccess = true;
                                 }
-                                finally
+                                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
                                 {
-                                    System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+                                    if (attempt == 4)
+                                    {
+                                        break;
+                                    }
+                                    Thread.Sleep(readDelay);
+                                    readDelay *= 2;
                                 }
-                            }
-                            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-                            {
-                                if (attempt == 4)
+                                if (readSuccess)
                                 {
                                     break;
                                 }
-                                Thread.Sleep(readDelay);
-                                readDelay *= 2;
                             }
-                            if (readSuccess)
-                            {
-                                break;
-                            }
-                        }
 
-                        if (readSuccess && count > 0)
-                        {
-                            lastLines = ReadLastLinesSafe(_telemetryPath, count);
+                            if (readSuccess && count > 0)
+                            {
+                                lastLines = ReadLastLinesSafe(_telemetryPath, count);
+                            }
                         }
                     }
+                    finally
+                    {
+                        localLock.ExitReadLock();
+                    }
+
+                    for (int i = lastLines.Count - 1; i >= 0; i--)
+                    {
+                        var line = lastLines[i];
+                        try
+                        {
+                            var entry = JsonSerializer.Deserialize(line, TelemetryJsonContext.Default.TelemetryEntry);
+                            if (entry != null && entry.IsValid())
+                            {
+                                results.Add(entry);
+                            }
+                        }
+                        catch (JsonException ex)
+                        {
+                            TrackError("ContainerTelemetry", "Failed to deserialize stats line", ex, line);
+                        }
+                    }
+
+                    var successRate = total > 0 ? Math.Round((double)successes / total * 100, 1) : 0;
+                    var avgDuration = durationCount > 0 ? Math.Round(totalDuration / durationCount, 2) : 0;
+
+                    var finalWriteTime = exists ? File.GetLastWriteTimeUtc(_telemetryPath) : DateTime.MinValue;
+                    var finalLength = exists ? new FileInfo(_telemetryPath).Length : 0;
+                    var newCache = new CachedStats(results, total, successRate, avgDuration, count, finalWriteTime, finalLength, _telemetryPath);
+                    Volatile.Write(ref _cachedStats, newCache);
+
+                    return (results, total, successRate, avgDuration);
                 }
                 finally
                 {
-                    RwLock.ExitReadLock();
-                }
-
-                for (int i = lastLines.Count - 1; i >= 0; i--)
-                {
-                    var line = lastLines[i];
-                    try
+                    if (acquired && mutex != null)
                     {
-                        var entry = JsonSerializer.Deserialize(line, TelemetryJsonContext.Default.TelemetryEntry);
-                        if (entry != null && entry.IsValid())
+                        try
                         {
-                            results.Add(entry);
+                            mutex.ReleaseMutex();
+                        }
+                        catch
+                        {
+                            // Ignore disposal race
                         }
                     }
-                    catch (JsonException ex)
-                    {
-                        TrackError("ContainerTelemetry", "Failed to deserialize stats line", ex, line);
-                    }
                 }
-
-                var successRate = total > 0 ? Math.Round((double)successes / total * 100, 1) : 0;
-                var avgDuration = durationCount > 0 ? Math.Round(totalDuration / durationCount, 2) : 0;
-
-                var finalWriteTime = exists ? File.GetLastWriteTimeUtc(_telemetryPath) : DateTime.MinValue;
-                var finalLength = exists ? new FileInfo(_telemetryPath).Length : 0;
-                var newCache = new CachedStats(results, total, successRate, avgDuration, count, finalWriteTime, finalLength, _telemetryPath);
-                Volatile.Write(ref _cachedStats, newCache);
-
-                return (results, total, successRate, avgDuration);
             }
-            finally
+            catch
             {
-                if (acquired && mutex != null)
-                {
-                    try
-                    {
-                        mutex.ReleaseMutex();
-                    }
-                    catch
-                    {
-                        // Ignore disposal race
-                    }
-                }
+                return ([], 0, 0, 0);
             }
         }
-        catch
+        finally
         {
-            return ([], 0, 0, 0);
+            Interlocked.Decrement(ref _activeOperations);
         }
     }
 
@@ -1594,58 +1819,71 @@ public static partial class ContainerTelemetry
         {
             return;
         }
-        var mutex = ProcessMutex;
-        bool acquired = false;
+        Interlocked.Increment(ref _activeOperations);
         try
         {
-            try
-            {
-                acquired = mutex?.WaitOne(TimeSpan.FromSeconds(5)) ?? true;
-            }
-            catch (AbandonedMutexException)
-            {
-                acquired = true;
-            }
-            catch (Exception)
-            {
-                acquired = false;
-            }
-            if (!acquired)
-            {
-                return;
-            }
-
             if (Volatile.Read(ref _isShutdown) == 1)
             {
                 return;
             }
-            RwLock.EnterWriteLock();
+            var mutex = ProcessMutex;
+            bool acquired = false;
             try
-            {
-                TrimTelemetryFileInternal(path, maxEntries);
-            }
-            finally
-            {
-                RwLock.ExitWriteLock();
-            }
-        }
-        catch
-        {
-            // Ignore
-        }
-        finally
-        {
-            if (acquired && mutex != null)
             {
                 try
                 {
-                    mutex.ReleaseMutex();
+                    acquired = mutex?.WaitOne(TimeSpan.FromSeconds(5)) ?? true;
                 }
-                catch
+                catch (AbandonedMutexException)
                 {
-                    // Ignore
+                    acquired = true;
+                }
+                catch (Exception)
+                {
+                    acquired = false;
+                }
+                if (!acquired)
+                {
+                    return;
+                }
+
+                if (Volatile.Read(ref _isShutdown) == 1)
+                {
+                    return;
+                }
+                var localLock = RwLock;
+                localLock.EnterWriteLock();
+                try
+                {
+                    TrimTelemetryFileInternal(path, maxEntries);
+                }
+                finally
+                {
+                    localLock.ExitWriteLock();
                 }
             }
+            catch
+            {
+                // Ignore
+            }
+            finally
+            {
+                if (acquired && mutex != null)
+                {
+                    try
+                    {
+                        mutex.ReleaseMutex();
+                    }
+                    catch
+                    {
+                        // Ignore
+                    }
+                }
+            }
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activeOperations);
         }
     }
 

@@ -1118,33 +1118,137 @@ internal static class DockerCommandBuilder
 
     private static string GetCanonicalPath(string path)
     {
-        try
+        if (string.IsNullOrWhiteSpace(path))
         {
-            var resolved = Path.GetFullPath(path);
-            var info = new System.IO.DirectoryInfo(resolved);
-            if (info.Exists)
+            throw new ArgumentException("Path cannot be null or empty.", nameof(path));
+        }
+
+        var seenSymlinks = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+        string ResolveCanonicalInternal(string currentPath, int depth)
+        {
+            if (depth > 40)
             {
-                var target = info.LinkTarget;
-                if (!string.IsNullOrEmpty(target))
+                throw new ContainerExtension.DockerExecutionException("Too many levels of symbolic links.");
+            }
+
+            string absolutePath = currentPath;
+            if (!Path.IsPathRooted(absolutePath))
+            {
+                absolutePath = Path.Combine(Directory.GetCurrentDirectory(), absolutePath);
+            }
+
+            string root = Path.GetPathRoot(absolutePath) ?? (OperatingSystem.IsWindows() ? @"C:\" : "/");
+            if (string.IsNullOrEmpty(root))
+            {
+                root = OperatingSystem.IsWindows() ? @"C:\" : "/";
+            }
+
+            string remainder = absolutePath.Substring(root.Length);
+            var separatorChars = new char[] { '/', '\\' };
+            var components = remainder.Split(separatorChars, StringSplitOptions.RemoveEmptyEntries);
+
+            string current = root;
+
+            foreach (var component in components)
+            {
+                if (string.Equals(component, ".", StringComparison.Ordinal))
                 {
-                    return info.ResolveLinkTarget(true)?.FullName ?? info.FullName;
+                    continue;
+                }
+
+                if (string.Equals(component, "..", StringComparison.Ordinal))
+                {
+                    var parent = Path.GetDirectoryName(current);
+                    current = parent ?? root;
+                    continue;
+                }
+
+                string next = Path.Combine(current, component);
+
+                bool isSymlink = false;
+                string? target = null;
+
+                try
+                {
+                    if (Directory.Exists(next))
+                    {
+                        var info = new DirectoryInfo(next);
+                        if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                        {
+                            target = info.LinkTarget;
+                            isSymlink = !string.IsNullOrEmpty(target);
+                        }
+                    }
+                    else if (File.Exists(next))
+                    {
+                        var info = new FileInfo(next);
+                        if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                        {
+                            target = info.LinkTarget;
+                            isSymlink = !string.IsNullOrEmpty(target);
+                        }
+                    }
+                    else
+                    {
+                        var info = new DirectoryInfo(next);
+                        if (info.Exists && info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                        {
+                            target = info.LinkTarget;
+                            isSymlink = !string.IsNullOrEmpty(target);
+                        }
+                        else
+                        {
+                            var fInfo = new FileInfo(next);
+                            if (fInfo.Exists && fInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                            {
+                                target = fInfo.LinkTarget;
+                                isSymlink = !string.IsNullOrEmpty(target);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    // Ignore and treat as non-symlink
+                }
+
+                if (isSymlink && target != null)
+                {
+                    string canonicalSymlink = Path.GetFullPath(next);
+                    if (!seenSymlinks.Add(canonicalSymlink))
+                    {
+                        throw new ContainerExtension.DockerExecutionException($"Circular symbolic link detected: '{next}'");
+                    }
+
+                    try
+                    {
+                        string resolvedTarget;
+                        if (Path.IsPathRooted(target))
+                        {
+                            resolvedTarget = ResolveCanonicalInternal(target, depth + 1);
+                        }
+                        else
+                        {
+                            resolvedTarget = ResolveCanonicalInternal(Path.Combine(current, target), depth + 1);
+                        }
+                        current = resolvedTarget;
+                    }
+                    finally
+                    {
+                        seenSymlinks.Remove(canonicalSymlink);
+                    }
+                }
+                else
+                {
+                    current = next;
                 }
             }
-            var fileInfo = new System.IO.FileInfo(resolved);
-            if (fileInfo.Exists)
-            {
-                var target = fileInfo.LinkTarget;
-                if (!string.IsNullOrEmpty(target))
-                {
-                    return fileInfo.ResolveLinkTarget(true)?.FullName ?? fileInfo.FullName;
-                }
-            }
-            return resolved;
+
+            return Path.GetFullPath(current);
         }
-        catch
-        {
-            return Path.GetFullPath(path);
-        }
+
+        return ResolveCanonicalInternal(path, 0);
     }
 
     private static string MapPathToContainerInternal(string path, string workingDirCanonical)

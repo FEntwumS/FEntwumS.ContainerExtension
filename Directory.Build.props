@@ -20,7 +20,7 @@
     <!-- Supply Chain Security & CI/CD -->
     <PropertyGroup>
         <Deterministic>true</Deterministic>
-        <PathMap Condition="'$(GITHUB_ACTIONS)' != 'true'">$(MSBuildProjectDirectory)=/_/</PathMap>
+        <PathMap Condition="'$(GITHUB_ACTIONS)' == 'true'">$(MSBuildProjectDirectory)=/_/</PathMap>
         <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
         <EmbedUntrackedSources>true</EmbedUntrackedSources>
         

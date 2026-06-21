@@ -64,6 +64,15 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.Contains("ContainerExtension", assembly.GetName().Name, StringComparison.Ordinal);
     }
 
+
+
+
+
+
+
+
+
+
     // -- String Extensions - Edge Cases ----------------------------------
 
     [Theory]
@@ -1060,7 +1069,7 @@ public sealed class ContainerExtensionTests : IDisposable
             WorkingDirectory = "/workspace/dir",
             CommandArguments = new List<ICommandArgument>()
         };
-        await Assert.ThrowsAsync<ArgumentException>(() => strategy.ExecuteAsync(command));
+        await Assert.ThrowsAsync<ArgumentException>(() => strategy.ExecuteAsync(command, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -1079,7 +1088,7 @@ public sealed class ContainerExtensionTests : IDisposable
                 new TestCommandArgument("arg; rm -rf /")
             }
         };
-        await Assert.ThrowsAsync<ArgumentException>(() => strategy.ExecuteAsync(command));
+        await Assert.ThrowsAsync<ArgumentException>(() => strategy.ExecuteAsync(command, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -1098,7 +1107,7 @@ public sealed class ContainerExtensionTests : IDisposable
                 new TestCommandArgument("read_verilog Verilog_Blink.v; synth -top Verilog_Blink")
             }
         };
-        var ex = await Record.ExceptionAsync(() => strategy.ExecuteAsync(command));
+        var ex = await Record.ExceptionAsync(() => strategy.ExecuteAsync(command, TestContext.Current.CancellationToken));
         if (ex != null)
         {
             Assert.IsNotType<ArgumentException>(ex);
@@ -2644,14 +2653,101 @@ public sealed class ContainerExtensionTests : IDisposable
             OutputHandler = line => { outputLines.Add(line); return true; }
         };
 
-        var (success, output) = await strategy.ExecuteAsync(command);
+        var (success, output) = await strategy.ExecuteAsync(command, TestContext.Current.CancellationToken);
 
         Assert.True(success);
         Assert.NotEmpty(outputLines);
         Assert.Contains(outputLines, line => line.Contains("git version", StringComparison.OrdinalIgnoreCase));
     }
+
+    // -- TOCTOU Symlink Traversal Fix Tests -----------------------------
+
+    [Fact]
+    public void GetCanonicalPath_CircularSymlink_ThrowsDockerExecutionException()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "ContainerExtensionTests_Circular_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var pathA = Path.Combine(tempDir, "linkA");
+            var pathB = Path.Combine(tempDir, "linkB");
+
+            if (!OperatingSystem.IsWindows())
+            {
+                File.CreateSymbolicLink(pathA, pathB);
+                File.CreateSymbolicLink(pathB, pathA);
+
+                var method = typeof(DockerExecutionStrategy).GetMethod("GetCanonicalPath", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                Assert.NotNull(method);
+
+                var ex = Assert.Throws<System.Reflection.TargetInvocationException>(() => method.Invoke(null, new object[] { pathA }));
+                Assert.IsType<DockerExecutionException>(ex.InnerException);
+                Assert.Contains("Circular", ex.InnerException.Message, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void GetCanonicalPath_NonExistentSuffix_ResolvesLongestAncestor()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "ContainerExtensionTests_Ancestor_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var method = typeof(DockerExecutionStrategy).GetMethod("GetCanonicalPath", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            Assert.NotNull(method);
+
+            var canonicalTempDir = (string)method.Invoke(null, new object[] { tempDir })!;
+
+            var testPath = Path.Combine(tempDir, "nonexistent", "subdir");
+            var expectedPath = Path.Combine(canonicalTempDir, "nonexistent", "subdir");
+
+            var result = (string)method.Invoke(null, new object[] { testPath })!;
+            Assert.Equal(expectedPath, result);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void GetCanonicalPath_SymlinkTraversalBypass_FailsToCanonicalizeCorrectly()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "ContainerExtensionTests_Bypass_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var symlinkPath = Path.Combine(tempDir, "symlink_to_private");
+            if (!OperatingSystem.IsWindows())
+            {
+                File.CreateSymbolicLink(symlinkPath, "/private");
+
+                var method = typeof(DockerExecutionStrategy).GetMethod("GetCanonicalPath", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                Assert.NotNull(method);
+
+                var inputPath = Path.Combine(tempDir, "symlink_to_private", "..", "etc");
+                var result = (string)method.Invoke(null, new object[] { inputPath })!;
+
+                // The actual OS path of inputPath is /private/etc (because symlink_to_private points to /private, and its parent is /)
+                // But if the resolver resolves it textually first, it returns tempDir/etc.
+                // Let's assert that it does NOT return the bypassed path, i.e., it must be /private/etc.
+                Assert.NotEqual(Path.Combine(tempDir, "etc"), result);
+                Assert.Equal("/private/etc", result);
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
 #pragma warning restore CA1305, CA1307, CA1031, CA1822, CS8019, CA1308
 }
+
 
 #pragma warning disable CA1822
 internal sealed class MockSettingsService : ISettingsService

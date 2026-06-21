@@ -379,7 +379,12 @@ public sealed class DockerImageManager
                             pipeName = parts[parts.Length - 1];
                         }
                     }
-                    var pipe = new System.IO.Pipes.NamedPipeClientStream(serverName, pipeName, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
+                    var pipe = new System.IO.Pipes.NamedPipeClientStream(
+                        serverName,
+                        pipeName,
+                        System.IO.Pipes.PipeDirection.InOut,
+                        System.IO.Pipes.PipeOptions.Asynchronous,
+                        System.Security.Principal.TokenImpersonationLevel.Identification);
                     try
                     {
                         await pipe.ConnectAsync(token).ConfigureAwait(false);
@@ -432,7 +437,7 @@ public sealed class DockerImageManager
             using var response = await httpClient.GetAsync(url, ct).ConfigureAwait(false);
             if (response.IsSuccessStatusCode)
             {
-                var contentStream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+                using var contentStream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
                 var systemDf = await System.Text.Json.JsonSerializer.DeserializeAsync(contentStream, DockerImageJsonContext.Default.SystemDfResponse, cancellationToken: ct).ConfigureAwait(false);
                 if (systemDf != null)
                 {
