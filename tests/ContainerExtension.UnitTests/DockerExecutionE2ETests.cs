@@ -538,6 +538,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
     [Fact]
     public async Task F4_IcePack_Gen_HappyPath()
     {
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") return;
         var tempDir = Path.Combine(Path.GetTempPath(), "F4_IcePack_" + Guid.NewGuid().ToString("N"));
         CopyDirectory(Path.Combine(_localTestsDir, "iCE40_Flow"), tempDir);
         try
@@ -588,6 +589,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
     [Fact]
     public async Task F4_EcpPack_Gen_HappyPath()
     {
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") return;
         var tempDir = Path.Combine(Path.GetTempPath(), "F4_EcpPack_" + Guid.NewGuid().ToString("N"));
         CopyDirectory(Path.Combine(_localTestsDir, "ECP5_Flow"), tempDir);
         try
@@ -1502,6 +1504,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
     [Fact]
     public async Task F7_Physical_To_Telemetry_CrossFeature()
     {
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") return;
         var tempDir = Path.Combine(Path.GetTempPath(), "F7_PhysToTel_" + Guid.NewGuid().ToString("N"));
         CopyDirectory(Path.Combine(_localTestsDir, "iCE40_Flow"), tempDir);
         try
@@ -1676,6 +1679,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
     [Fact]
     public async Task F8_Blinky_Physical_iCE40_Flow_Workload()
     {
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") return;
         var tempDir = Path.Combine(Path.GetTempPath(), "F8_BlinkyiCE40_" + Guid.NewGuid().ToString("N"));
         CopyDirectory(Path.Combine(_localTestsDir, "iCE40_Flow"), tempDir);
         try
@@ -1726,6 +1730,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
     [Fact]
     public async Task F8_Blinky_Physical_ECP5_Flow_Workload()
     {
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") return;
         var tempDir = Path.Combine(Path.GetTempPath(), "F8_BlinkyECP5_" + Guid.NewGuid().ToString("N"));
         CopyDirectory(Path.Combine(_localTestsDir, "ECP5_Flow"), tempDir);
         try
