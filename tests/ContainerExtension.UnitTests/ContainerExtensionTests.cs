@@ -2735,9 +2735,9 @@ public sealed class ContainerExtensionTests : IDisposable
 
                 // The actual OS path of inputPath is /private/etc (because symlink_to_private points to /private, and its parent is /)
                 // But if the resolver resolves it textually first, it returns tempDir/etc.
-                // Let's assert that it does NOT return the bypassed path, i.e., it must be /private/etc.
                 Assert.NotEqual(Path.Combine(tempDir, "etc"), result);
-                Assert.Equal("/private/etc", result);
+                var expectedPath = OperatingSystem.IsMacOS() ? "/private/etc" : "/etc";
+                Assert.Equal(expectedPath, result);
             }
         }
         finally

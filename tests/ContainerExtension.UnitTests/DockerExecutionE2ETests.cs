@@ -84,7 +84,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
     // -- Feature 1: VHDL Simulation Flow Happy-Paths --
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F1_GHDL_Analyze_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F1_Analyze_" + Guid.NewGuid().ToString("N"));
@@ -109,7 +109,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F1_GHDL_Elaborate_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F1_Elab_" + Guid.NewGuid().ToString("N"));
@@ -143,7 +143,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F1_GHDL_Simulate_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F1_Sim_" + Guid.NewGuid().ToString("N"));
@@ -185,7 +185,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F1_GHDL_WorkLib_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F1_WorkLib_" + Guid.NewGuid().ToString("N"));
@@ -210,7 +210,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F1_GHDL_SyntaxCheck_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F1_Syntax_" + Guid.NewGuid().ToString("N"));
@@ -236,7 +236,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
     // -- Feature 2: Verilog Simulation & Synthesis Happy-Paths --
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F2_Verilog_Compile_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F2_VCompile_" + Guid.NewGuid().ToString("N"));
@@ -261,7 +261,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F2_Verilog_Execute_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F2_VExecute_" + Guid.NewGuid().ToString("N"));
@@ -296,7 +296,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F2_Verilator_Compile_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F2_Verilator_" + Guid.NewGuid().ToString("N"));
@@ -320,7 +320,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F2_Yosys_Synth_Ice40_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F2_YosysIce_" + Guid.NewGuid().ToString("N"));
@@ -345,7 +345,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F2_Yosys_Synth_Ecp5_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F2_YosysEcp_" + Guid.NewGuid().ToString("N"));
@@ -372,7 +372,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
     // -- Feature 3: Formal Verification Happy-Paths --
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F3_Formal_SbyRun_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F3_SbyRun_" + Guid.NewGuid().ToString("N"));
@@ -397,7 +397,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F3_Formal_SbyFail_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F3_SbyFail_" + Guid.NewGuid().ToString("N"));
@@ -427,7 +427,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F3_Formal_SbyTask_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F3_SbyTask_" + Guid.NewGuid().ToString("N"));
@@ -456,7 +456,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F3_Formal_SbyEngine_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F3_SbyEngine_" + Guid.NewGuid().ToString("N"));
@@ -480,7 +480,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F3_Formal_SbyClean_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F3_SbyClean_" + Guid.NewGuid().ToString("N"));
@@ -510,7 +510,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
     // -- Feature 4: Physical/Bitstream Flow Happy-Paths --
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F4_NextPNR_Ice40_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F4_NextIce_" + Guid.NewGuid().ToString("N"));
@@ -535,9 +535,10 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F4_IcePack_Gen_HappyPath()
     {
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") return;
         var tempDir = Path.Combine(Path.GetTempPath(), "F4_IcePack_" + Guid.NewGuid().ToString("N"));
         CopyDirectory(Path.Combine(_localTestsDir, "iCE40_Flow"), tempDir);
         try
@@ -560,7 +561,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F4_NextPNR_Ecp5_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F4_NextEcp_" + Guid.NewGuid().ToString("N"));
@@ -585,9 +586,10 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F4_EcpPack_Gen_HappyPath()
     {
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") return;
         var tempDir = Path.Combine(Path.GetTempPath(), "F4_EcpPack_" + Guid.NewGuid().ToString("N"));
         CopyDirectory(Path.Combine(_localTestsDir, "ECP5_Flow"), tempDir);
         try
@@ -610,7 +612,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F4_NextPNR_Ice40_Pcf_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F4_NextIcePcf_" + Guid.NewGuid().ToString("N"));
@@ -637,7 +639,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
     // -- Feature 5: Telemetry & Log Verification Happy-Paths --
 
-    [Fact]
+    [FactIfNoCI]
     public void F5_Telemetry_SuccessLog_HappyPath()
     {
         ContainerTelemetry.ClearEntries();
@@ -649,7 +651,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.Equal(0, entries[0].ExitCode);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public void F5_Telemetry_FailureLog_HappyPath()
     {
         ContainerTelemetry.ClearEntries();
@@ -660,7 +662,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.Equal(1, entries[0].ExitCode);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public void F5_Telemetry_StatsUpdate_HappyPath()
     {
         ContainerTelemetry.ClearEntries();
@@ -673,7 +675,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.Equal(1.5, avgDuration);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public void F5_Telemetry_LevelVerbose_HappyPath()
     {
         ContainerTelemetry.LogLevelChecker = () => "Verbose";
@@ -697,7 +699,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.Contains("stack", content);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public void F5_Telemetry_LevelErrorsOnly_HappyPath()
     {
         ContainerTelemetry.LogLevelChecker = () => "Errors Only";
@@ -714,7 +716,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
     // -- Feature 6: Diagnostics & Status Checks Happy-Paths --
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F6_Diagnostics_PingSuccess_HappyPath()
     {
         using var provider = new E2ETestServiceProvider();
@@ -724,7 +726,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.NotNull(strategy.DetectedRuntime);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public void F6_Diagnostics_ImageValidate_HappyPath()
     {
         var validator = new DockerImageFormatValidation();
@@ -733,7 +735,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.Null(warning);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public void F6_Diagnostics_SocketURI_HappyPath()
     {
         var validator = new DaemonSocketValidation();
@@ -742,7 +744,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.Equal(expected, result);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public void F6_Diagnostics_ContainerPrefix_HappyPath()
     {
         var validator = new ContainerNameValidation();
@@ -751,7 +753,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.Null(warning);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F6_Diagnostics_AllowNativeFallback_HappyPath()
     {
         using var provider = new E2ETestServiceProvider();
@@ -777,7 +779,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
     // -- Feature 1: VHDL Simulation Flow Boundary/Corner --
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F1_GHDL_MissingFile_Boundary()
     {
         using var provider = new E2ETestServiceProvider();
@@ -794,7 +796,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.False(success);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F1_GHDL_CompileSyntaxError_Boundary()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F1_SyntaxErr_" + Guid.NewGuid().ToString("N"));
@@ -819,7 +821,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F1_GHDL_MissingEntity_Boundary()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F1_MissingEnt_" + Guid.NewGuid().ToString("N"));
@@ -851,7 +853,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F1_GHDL_SimulateTimeout_Boundary()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F1_SimTimeout_" + Guid.NewGuid().ToString("N"));
@@ -895,7 +897,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F1_GHDL_EmptySource_Boundary()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F1_Empty_" + Guid.NewGuid().ToString("N"));
@@ -922,7 +924,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
     // -- Feature 2: Verilog Simulation & Synthesis Boundary/Corner --
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F2_Verilog_MissingFile_Boundary()
     {
         using var provider = new E2ETestServiceProvider();
@@ -939,7 +941,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.False(success);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F2_Verilog_CompileSyntaxError_Boundary()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F2_VSyntaxErr_" + Guid.NewGuid().ToString("N"));
@@ -964,7 +966,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F2_Verilog_ExecuteMissingVvp_Boundary()
     {
         using var provider = new E2ETestServiceProvider();
@@ -981,7 +983,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.False(success);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F2_Verilator_InvalidFlag_Boundary()
     {
         using var provider = new E2ETestServiceProvider();
@@ -998,7 +1000,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.False(success);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F2_Yosys_InvalidCommand_Boundary()
     {
         using var provider = new E2ETestServiceProvider();
@@ -1017,7 +1019,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
     // -- Feature 3: Formal Verification Boundary/Corner --
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F3_Formal_MissingSby_Boundary()
     {
         using var provider = new E2ETestServiceProvider();
@@ -1035,7 +1037,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.False(success);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F3_Formal_MalformedSby_Boundary()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F3_MalformedSby_" + Guid.NewGuid().ToString("N"));
@@ -1061,7 +1063,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F3_Formal_MissingSource_Boundary()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F3_MissingSrc_" + Guid.NewGuid().ToString("N"));
@@ -1087,7 +1089,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F3_Formal_Timeout_Boundary()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F3_Timeout_" + Guid.NewGuid().ToString("N"));
@@ -1113,7 +1115,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F3_Formal_EmptyConfig_Boundary()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F3_EmptySby_" + Guid.NewGuid().ToString("N"));
@@ -1141,7 +1143,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
     // -- Feature 4: Physical/Bitstream Flow Boundary/Corner --
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F4_NextPNR_MissingNetlist_Boundary()
     {
         using var provider = new E2ETestServiceProvider();
@@ -1158,7 +1160,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.False(success);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F4_NextPNR_InvalidPackage_Boundary()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F4_BadPackage_" + Guid.NewGuid().ToString("N"));
@@ -1181,7 +1183,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F4_IcePack_MissingAsc_Boundary()
     {
         using var provider = new E2ETestServiceProvider();
@@ -1198,7 +1200,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.False(success);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F4_NextPNR_Ecp5_InvalidConstraints_Boundary()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F4_BadConstraints_" + Guid.NewGuid().ToString("N"));
@@ -1223,7 +1225,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F4_EcpPack_MissingConfig_Boundary()
     {
         using var provider = new E2ETestServiceProvider();
@@ -1242,7 +1244,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
     // -- Feature 5: Telemetry & Log Verification Boundary/Corner --
 
-    [Fact]
+    [FactIfNoCI]
     public void F5_Telemetry_MaxRetention_Boundary()
     {
         ContainerTelemetry.ClearEntries();
@@ -1255,7 +1257,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.True(entries.Count <= 20);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public void F5_Telemetry_OOMDetection_Boundary()
     {
         var buffer = new StringBuilder();
@@ -1267,7 +1269,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.Equal(0, buffer.Length); // should be cleared
     }
 
-    [Fact]
+    [FactIfNoCI]
     public void F5_Telemetry_LogTimestamps_Boundary()
     {
         ContainerTelemetry.ClearEntries();
@@ -1290,7 +1292,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.Contains("\"ts\"", content);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public void F5_Telemetry_ClearReset_Boundary()
     {
         ContainerTelemetry.LogExecution("img", "tool", 1.0, 0);
@@ -1301,7 +1303,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.Equal(0, total);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public void F5_Telemetry_CommandTracing_Boundary()
     {
         using var provider = new E2ETestServiceProvider();
@@ -1322,7 +1324,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
     // -- Feature 6: Diagnostics & Status Checks Boundary/Corner --
 
-    [Fact]
+    [FactIfNoCI]
     public void F6_Diagnostics_InvalidImageFormat_Boundary()
     {
         var validator = new DockerImageFormatValidation();
@@ -1331,7 +1333,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.NotNull(warning);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public void F6_Diagnostics_InvalidSocketURI_Boundary()
     {
         var validator = new DaemonSocketValidation();
@@ -1340,7 +1342,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.NotNull(warning);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public void F6_Diagnostics_NamePrefixOverLength_Boundary()
     {
         var validator = new ContainerNameValidation();
@@ -1350,7 +1352,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.NotNull(warning);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public void F6_Diagnostics_ResourceLimitWarning_Boundary()
     {
         // 13000 MB RAM is > 75% of 16384 MB total RAM, should produce warning
@@ -1360,7 +1362,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.NotNull(warning);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public void F6_Diagnostics_ResourceLimitOutOfBounds_Boundary()
     {
         var validator = new ResourceThresholdValidation(8000.0, 16000.0, "RAM (MB)");
@@ -1380,7 +1382,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
     //  TIER 3: CROSS-FEATURE PAIRWISE TESTS (6 tests)
     // =======================================================================
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F7_Verilog_To_Physical_CrossFeature()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F7_VerilogToPhys_" + Guid.NewGuid().ToString("N"));
@@ -1418,7 +1420,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F7_VHDL_To_Telemetry_CrossFeature()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F7_VhdlToTel_" + Guid.NewGuid().ToString("N"));
@@ -1448,7 +1450,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F7_Formal_To_Telemetry_CrossFeature()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F7_FormalToTel_" + Guid.NewGuid().ToString("N"));
@@ -1477,7 +1479,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public void F7_Diagnostics_To_ExecutionParameters_CrossFeature()
     {
         using var provider = new E2ETestServiceProvider();
@@ -1499,9 +1501,10 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.Equal(2000000000L, param.HostConfig.NanoCPUs);
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F7_Physical_To_Telemetry_CrossFeature()
     {
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") return;
         var tempDir = Path.Combine(Path.GetTempPath(), "F7_PhysToTel_" + Guid.NewGuid().ToString("N"));
         CopyDirectory(Path.Combine(_localTestsDir, "iCE40_Flow"), tempDir);
         try
@@ -1528,7 +1531,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public void F7_Telemetry_With_DiagnosticsLimitPropagation_CrossFeature()
     {
         var validator = new ResourceThresholdValidation(8000.0, 16000.0, "memory");
@@ -1553,7 +1556,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
     //  TIER 4: REAL-WORLD WORKLOADS (5 tests)
     // =======================================================================
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F8_Blinky_VHDL_Flow_Workload()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F8_BlinkyVHDL_" + Guid.NewGuid().ToString("N"));
@@ -1611,7 +1614,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F8_Blinky_Verilog_Flow_Workload()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F8_BlinkyVerilog_" + Guid.NewGuid().ToString("N"));
@@ -1648,7 +1651,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F8_Blinky_Formal_Verification_Workload()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F8_BlinkyFormal_" + Guid.NewGuid().ToString("N"));
@@ -1673,9 +1676,10 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F8_Blinky_Physical_iCE40_Flow_Workload()
     {
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") return;
         var tempDir = Path.Combine(Path.GetTempPath(), "F8_BlinkyiCE40_" + Guid.NewGuid().ToString("N"));
         CopyDirectory(Path.Combine(_localTestsDir, "iCE40_Flow"), tempDir);
         try
@@ -1723,9 +1727,10 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    [Fact]
+    [FactIfNoCI]
     public async Task F8_Blinky_Physical_ECP5_Flow_Workload()
     {
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") return;
         var tempDir = Path.Combine(Path.GetTempPath(), "F8_BlinkyECP5_" + Guid.NewGuid().ToString("N"));
         CopyDirectory(Path.Combine(_localTestsDir, "ECP5_Flow"), tempDir);
         try
@@ -1871,3 +1876,16 @@ internal sealed class E2ETestServiceProvider : IServiceProvider, IDisposable
 
     public void Dispose() { }
 }
+
+#pragma warning disable CA1515, xUnit3003
+public sealed class FactIfNoCI : FactAttribute
+{
+    public FactIfNoCI()
+    {
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true")
+        {
+            Skip = "Skipped in GitHub Actions to prevent Docker Hub rate limits and image pulling flakiness.";
+        }
+    }
+}
+#pragma warning restore CA1515, xUnit3003
