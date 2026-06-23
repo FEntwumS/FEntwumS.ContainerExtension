@@ -36,6 +36,7 @@ Desktop.ini
 riderModule.iml
 /_ReSharper.Caches/
 .gemini/
+.agents/
 
 # -- .NET Build & Tooling -----------------------------------------------------
 bin/
