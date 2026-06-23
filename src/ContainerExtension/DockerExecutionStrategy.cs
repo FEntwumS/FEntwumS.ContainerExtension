@@ -94,7 +94,15 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                     using var identity = new System.Security.Principal.WindowsIdentity(hToken.DangerousGetHandle());
 #pragma warning restore S3869
                     var principal = new System.Security.Principal.WindowsPrincipal(identity);
-                    bool isAdmin = principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+                    bool isAdmin = false;
+                    try
+                    {
+                        isAdmin = principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+                    }
+                    catch (Exception ex) when (ex is System.Security.SecurityException || ex is UnauthorizedAccessException)
+                    {
+                        isAdmin = false;
+                    }
                     bool isSystem = identity.IsSystem;
                     using var currentIdentity = System.Security.Principal.WindowsIdentity.GetCurrent();
                     bool isCurrentUser = identity.User != null && currentIdentity.User != null && identity.User.Equals(currentIdentity.User);
