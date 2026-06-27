@@ -40,7 +40,14 @@ ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Dependencies
+# Runtime dependencies. The native toolchain (gcc/g++/make/perl/libc6-dev/zlib1g-dev) is REQUIRED at
+# runtime, not build-time scaffolding: the Verilator flow emits C++ from the HDL and compiles it into a
+# simulation executable inside the container, so it cannot be dropped without losing Verilator support.
+# The in-container-compiler escape exposure is mitigated by the non-privileged, cap-dropped,
+# no-new-privileges, non-root, read-only-tooling execution posture. python3 backs SymbiYosys and flow
+# scripts. The base image is digest-pinned (above); the apt index it points at still serves rolling
+# security updates, so a from-source rebuild is not bit-identical — reproducibility is anchored on the
+# built image's recorded digest (the evaluation captures it per run), not on a Dockerfile rebuild.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     libffi8 \
@@ -58,8 +65,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy tools
 COPY --from=downloader /opt/oss-cad-suite /opt/oss-cad-suite
 
-# Strip suid/sgid and enforce read-only
-RUN find /opt/oss-cad-suite -xdev \( -perm -4000 -o -perm -2000 \) -type f -exec chmod a-s {} + || true \
+# Strip any suid/sgid bits from the prebuilt tools, then make the toolchain tree read-only. Fail closed:
+# a chmod failure aborts the build rather than shipping an unstripped binary (the previous `|| true`
+# masked exactly that). `find -exec ... +` still exits 0 when no suid/sgid files are present.
+RUN find /opt/oss-cad-suite -xdev \( -perm -4000 -o -perm -2000 \) -type f -exec chmod a-s {} + \
     && chmod -R a-w /opt/oss-cad-suite
 
 ENV PATH="/opt/oss-cad-suite/bin:${PATH}"

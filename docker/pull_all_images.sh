@@ -30,7 +30,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Docker Content Trust
+# Trust model. These are upstream-maintained hdlc/* fallback images, pulled by tag for local
+# convenience caching; they are NOT the reproducible execution target. The pinned, integrity-anchored
+# path is the fentwums/oss-cad-suite image, whose base is digest-pinned and whose toolchain tarball is
+# verified against a committed SHA-256 (fail-closed) in docker/oss-cad-suite/Dockerfile, and whose
+# resolved digest the evaluation records per run. Provenance here is TLS-trusted, not cosign-signed.
+# Enable Docker Content Trust if (and only if) the upstream publisher signs these tags:
 # export DOCKER_CONTENT_TRUST=1
 
 pull() {

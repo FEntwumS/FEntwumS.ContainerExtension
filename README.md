@@ -58,7 +58,10 @@ The plugin coordinates execution through a hybrid strategy:
 - Mount allow-listing rejects binds of critical host paths (`/etc`, `/proc`, `/sys`, the Docker socket, …).
 - The registry client is HTTPS-only, scopes forwarded credentials to the matching host, and rejects
   references that resolve to loopback or internal addresses (SSRF defense).
-- Supply chain: `NuGetAudit`, an SBOM and OIDC build attestations on releases, and CodeQL plus Trivy scans in CI.
+- Supply chain: `NuGetAudit`, an SBOM and OIDC build attestations on releases, and CodeQL plus Trivy
+  scans in CI. The runtime image pins its base by digest and verifies the toolchain tarball against a
+  committed SHA-256 (fail-closed); image integrity is anchored on these committed digests and the
+  per-run recorded image digest. Provenance is TLS-trusted, not yet cosign-signed.
 
 ## Supported container runtimes
 
