@@ -15,7 +15,7 @@ namespace ContainerExtension.Services.Docker;
 /// Handles container image resolution, pulling, inspection, and pruning.
 /// Integrates with <see cref="ISettingsService"/> to respect pull policies (Always, IfNotPresent, Never).
 /// </summary>
-public sealed class DockerImageManager
+public sealed class DockerImageManager : IDisposable
 {
     private static readonly System.Diagnostics.ActivitySource ImageActivitySource = new("OneWare.ContainerExtension.Image");
     private static readonly SemaphoreSlim PullSemaphore = new(2, 2);
@@ -29,6 +29,15 @@ public sealed class DockerImageManager
     private readonly DockerClient _client;
     private readonly ISettingsService _settingsService;
     private readonly SemaphoreSlim _listImagesSemaphore = new(1, 1);
+
+    // The pull/prune semaphores are static (process-lifetime); only the per-instance gate is owned here.
+    public void Dispose() => _listImagesSemaphore.Dispose();
+
+    // Invokes the handler inline on the reporting thread, unlike Progress<T> which posts asynchronously.
+    private sealed class SynchronousProgress<T>(Action<T> handler) : IProgress<T>
+    {
+        public void Report(T value) => handler(value);
+    }
 
     public DockerImageManager(DockerClient client, ISettingsService settingsService)
     {
@@ -170,7 +179,6 @@ public sealed class DockerImageManager
     {
         using var activity = ImageActivitySource.StartActivity("DockerImageManager.UpdateAllImages");
 
-        // Host disk space check: require at least 1 GB of free space
         if (!CheckFreeDiskSpace(1024 * 1024 * 1024, out var spaceError))
         {
             progress?.Invoke($"[ERROR] Pull aborted: {spaceError}");
@@ -228,10 +236,33 @@ public sealed class DockerImageManager
                         pullParams.Platform = platform;
                     }
 
-                    await _client.Images.CreateImageAsync(
-                      pullParams, null, EmptyProgress<JSONMessage>.Instance, ct).ConfigureAwait(false);
+                    // The registry streams pull errors in-band over an HTTP 200 response,
+                    // so a missing transport exception does not imply success.
+                    // Synchronous sink (not Progress<T>): CreateImageAsync calls Report inline as it parses
+                    // each stream message, so the in-band error is captured before the await returns. A
+                    // Progress<T> would post the callback off-thread and could run after the read below.
+                    string? pullError = null;
+                    var pullProgress = new SynchronousProgress<JSONMessage>(msg =>
+                    {
+                        var error = msg.Error?.Message ?? msg.ErrorMessage;
+                        if (!string.IsNullOrEmpty(error))
+                        {
+                            pullError = error;
+                        }
+                    });
 
-                    Interlocked.Increment(ref pulledCount);
+                    await _client.Images.CreateImageAsync(
+                      pullParams, null, pullProgress, ct).ConfigureAwait(false);
+
+                    if (pullError != null)
+                    {
+                        progress?.Invoke($"[ERROR] Re-pull failed for {targetTag}: {pullError}");
+                        Interlocked.Increment(ref failedCount);
+                    }
+                    else
+                    {
+                        Interlocked.Increment(ref pulledCount);
+                    }
                 }
                 catch (OperationCanceledException)
                 {
@@ -468,7 +499,7 @@ public sealed class DockerImageManager
         }
         return null;
     }
-} // Close DockerImageManager class
+}
 
 internal sealed class SystemDfResponse
 {

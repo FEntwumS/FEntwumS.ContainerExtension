@@ -189,10 +189,14 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, PlatformSetting, new ComboBoxSetting("Image Platform", "auto", ["auto", "linux/amd64", "linux/arm64", "linux/arm/v7"]));
 
         var totalRamMb = GetHostMemoryMB();
-        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, MemoryLimitSetting, new SliderSetting($"Memory Limit (0 = unlimited) — {totalRamMb:N0} MB available", 0, 0, totalRamMb, 256) { Validator = new ResourceThresholdValidation(totalRamMb * 0.75, totalRamMb, "memory") });
+        // Step is 512 MB so every selectable stop satisfies the validator's 512 MB floor (a 256 MB
+        // step would let the user land on 256, which the validator then rejects).
+        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, MemoryLimitSetting, new SliderSetting($"Memory Limit (0 = unlimited) — {totalRamMb:N0} MB available", 0, 0, totalRamMb, 512) { Validator = new ResourceThresholdValidation(totalRamMb * 0.75, totalRamMb, "memory") });
 
         var totalCores = (double)Environment.ProcessorCount;
-        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, CpuLimitSetting, new SliderSetting($"CPU Cores Limit (0 = unlimited) — {totalCores:N0} cores available", 0, 0, totalCores, 1) { Validator = new ResourceThresholdValidation(totalCores * 0.75, totalCores, "CPU") });
+        // Step is 0.5 so fractional core limits (e.g. 1.5) are selectable, matching the documented
+        // fractional-core support and the validator's 0.1-core floor.
+        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, CpuLimitSetting, new SliderSetting($"CPU Cores Limit (0 = unlimited) — {totalCores:N0} cores available", 0, 0, totalCores, 0.5) { Validator = new ResourceThresholdValidation(totalCores * 0.75, totalCores, "CPU") });
 
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, TimeoutSetting, new SliderSetting("Execution Timeout (0 = no timeout)", 0, 0, 480, 5));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, NetworkModeSetting, new ComboBoxSetting("Network Mode", "bridge", ["bridge", "host", "none"]));
@@ -206,7 +210,10 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, TelemetryRetentionSetting, new ComboBoxSetting("Telemetry Retention", "100", ["None", "25", "50", "100", "250", "500", "1000", "Unlimited"]));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DockerRuntimePathSetting, new FilePathSetting("Container Runtime Path", "", "Absolute path to the container runtime executable.", null, ValidateRuntimePath));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DaemonSocketSetting, new TextBoxSetting("Custom Daemon Socket", "", "Optional: Override DOCKER_HOST.") { Validator = DaemonSocketValidatorInstance });
-        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, BypassNamedPipeCheckSetting, new CheckBoxSetting("Bypass Named Pipe Security Check", false));
+        // Default to bypass: the named-pipe host-process check is Windows-only and yields false positives on
+        // common non-default daemon setups (WSL2 relays, rootless/remote engines), where it would block
+        // execution. Users on a hardened Windows host can uncheck it to re-enable the impersonation guard.
+        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, BypassNamedPipeCheckSetting, new CheckBoxSetting("Bypass Named Pipe Security Check", true));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, AllowNativeFallbackSetting, new CheckBoxSetting("Allow Native Fallback", false));
 
         IToolService toolService;
@@ -219,7 +226,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         try
         {
             toolService = serviceProvider.Resolve<IToolService>() ?? throw new InvalidOperationException("IToolService is not registered.");
-            dockerStrategy = serviceProvider.Resolve<DockerExecutionStrategy>() ?? throw new InvalidOperationException("DockerExecutionStrategy is not registered. (Fix 107)");
+            dockerStrategy = serviceProvider.Resolve<DockerExecutionStrategy>() ?? throw new InvalidOperationException("DockerExecutionStrategy is not registered.");
             dockService = serviceProvider.Resolve<IMainDockService>() ?? throw new InvalidOperationException("IMainDockService is not registered.");
             dashboardVm = serviceProvider.Resolve<DockerDiagnosticsViewModel>() ?? throw new InvalidOperationException("DockerDiagnosticsViewModel is not registered.");
             appCommandService = serviceProvider.Resolve<IApplicationCommandService>();
@@ -237,37 +244,63 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         _ = Task.Run(async () =>
         {
             var knownToolCount = toolService.GetAllTools().Count;
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            // Strategy injection for all known tools already happened synchronously above; this
+            // timer only re-injects for tools registered later. A 5 s cadence keeps late-tool
+            // latency low while avoiding a per-second scan of every tool's settings for the
+            // entire plugin lifetime.
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
             try
             {
                 var strategyKey = dockerStrategy.GetStrategyKey();
                 while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
                 {
                     if (ct.IsCancellationRequested) break;
-                    var currentTools = toolService.GetAllTools();
-                    var needsInjection = false;
-                    foreach (var tool in currentTools)
+
+                    // Isolate each tick: a transient fault in one scan must not tear down the
+                    // poller, otherwise late-registered tools would silently never receive the
+                    // strategy until the next IDE restart.
+                    try
                     {
-                        if (settingsService.HasSetting(tool.Key) && settingsService.GetSetting(tool.Key) is ComboBoxSetting comboSetting && (comboSetting.Options == null || comboSetting.Options.Length == 0 || !OptionsContains(comboSetting.Options, strategyKey)))
+                        var currentTools = toolService.GetAllTools();
+                        var needsInjection = false;
+                        foreach (var tool in currentTools)
                         {
-                            needsInjection = true;
-                            break;
+                            if (settingsService.HasSetting(tool.Key) && settingsService.GetSetting(tool.Key) is ComboBoxSetting comboSetting && (comboSetting.Options == null || comboSetting.Options.Length == 0 || !OptionsContains(comboSetting.Options, strategyKey)))
+                            {
+                                needsInjection = true;
+                                break;
+                            }
+                        }
+
+                        var currentToolCount = currentTools.Count;
+                        if (currentToolCount != knownToolCount || needsInjection)
+                        {
+                            knownToolCount = currentToolCount;
+                            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                            {
+                                InjectStrategyIntoAllTools(toolService, dockerStrategy, settingsService);
+                            });
                         }
                     }
-
-                    var currentToolCount = currentTools.Count;
-                    if (currentToolCount != knownToolCount || needsInjection)
+                    catch (Exception ex) when (ex is not OutOfMemoryException)
                     {
-                        knownToolCount = currentToolCount;
-                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                        {
-                            InjectStrategyIntoAllTools(toolService, dockerStrategy, settingsService);
-                        });
+                        // Swallow and let the loop advance to the next tick.
+                        ContainerTelemetry.TrackError("ContainerExtensionModule", "ToolPollingTickError", ex);
                     }
                 }
             }
             catch (OperationCanceledException) { /* Ignore */ }
-            catch (Exception ex) { ContainerTelemetry.TrackError("ContainerExtensionModule", "ToolPollingError", ex); }
+            catch (Exception ex)
+            {
+                // The loop itself failed (not a per-tick fault): late-tool wiring has stopped for
+                // the remainder of this session and only an IDE restart will restore it.
+                ContainerTelemetry.TrackError("ContainerExtensionModule", "ToolPollingError", ex);
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    windowService?.ShowNotification(
+                        "Container Extension",
+                        "Late-tool strategy wiring has stopped. Newly registered FPGA tools will not run in containers until OneWare is restarted.",
+                        Avalonia.Controls.Notifications.NotificationType.Warning));
+            }
         });
 
         try
@@ -409,7 +442,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
 
                 if (attempt < maxRetries)
                 {
-                    await Console.Error.WriteLineAsync($"[ContainerExtension] ⏳ Daemon not reachable (attempt {attempt}/{maxRetries}), retrying in {retryDelayMs / 1000}s...").ConfigureAwait(false);
+                    await Console.Error.WriteLineAsync($"[ContainerExtension] Daemon not reachable (attempt {attempt}/{maxRetries}), retrying in {retryDelayMs / 1000}s.").ConfigureAwait(false);
                     await Task.Delay(retryDelayMs, ct).ConfigureAwait(false);
                 }
             }
@@ -421,7 +454,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
 
             if (isReachable)
             {
-                await Console.Out.WriteLineAsync($"[ContainerExtension] ✅ Connected to {dockerStrategy.DetectedRuntime} daemon.").ConfigureAwait(false);
+                await Console.Out.WriteLineAsync($"[ContainerExtension] Connected to {dockerStrategy.DetectedRuntime} daemon.").ConfigureAwait(false);
 
                 try
                 {
@@ -452,7 +485,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                                 try
                                 {
                                     await dockerStrategy.Client.Containers.RemoveContainerAsync(container.ID, new Docker.DotNet.Models.ContainerRemoveParameters { Force = true }, ct).ConfigureAwait(false);
-                                    await Console.Out.WriteLineAsync($"[ContainerExtension] 🧹 Reaped dangling container: {names}").ConfigureAwait(false);
+                                    await Console.Out.WriteLineAsync($"[ContainerExtension] Reaped dangling container: {names}").ConfigureAwait(false);
                                 }
                                 catch (Exception ex)
                                 {
@@ -481,7 +514,12 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
             }
             else
             {
-                await Console.Error.WriteLineAsync($"[ContainerExtension] ⚠️ Docker daemon is not reachable after {maxRetries} attempts.").ConfigureAwait(false);
+                await Console.Error.WriteLineAsync($"[ContainerExtension] Docker daemon is not reachable after {maxRetries} attempts.").ConfigureAwait(false);
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    windowService?.ShowNotification(
+                        "Container Extension",
+                        $"{dockerStrategy.DetectedRuntime} daemon is not reachable. FPGA tools will run natively or fail until it is started.",
+                        Avalonia.Controls.Notifications.NotificationType.Warning));
             }
         });
     }

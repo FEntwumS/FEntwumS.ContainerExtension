@@ -12,7 +12,8 @@
         <IsAotCompatible>false</IsAotCompatible>
         <!-- CA1707: Underscored test names are standard xUnit convention -->
         <!-- CA1016: Assembly version is not required for test projects -->
-        <NoWarn>$(NoWarn);CA1707;CA1016;IL2026;IL3050;IL2075</NoWarn>
+        <!-- CA1849: Test fixtures use synchronous file and process I/O by design; async offers no value here -->
+        <NoWarn>$(NoWarn);CA1707;CA1016;IL2026;IL3050;IL2075;CA1849</NoWarn>
     </PropertyGroup>
 
     <ItemGroup>

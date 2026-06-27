@@ -28,6 +28,19 @@ public partial class DockerDiagnosticsView
         return string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{size:F1} {BinaryUnits[i]}");
     }
 
+    /// <summary>Re-runs <see cref="PopulateImages"/> against the last cached image snapshot.</summary>
+    private void RepopulateImagesFromCache()
+    {
+        IList<Docker.DotNet.Models.ImagesListResponse> localImages;
+        (int imageCount, long totalSizeBytes, long reclaimableBytes) localDiskUsage;
+        lock (_cachedDataLock)
+        {
+            localImages = _cachedImages;
+            localDiskUsage = _cachedDiskUsage;
+        }
+        PopulateImages(localImages, localDiskUsage);
+    }
+
     /// <summary>Populates the Images &amp; Disk Usage section with the image inventory and storage summary.</summary>
     private void PopulateImages(IList<Docker.DotNet.Models.ImagesListResponse> images,
     (int imageCount, long totalSizeBytes, long reclaimableBytes) diskUsage)
@@ -49,9 +62,9 @@ public partial class DockerDiagnosticsView
                     _recycledImageRows.Add(grid);
                 }
             }
-            if (_recycledImageRows.Count > 100)
+            if (_recycledImageRows.Count > MaxRecycledRows)
             {
-                _recycledImageRows.RemoveRange(100, _recycledImageRows.Count - 100);
+                _recycledImageRows.RemoveRange(MaxRecycledRows, _recycledImageRows.Count - MaxRecycledRows);
             }
         }
         _imagesContent.Children.Clear();
@@ -108,27 +121,18 @@ public partial class DockerDiagnosticsView
             }
         }
 
-        // Sortable header row
         newChildren.Add(CreateSortableHeaderRow(
           [("REPOSITORY:TAG", "repo"), ("SIZE", "size"), ("CREATED", "created")],
           _imageSort,
           key =>
           {
               ToggleSort(ref _imageSort, key);
-              IList<Docker.DotNet.Models.ImagesListResponse> localImages;
-              (int imageCount, long totalSizeBytes, long reclaimableBytes) localDiskUsage;
-              lock (_cachedDataLock)
-              {
-                  localImages = _cachedImages;
-                  localDiskUsage = _cachedDiskUsage;
-              }
-              PopulateImages(localImages, localDiskUsage);
+              RepopulateImagesFromCache();
           },
           "250,8,80,8,150,8,Auto",
           ThreeColumnIndices));
         newChildren.Add(CreateSeparator());
 
-        // Sort images by active column
         var sorted = _imageSort.column switch
         {
             "size" => _imageSort.ascending
@@ -142,7 +146,7 @@ public partial class DockerDiagnosticsView
               : taggedImages.OrderByDescending(i => i.RepoTags?.FirstOrDefault() ?? "", StringComparer.OrdinalIgnoreCase),
         };
 
-        var itemsToShow = _showAllImages ? sorted : sorted.Take(15);
+        var itemsToShow = _showAllImages ? sorted : sorted.Take(MaxVisibleRows);
         foreach (var img in itemsToShow)
         {
             var repoTag = Truncate(img.RepoTags?.FirstOrDefault() ?? "<none>:<none>", 35);
@@ -170,6 +174,11 @@ public partial class DockerDiagnosticsView
                 Command = new AsyncRelayCommand(async () =>
                 {
                     var prevTip = ToolTip.GetTip(removeBtn);
+                    // Image deletion is destructive and irreversible without a re-pull.
+                    if (!await ShowConfirmDialogAsync("Remove Image", $"Remove image '{repoTag}'? This deletes it from local storage and fails if a container is using it.", "Remove"))
+                    {
+                        return;
+                    }
                     try
                     {
                         removeBtn.IsEnabled = false;
@@ -181,7 +190,7 @@ public partial class DockerDiagnosticsView
                     {
                         ContainerTelemetry.TrackError("DockerDiagnosticsView.Images", "Action_RemoveImage", ex);
                         if (!_hasAttached) return;
-                        removeBtn.Content = "Error ✗";
+                        removeBtn.Content = "Error";
                         ToolTip.SetTip(removeBtn, $"Failed to remove: {ex.Message}");
                         await Task.Delay(3000);
                         if (!_hasAttached) return;
@@ -192,64 +201,27 @@ public partial class DockerDiagnosticsView
                 })
             };
             ToolTip.SetTip(removeBtn, "Delete this image from local storage (fails if a container is using it)");
+            Avalonia.Automation.AutomationProperties.SetName(removeBtn, $"Remove image {repoTag}");
             Grid.SetColumn(removeBtn, 6);
             (imageRow as Grid)!.Children.Add(removeBtn);
 
             newChildren.Add(imageRow);
         }
 
-        if (!_showAllImages && taggedImages.Count > 15)
+        if (!_showAllImages && taggedImages.Count > MaxVisibleRows)
         {
-            var remaining = taggedImages.Count - 15;
-            var showAllBtn = new Button
-            {
-                Content = $"... and {remaining} more (click to show all)",
-                Foreground = MutedColor,
-                Background = new SolidColorBrush(Colors.Transparent),
-                BorderBrush = new SolidColorBrush(Colors.Transparent),
-                FontSize = 11,
-                FontStyle = FontStyle.Italic,
-                Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
-                Command = new RelayCommand(() =>
-                {
-                    _showAllImages = true;
-                    IList<Docker.DotNet.Models.ImagesListResponse> localImages;
-                    (int imageCount, long totalSizeBytes, long reclaimableBytes) localDiskUsage;
-                    lock (_cachedDataLock)
-                    {
-                        localImages = _cachedImages;
-                        localDiskUsage = _cachedDiskUsage;
-                    }
-                    PopulateImages(localImages, localDiskUsage);
-                })
-            };
-            newChildren.Add(showAllBtn);
+            var remaining = taggedImages.Count - MaxVisibleRows;
+            newChildren.Add(CreateToggleMoreButton(
+                $"... and {remaining} more (click to show all)",
+                () => { _showAllImages = true; RepopulateImagesFromCache(); },
+                $"Show all {remaining} additional images"));
         }
-        else if (_showAllImages && taggedImages.Count > 15)
+        else if (_showAllImages && taggedImages.Count > MaxVisibleRows)
         {
-            var showLessBtn = new Button
-            {
-                Content = "Show less",
-                Foreground = MutedColor,
-                Background = new SolidColorBrush(Colors.Transparent),
-                BorderBrush = new SolidColorBrush(Colors.Transparent),
-                FontSize = 11,
-                FontStyle = FontStyle.Italic,
-                Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
-                Command = new RelayCommand(() =>
-                {
-                    _showAllImages = false;
-                    IList<Docker.DotNet.Models.ImagesListResponse> localImages;
-                    (int imageCount, long totalSizeBytes, long reclaimableBytes) localDiskUsage;
-                    lock (_cachedDataLock)
-                    {
-                        localImages = _cachedImages;
-                        localDiskUsage = _cachedDiskUsage;
-                    }
-                    PopulateImages(localImages, localDiskUsage);
-                })
-            };
-            newChildren.Add(showLessBtn);
+            newChildren.Add(CreateToggleMoreButton(
+                "Show less",
+                () => { _showAllImages = false; RepopulateImagesFromCache(); },
+                "Show fewer images"));
         }
 
         // Show dangling image count if any exist (computed before search filter)
@@ -295,7 +267,7 @@ public partial class DockerDiagnosticsView
             {
                 newChildren.Add(new TextBlock
                 {
-                    Text = "⚠️ High volume of reclaimable space. Run Prune System to free up disk space.",
+                    Text = "High volume of reclaimable space. Run Prune System to free up disk space.",
                     FontSize = 10,
                     Foreground = RedColor,
                     Margin = new Thickness(0, 4, 0, 0)

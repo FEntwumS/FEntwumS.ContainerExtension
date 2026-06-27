@@ -12,7 +12,7 @@ namespace ContainerExtension.Services.Docker;
 /// Handles container queries, process metrics, and lifecycle commands (start, stop, remove, restart).
 /// Implements caching mechanisms to prevent UI-triggered SDK flooding.
 /// </summary>
-public sealed class DockerContainerManager
+public sealed class DockerContainerManager : IDisposable
 {
     private static readonly System.Diagnostics.ActivitySource ContainerActivitySource = new("OneWare.ContainerExtension.Container");
     private static readonly System.Buffers.SearchValues<char> InvalidContainerNameChars =
@@ -24,6 +24,16 @@ public sealed class DockerContainerManager
     private IList<ContainerListResponse>? _cachedContainers;
     private long _containersCacheExpiration;
     private readonly System.Threading.Lock _containersCacheLock = new();
+
+    public void Dispose()
+    {
+        _listSemaphore.Dispose();
+        foreach (var entry in _containerSemaphores)
+        {
+            entry.Value.Semaphore.Dispose();
+        }
+        _containerSemaphores.Clear();
+    }
 
     private void InvalidateCache()
     {
@@ -111,38 +121,6 @@ public sealed class DockerContainerManager
         finally
         {
             _listSemaphore.Release();
-        }
-    }
-
-    public async ValueTask<string> GetContainerStateAsync(string containerId, CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(containerId)) return "unknown";
-        IList<ContainerListResponse>? cached = null;
-        lock (_containersCacheLock)
-        {
-            if (_cachedContainers != null && Environment.TickCount64 < _containersCacheExpiration)
-            {
-                cached = _cachedContainers;
-            }
-        }
-        if (cached != null)
-        {
-            foreach (var c in cached)
-            {
-                if (c != null && string.Equals(c.ID, containerId, StringComparison.Ordinal))
-                {
-                    return c.State ?? "unknown";
-                }
-            }
-        }
-        try
-        {
-            var inspect = await InspectContainerAsync(containerId, ct).ConfigureAwait(false);
-            return inspect?.State?.Status ?? "unknown";
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
-        {
-            return "unknown";
         }
     }
 
@@ -261,7 +239,7 @@ public sealed class DockerContainerManager
         }
         catch (DockerApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            // Not found, ignore or propagate? Let's propagate or ignore if it's already gone. Propagating or ignoring is fine, let's ignore to match Start/Stop behaviors.
+            // Already-removed container: swallow the 404 to match Start/Stop idempotency.
         }
         finally
         {

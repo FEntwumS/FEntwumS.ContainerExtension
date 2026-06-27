@@ -16,7 +16,7 @@ using Xunit;
 namespace ContainerExtension.UnitTests;
 
 /// <summary>
-/// Comprehensive E2E test suite (71 test cases) for the OneWare Container Extension.
+/// End-to-end test suite for the OneWare Container Extension.
 /// </summary>
 [Collection("TelemetryTests")]
 public sealed class DockerExecutionE2ETests : IDisposable
@@ -32,17 +32,20 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
         var baseDir = AppContext.BaseDirectory;
         var current = new DirectoryInfo(baseDir);
-        while (current != null && !Directory.Exists(Path.Combine(current.FullName, "local_tests")))
+        while (current != null && !Directory.Exists(Path.Combine(current.FullName, "tests", "integration")))
         {
             current = current.Parent;
         }
         if (current != null)
         {
-            _localTestsDir = Path.Combine(current.FullName, "local_tests");
+            _localTestsDir = Path.Combine(current.FullName, "tests", "integration");
         }
         else
         {
-            _localTestsDir = "/Users/mtorun/Library/Mobile Documents/com~apple~CloudDocs/Masterarbeit/FEntwumS.ContainerExtension/local_tests";
+            // Resolve from an explicit override or relative to the test assembly; never hardcode a
+            // machine-specific absolute path.
+            _localTestsDir = Environment.GetEnvironmentVariable("CONTAINER_EXTENSION_LOCAL_TESTS")
+                ?? Path.Combine(AppContext.BaseDirectory, "tests", "integration");
         }
     }
 
@@ -77,12 +80,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
     {
         return args.Select(a => (ICommandArgument)new E2ETestCommandArgument(a)).ToList();
     }
-
-    // =======================================================================
-    //  TIER 1: HAPPY PATH TESTS (30 tests)
-    // =======================================================================
-
-    // -- Feature 1: VHDL Simulation Flow Happy-Paths --
 
     [FactIfNoCI]
     public async Task F1_GHDL_Analyze_HappyPath()
@@ -234,8 +231,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    // -- Feature 2: Verilog Simulation & Synthesis Happy-Paths --
-
     [FactIfNoCI]
     public async Task F2_Verilog_Compile_HappyPath()
     {
@@ -370,8 +365,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    // -- Feature 3: Formal Verification Happy-Paths --
-
     [FactIfNoCI]
     public async Task F3_Formal_SbyRun_HappyPath()
     {
@@ -412,7 +405,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
             var blinkV = Path.Combine(tempDir, "Blink.v");
             var content = File.ReadAllText(blinkV);
             var mutatedContent = content.Replace("assert (counter < 24'hFFFFFF);", "assert (counter < 5);");
-            File.WriteAllText(blinkV, mutatedContent);
+            await File.WriteAllTextAsync(blinkV, mutatedContent);
 
             var command = new ToolCommand
             {
@@ -441,7 +434,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
             // Mutate Blink.sby to add a task definition
             var sbyPath = Path.Combine(tempDir, "Blink.sby");
             var sbyContent = "[tasks]\nbmc\n\n" + File.ReadAllText(sbyPath);
-            File.WriteAllText(sbyPath, sbyContent);
+            await File.WriteAllTextAsync(sbyPath, sbyContent);
 
             var command = new ToolCommand
             {
@@ -508,8 +501,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 
-    // -- Feature 4: Physical/Bitstream Flow Happy-Paths --
-
     [FactIfNoCI]
     public async Task F4_NextPNR_Ice40_HappyPath()
     {
@@ -538,7 +529,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
     [FactIfNoCI]
     public async Task F4_IcePack_Gen_HappyPath()
     {
-        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") return;
         var tempDir = Path.Combine(Path.GetTempPath(), "F4_IcePack_" + Guid.NewGuid().ToString("N"));
         CopyDirectory(Path.Combine(_localTestsDir, "iCE40_Flow"), tempDir);
         try
@@ -589,7 +579,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
     [FactIfNoCI]
     public async Task F4_EcpPack_Gen_HappyPath()
     {
-        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") return;
         var tempDir = Path.Combine(Path.GetTempPath(), "F4_EcpPack_" + Guid.NewGuid().ToString("N"));
         CopyDirectory(Path.Combine(_localTestsDir, "ECP5_Flow"), tempDir);
         try
@@ -636,8 +625,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
-
-    // -- Feature 5: Telemetry & Log Verification Happy-Paths --
 
     [FactIfNoCI]
     public void F5_Telemetry_SuccessLog_HappyPath()
@@ -714,8 +701,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.Contains("errors only test", content);
     }
 
-    // -- Feature 6: Diagnostics & Status Checks Happy-Paths --
-
     [FactIfNoCI]
     public async Task F6_Diagnostics_PingSuccess_HappyPath()
     {
@@ -773,12 +758,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.True(success);
     }
 
-    // =======================================================================
-    //  TIER 2: BOUNDARY & CORNER TESTS (30 tests)
-    // =======================================================================
-
-    // -- Feature 1: VHDL Simulation Flow Boundary/Corner --
-
     [FactIfNoCI]
     public async Task F1_GHDL_MissingFile_Boundary()
     {
@@ -803,7 +782,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Directory.CreateDirectory(tempDir);
         try
         {
-            File.WriteAllText(Path.Combine(tempDir, "bad.vhd"), "entity bad is invalid syntax;");
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "bad.vhd"), "entity bad is invalid syntax;");
 
             using var provider = new E2ETestServiceProvider();
             using var strategy = new DockerExecutionStrategy(provider);
@@ -904,7 +883,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Directory.CreateDirectory(tempDir);
         try
         {
-            File.WriteAllText(Path.Combine(tempDir, "empty.vhd"), "");
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "empty.vhd"), "");
 
             using var provider = new E2ETestServiceProvider();
             using var strategy = new DockerExecutionStrategy(provider);
@@ -921,8 +900,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
-
-    // -- Feature 2: Verilog Simulation & Synthesis Boundary/Corner --
 
     [FactIfNoCI]
     public async Task F2_Verilog_MissingFile_Boundary()
@@ -948,7 +925,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Directory.CreateDirectory(tempDir);
         try
         {
-            File.WriteAllText(Path.Combine(tempDir, "bad.v"), "module bad invalid syntax;");
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "bad.v"), "module bad invalid syntax;");
 
             using var provider = new E2ETestServiceProvider();
             using var strategy = new DockerExecutionStrategy(provider);
@@ -1017,8 +994,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.False(success);
     }
 
-    // -- Feature 3: Formal Verification Boundary/Corner --
-
     [FactIfNoCI]
     public async Task F3_Formal_MissingSby_Boundary()
     {
@@ -1044,7 +1019,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Directory.CreateDirectory(tempDir);
         try
         {
-            File.WriteAllText(Path.Combine(tempDir, "bad.sby"), "[options]\nmode bmc\n[engines]\n[script]\n");
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "bad.sby"), "[options]\nmode bmc\n[engines]\n[script]\n");
 
             using var provider = new E2ETestServiceProvider();
             provider.SettingsService.SetSettingValue("ContainerImage_sby", "hdlc/formal:latest");
@@ -1070,7 +1045,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Directory.CreateDirectory(tempDir);
         try
         {
-            File.WriteAllText(Path.Combine(tempDir, "config.sby"), "[options]\nmode bmc\ndepth 5\n[engines]\nsmtbmc z3\n[script]\nread -formal missing.v\nprep -top top\n[files]\nmissing.v\n");
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "config.sby"), "[options]\nmode bmc\ndepth 5\n[engines]\nsmtbmc z3\n[script]\nread -formal missing.v\nprep -top top\n[files]\nmissing.v\n");
 
             using var provider = new E2ETestServiceProvider();
             provider.SettingsService.SetSettingValue("ContainerImage_sby", "hdlc/formal:latest");
@@ -1122,7 +1097,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Directory.CreateDirectory(tempDir);
         try
         {
-            File.WriteAllText(Path.Combine(tempDir, "empty.sby"), "");
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "empty.sby"), "");
 
             using var provider = new E2ETestServiceProvider();
             provider.SettingsService.SetSettingValue("ContainerImage_sby", "hdlc/formal:latest");
@@ -1140,8 +1115,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
-
-    // -- Feature 4: Physical/Bitstream Flow Boundary/Corner --
 
     [FactIfNoCI]
     public async Task F4_NextPNR_MissingNetlist_Boundary()
@@ -1207,7 +1180,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         CopyDirectory(Path.Combine(_localTestsDir, "ECP5_Flow"), tempDir);
         try
         {
-            File.WriteAllText(Path.Combine(tempDir, "bad.lpf"), "invalid constraints syntax;");
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "bad.lpf"), "invalid constraints syntax;");
 
             using var provider = new E2ETestServiceProvider();
             using var strategy = new DockerExecutionStrategy(provider);
@@ -1241,8 +1214,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
         var (success, _) = await strategy.ExecuteAsync(command);
         Assert.False(success);
     }
-
-    // -- Feature 5: Telemetry & Log Verification Boundary/Corner --
 
     [FactIfNoCI]
     public void F5_Telemetry_MaxRetention_Boundary()
@@ -1322,8 +1293,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.Contains("--label custom=val", runCommand);
     }
 
-    // -- Feature 6: Diagnostics & Status Checks Boundary/Corner --
-
     [FactIfNoCI]
     public void F6_Diagnostics_InvalidImageFormat_Boundary()
     {
@@ -1378,10 +1347,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.NotNull(w2);
     }
 
-    // =======================================================================
-    //  TIER 3: CROSS-FEATURE PAIRWISE TESTS (6 tests)
-    // =======================================================================
-
     [FactIfNoCI]
     public async Task F7_Verilog_To_Physical_CrossFeature()
     {
@@ -1394,7 +1359,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
             provider.SettingsService.SetSettingValue("ContainerImage_nextpnr-ice40", "hdlc/nextpnr:latest");
             using var strategy = new DockerExecutionStrategy(provider);
 
-            // Step 1: Synthesis
             var cmdYosys = new ToolCommand
             {
                 Executable = "yosys",
@@ -1405,7 +1369,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
             var (s1, _) = await strategy.ExecuteAsync(cmdYosys);
             Assert.True(s1);
 
-            // Step 2: Routing
             var cmdPnr = new ToolCommand
             {
                 Executable = "nextpnr-ice40",
@@ -1504,7 +1467,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
     [FactIfNoCI]
     public async Task F7_Physical_To_Telemetry_CrossFeature()
     {
-        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") return;
         var tempDir = Path.Combine(Path.GetTempPath(), "F7_PhysToTel_" + Guid.NewGuid().ToString("N"));
         CopyDirectory(Path.Combine(_localTestsDir, "iCE40_Flow"), tempDir);
         try
@@ -1552,10 +1514,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.Contains("Memory", content);
     }
 
-    // =======================================================================
-    //  TIER 4: REAL-WORLD WORKLOADS (5 tests)
-    // =======================================================================
-
     [FactIfNoCI]
     public async Task F8_Blinky_VHDL_Flow_Workload()
     {
@@ -1567,7 +1525,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
             provider.SettingsService.SetSettingValue("ContainerImage_ghdl", "hdlc/ghdl:yosys");
             using var strategy = new DockerExecutionStrategy(provider);
 
-            // Step 1: Compile/Analyze Design
             var cmdAnalyzeDesign = new ToolCommand
             {
                 Executable = "ghdl",
@@ -1578,7 +1535,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
             var (s1, _) = await strategy.ExecuteAsync(cmdAnalyzeDesign);
             Assert.True(s1);
 
-            // Step 2: Compile/Analyze Testbench
             var cmdAnalyzeTb = new ToolCommand
             {
                 Executable = "ghdl",
@@ -1589,7 +1545,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
             var (s2, _) = await strategy.ExecuteAsync(cmdAnalyzeTb);
             Assert.True(s2);
 
-            // Step 3: Elaborate
             var cmdElab = new ToolCommand
             {
                 Executable = "ghdl",
@@ -1600,7 +1555,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
             var (s3, _) = await strategy.ExecuteAsync(cmdElab);
             Assert.True(s3);
 
-            // Step 4: Simulate
             var cmdSim = new ToolCommand
             {
                 Executable = "ghdl",
@@ -1625,7 +1579,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
             provider.SettingsService.SetSettingValue("ContainerImage_iverilog", "hdlc/iverilog:latest");
             using var strategy = new DockerExecutionStrategy(provider);
 
-            // Step 1: Compile
             var cmdCompile = new ToolCommand
             {
                 Executable = "iverilog",
@@ -1637,7 +1590,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
             Assert.True(s1);
             Assert.True(File.Exists(Path.Combine(tempDir, "Blink.vvp")));
 
-            // Step 2: Simulate/Execute
             var cmdExec = new ToolCommand
             {
                 Executable = "iverilog/vvp", // force read-write mount via path trick
@@ -1679,7 +1631,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
     [FactIfNoCI]
     public async Task F8_Blinky_Physical_iCE40_Flow_Workload()
     {
-        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") return;
         var tempDir = Path.Combine(Path.GetTempPath(), "F8_BlinkyiCE40_" + Guid.NewGuid().ToString("N"));
         CopyDirectory(Path.Combine(_localTestsDir, "iCE40_Flow"), tempDir);
         try
@@ -1690,7 +1641,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
             provider.SettingsService.SetSettingValue("ContainerImage_icepack", "fentwums/oss-cad-suite:latest");
             using var strategy = new DockerExecutionStrategy(provider);
 
-            // Step 1: Synthesize design to json
             var cmdYosys = new ToolCommand
             {
                 Executable = "yosys",
@@ -1701,7 +1651,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
             var (s1, _) = await strategy.ExecuteAsync(cmdYosys);
             Assert.True(s1);
 
-            // Step 2: Route using nextpnr-ice40
             var cmdPnr = new ToolCommand
             {
                 Executable = "nextpnr-ice40",
@@ -1712,7 +1661,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
             var (s2, _) = await strategy.ExecuteAsync(cmdPnr);
             Assert.True(s2);
 
-            // Step 3: Pack bitstream using icepack
             var cmdPack = new ToolCommand
             {
                 Executable = "icepack",
@@ -1730,7 +1678,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
     [FactIfNoCI]
     public async Task F8_Blinky_Physical_ECP5_Flow_Workload()
     {
-        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") return;
         var tempDir = Path.Combine(Path.GetTempPath(), "F8_BlinkyECP5_" + Guid.NewGuid().ToString("N"));
         CopyDirectory(Path.Combine(_localTestsDir, "ECP5_Flow"), tempDir);
         try
@@ -1741,7 +1688,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
             provider.SettingsService.SetSettingValue("ContainerImage_ecppack", "fentwums/oss-cad-suite:latest");
             using var strategy = new DockerExecutionStrategy(provider);
 
-            // Step 1: Synthesize design to json
             var cmdYosys = new ToolCommand
             {
                 Executable = "yosys",
@@ -1752,7 +1698,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
             var (s1, _) = await strategy.ExecuteAsync(cmdYosys);
             Assert.True(s1);
 
-            // Step 2: Route using nextpnr-ecp5
             var cmdPnr = new ToolCommand
             {
                 Executable = "nextpnr-ecp5",
@@ -1763,7 +1708,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
             var (s2, _) = await strategy.ExecuteAsync(cmdPnr);
             Assert.True(s2);
 
-            // Step 3: Pack bitstream using ecppack
             var cmdPack = new ToolCommand
             {
                 Executable = "ecppack",
@@ -1778,10 +1722,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
 }
-
-// =======================================================================
-//  E2E TEST SUPPORTING CLASSES
-// =======================================================================
 
 internal sealed class E2EMockSettingsService : ISettingsService
 {

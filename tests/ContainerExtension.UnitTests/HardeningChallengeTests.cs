@@ -142,7 +142,7 @@ public sealed class HardeningChallengeTests
         var impersonationLevel = result.Item1;
 
         Assert.NotNull(impersonationLevel);
-        // Impersonation level must be Identification, preventing impersonation!
+        // Identification level denies the server the ability to impersonate the client.
         Assert.Equal(TokenImpersonationLevel.Identification, impersonationLevel);
     }
 }

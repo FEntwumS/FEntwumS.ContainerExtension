@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Docker.DotNet;
@@ -47,89 +46,6 @@ public sealed class DockerConnectionProvider : IDisposable
         _client = client;
     }
 
-    public static bool ValidateSocketPath(string? path, out string? errorMessage)
-    {
-        errorMessage = null;
-        if (string.IsNullOrWhiteSpace(path)) return true;
-
-        if (path.Contains("..", StringComparison.Ordinal) || path.Contains("/../", StringComparison.Ordinal) || path.Contains("\\..\\", StringComparison.Ordinal))
-        {
-            errorMessage = "Socket path cannot contain directory traversal (..).";
-            return false;
-        }
-
-        if (OperatingSystem.IsWindows())
-        {
-            if (path.StartsWith("unix://", StringComparison.OrdinalIgnoreCase))
-            {
-                errorMessage = "Unix sockets are not supported on Windows.";
-                return false;
-            }
-        }
-        else
-        {
-            if (path.StartsWith(@"\\.\", StringComparison.Ordinal) || path.StartsWith("npipe://", StringComparison.OrdinalIgnoreCase))
-            {
-                errorMessage = "Windows named pipes are not supported on Unix.";
-                return false;
-            }
-            if (path.StartsWith("unix://", StringComparison.OrdinalIgnoreCase))
-            {
-                var socketFilePath = path.AsSpan("unix://".Length);
-                if (socketFilePath.IsWhiteSpace())
-                {
-                    errorMessage = "Unix socket path cannot be empty.";
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    public static bool VerifyNamedPipeSafe(string? pipeName, out string? errorMessage)
-    {
-        errorMessage = null;
-        if (!OperatingSystem.IsWindows())
-        {
-            return true;
-        }
-
-        if (string.IsNullOrWhiteSpace(pipeName))
-        {
-            errorMessage = "Named pipe path cannot be empty or null.";
-            return false;
-        }
-
-        try
-        {
-            // Normalize the path BEFORE passing it to Path.GetFullPath to prevent ArgumentException.
-            var normalized = pipeName.Replace("npipe://", "", StringComparison.OrdinalIgnoreCase).Replace("/", "\\");
-            if (!normalized.StartsWith(@"\\.\pipe\", StringComparison.OrdinalIgnoreCase) && !normalized.StartsWith(@"\\?\", StringComparison.Ordinal))
-            {
-                errorMessage = "Windows named pipes must reside in the local pipe namespace (\\\\.\\pipe\\).";
-                return false;
-            }
-            var fullPath = Path.GetFullPath(normalized);
-            if (string.IsNullOrWhiteSpace(fullPath))
-            {
-                errorMessage = "Named pipe path is empty after normalization.";
-                return false;
-            }
-            if (!fullPath.StartsWith(@"\\.\pipe\", StringComparison.OrdinalIgnoreCase) && !fullPath.StartsWith(@"\\?\", StringComparison.Ordinal))
-            {
-                errorMessage = "Windows named pipes must reside in the local pipe namespace (\\\\.\\pipe\\) after normalization.";
-                return false;
-            }
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            errorMessage = $"Socket configuration error: Failed to validate named pipe path. Details: {ex.Message}";
-            return false;
-        }
-
-        return true;
-    }
-
     public async ValueTask<bool> PingAsync(CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -144,7 +60,19 @@ public sealed class DockerConnectionProvider : IDisposable
             return false;
         }
 
-        await _connectionSemaphore.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await _connectionSemaphore.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Provider disposed concurrently while acquiring the connection gate.
+            lock (_stateLock)
+            {
+                _lastPingSucceeded = false;
+            }
+            return false;
+        }
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -200,7 +128,8 @@ public sealed class DockerConnectionProvider : IDisposable
         }
         finally
         {
-            _connectionSemaphore.Release();
+            try { _connectionSemaphore.Release(); }
+            catch (ObjectDisposedException) { /* provider disposed concurrently; nothing to release */ }
         }
     }
 
@@ -248,7 +177,19 @@ public sealed class DockerConnectionProvider : IDisposable
             return null;
         }
 
-        await _connectionSemaphore.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await _connectionSemaphore.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Provider disposed concurrently while acquiring the connection gate.
+            lock (_stateLock)
+            {
+                _lastSystemInfoSucceeded = false;
+            }
+            return null;
+        }
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -303,7 +244,8 @@ public sealed class DockerConnectionProvider : IDisposable
         }
         finally
         {
-            _connectionSemaphore.Release();
+            try { _connectionSemaphore.Release(); }
+            catch (ObjectDisposedException) { /* provider disposed concurrently; nothing to release */ }
             lock (_systemInfoLock)
             {
                 _activeSystemInfoTask = null;

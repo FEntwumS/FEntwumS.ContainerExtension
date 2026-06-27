@@ -68,8 +68,6 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     [LibraryImport("libc", EntryPoint = "getegid")]
     private static partial uint getegid();
 
-    public static readonly string OSArchitecture = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString();
-
     private readonly ReaderWriterLockSlim _strategyLock = new();
 
     private static bool IsProcessTrusted(uint pid)
@@ -245,113 +243,6 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             return false;
         }
     }
-
-    /* System.Security.Principal.TokenImpersonationLevel.Identification);
-pipeStream.Connect(timeoutMs);
-var safeHandle = pipeStream.SafePipeHandle;
-if (safeHandle != null && !safeHandle.IsInvalid)
-{
-    if (GetNamedPipeServerProcessId(safeHandle, out var pid))
-    {
-        System.Diagnostics.Process? process = null;
-        try
-        {
-            process = System.Diagnostics.Process.GetProcessById((int)pid);
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-        catch (PlatformNotSupportedException)
-        {
-            return true; // Fail-open on platforms that do not support process by ID lookups
-        }
-
-        if (process != null)
-        {
-            using (process)
-            {
-                if (!process.HasExited)
-                {
-                    try
-                    {
-                        var startTime = process.StartTime;
-                        if (startTime > connectTime.AddMilliseconds(500))
-                        {
-                            return false; // PID reuse detected: process started after pipe connection
-                        }
-
-                         var name = process.ProcessName;
-                         var isNameWhitelisted = name.Contains("docker", StringComparison.OrdinalIgnoreCase) ||
-                                                 name.Contains("podman", StringComparison.OrdinalIgnoreCase) ||
-                                                 name.Contains("wsl", StringComparison.OrdinalIgnoreCase) ||
-                                                 name.Contains("vmmember", StringComparison.OrdinalIgnoreCase) ||
-                                                 name.Contains("win-sshproxy", StringComparison.OrdinalIgnoreCase) ||
-                                                 name.Contains("System", StringComparison.OrdinalIgnoreCase) ||
-                                                 name.Contains("svchost", StringComparison.OrdinalIgnoreCase) ||
-                                                 name.Contains("rancher", StringComparison.OrdinalIgnoreCase) ||
-                                                 name.Contains("lima", StringComparison.OrdinalIgnoreCase) ||
-                                                 name.Contains("com.docker", StringComparison.OrdinalIgnoreCase) ||
-                                                 name.Contains("orbstack", StringComparison.OrdinalIgnoreCase) ||
-                                                 name.Contains("socat", StringComparison.OrdinalIgnoreCase) ||
-                                                 name.Contains("ssh", StringComparison.OrdinalIgnoreCase);
-
-                         if (IsProcessTrusted(pid))
-                         {
-                             if (!isNameWhitelisted)
-                             {
-                                 ContainerTelemetry.TrackError("DockerExecutionStrategy",
-                                     $"Named pipe host process '{name}' (PID: {pid}) is trusted but not in default whitelist. Allowing connection.", null);
-                             }
-                             return true;
-                         }
-                         else
-                         {
-                             ContainerTelemetry.TrackError("DockerExecutionStrategy",
-                                 $"Named pipe verification failed for pipe '{pipeName}'. Host process: '{name}' (PID: {pid}) is NOT trusted.", null);
-                         }
-                    }
-                    catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5 || ex.Message.Contains("Access is denied", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return IsProcessTrusted(pid);
-                    }
-                    catch (PlatformNotSupportedException)
-                    {
-                        return true;
-                    }
-                    catch (InvalidOperationException)
-                    {
-                        return false;
-                    }
-                }
-            }
-        }
-    }
-    return false;
-}
-return false;
-}
-catch (FileNotFoundException)
-{
-return true;
-}
-catch (IOException ex) when (ex.InnerException is FileNotFoundException)
-{
-return true;
-}
-catch (TimeoutException)
-{
-return false;
-}
-catch (IOException)
-{
-return false;
-}
-catch
-{
-return false;
-}
-} */
 
     private static readonly SemaphoreSlim UnixIdSemaphore = new(1, 1);
     private static readonly ConcurrentDictionary<string, string?> OwnerCache = new(StringComparer.Ordinal);
@@ -795,6 +686,17 @@ return false;
             pullParams.Platform = platform;
 
         await Client.Images.CreateImageAsync(pullParams, null, EmptyProgress<JSONMessage>.Instance, ct).ConfigureAwait(false);
+
+        // The daemon streams registry pull failures as in-band JSON over an HTTP 200 response, so a
+        // failed pull surfaces here as success. Confirm the image actually materialized locally.
+        try
+        {
+            await Client.Images.InspectImageAsync(image, ct).ConfigureAwait(false);
+        }
+        catch (DockerApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            throw new InvalidOperationException($"Failed to pull image '{image}': image not found on registry.", ex);
+        }
     }
 
     public string GenerateDockerRunCommand()
@@ -826,7 +728,7 @@ return false;
         }
         if (memMb > 0)
         {
-            sb.Append(CultureInfo.InvariantCulture, $" --memory {memMb:N0}m --memory-swap {memMb:N0}m");
+            sb.Append(CultureInfo.InvariantCulture, $" --memory {memMb:F0}m --memory-swap {memMb:F0}m");
         }
         if (cpuCores > 0)
         {
@@ -919,13 +821,12 @@ return false;
                 var eqIdx = env.IndexOf('=');
                 if (eqIdx > 0)
                 {
+                    // Record the variable NAME only; the value is always masked. This command is
+                    // persisted to the telemetry log, and environment values can carry secrets
+                    // (license keys, tokens) under arbitrary, non-obvious names that a keyword
+                    // denylist cannot catch reliably — so no value is ever written.
                     var key = env[..eqIdx];
-                    var val = env[(eqIdx + 1)..];
-                    if (IsSensitiveEnvironmentVariable(key))
-                    {
-                        val = "********";
-                    }
-                    var escapedEnv = $"{key}={val}".Replace("\"", "\\\"", StringComparison.Ordinal);
+                    var escapedEnv = $"{key}=********".Replace("\"", "\\\"", StringComparison.Ordinal);
                     sb.Append(CultureInfo.InvariantCulture, $" -e \"{escapedEnv}\"");
                 }
                 else
@@ -958,26 +859,6 @@ return false;
         }
 
         return sb.ToString();
-    }
-
-    private static bool IsSensitiveEnvironmentVariable(string key)
-    {
-        if (string.IsNullOrEmpty(key)) return false;
-        ReadOnlySpan<char> span = key.AsSpan();
-        Span<char> upper = key.Length <= 128 ? stackalloc char[key.Length] : new char[key.Length];
-        span.ToUpperInvariant(upper);
-
-        ReadOnlySpan<char> rUpper = upper;
-        return rUpper.IndexOf("KEY".AsSpan(), StringComparison.Ordinal) >= 0 ||
-               rUpper.IndexOf("SECRET".AsSpan(), StringComparison.Ordinal) >= 0 ||
-               rUpper.IndexOf("PASSWORD".AsSpan(), StringComparison.Ordinal) >= 0 ||
-               rUpper.IndexOf("TOKEN".AsSpan(), StringComparison.Ordinal) >= 0 ||
-               rUpper.IndexOf("PASS".AsSpan(), StringComparison.Ordinal) >= 0 ||
-               rUpper.IndexOf("AUTH".AsSpan(), StringComparison.Ordinal) >= 0 ||
-               rUpper.IndexOf("CRED".AsSpan(), StringComparison.Ordinal) >= 0 ||
-               rUpper.IndexOf("CERT".AsSpan(), StringComparison.Ordinal) >= 0 ||
-               rUpper.IndexOf("PRIVATE".AsSpan(), StringComparison.Ordinal) >= 0 ||
-               rUpper.IndexOf("SSH_AUTH_SOCK".AsSpan(), StringComparison.Ordinal) >= 0;
     }
 
     private static async Task<(bool live, string? errorMessage)> IsUnixSocketLiveAndWritableAsync(string path, CancellationToken ct = default)
@@ -1032,90 +913,6 @@ return false;
         }
     }
 
-    /* private static bool IsUnixSocketLiveAndWritable(string path, out string? errorMessage, CancellationToken ct = default)
-    {
-        errorMessage = null;
-        if (!File.Exists(path))
-        {
-            return false;
-        }
-        try
-        {
-            using var socket = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.Unix, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Unspecified);
-            var ep = new System.Net.Sockets.UnixDomainSocketEndPoint(path);
-            var connectTask = socket.ConnectAsync(ep);
-            bool completed;
-            try
-            {
-                completed = connectTask.Wait(1000, ct);
-            }
-            catch (AggregateException ex)
-            {
-                throw ex.InnerException ?? ex;
-            }
-
-            if (completed)
-            {
-                if (connectTask.IsFaulted)
-                {
-                    connectTask.GetAwaiter().GetResult();
-                }
-                return true;
-            }
-            else
-            {
-                socket.Close();
-                errorMessage = $"Timeout connecting to UNIX socket '{path}'.";
-                return false;
-            }
-        }
-        catch (System.Net.Sockets.SocketException ex)
-        {
-            var nativeCode = ex.NativeErrorCode;
-            var socketCode = ex.SocketErrorCode;
-
-            if (socketCode == System.Net.Sockets.SocketError.AccessDenied ||
-                nativeCode == 13 ||
-                nativeCode == 1 ||
-                nativeCode == 10013)
-            {
-                errorMessage = $"Access Denied: Current user does not have permission to access socket '{path}'. Ensure correct group membership (e.g. 'docker').";
-            }
-            else if (socketCode == System.Net.Sockets.SocketError.ConnectionRefused ||
-                     nativeCode == 111 ||
-                     nativeCode == 61 ||
-                     nativeCode == 10061)
-            {
-                errorMessage = $"Connection Refused: Socket '{path}' is not active. Ensure the Docker/Podman daemon is running.";
-            }
-            else if (socketCode == System.Net.Sockets.SocketError.AddressNotAvailable ||
-                     nativeCode == 2 ||
-                     nativeCode == 10049)
-            {
-                errorMessage = $"Socket not found or unavailable at '{path}'.";
-            }
-            else
-            {
-                errorMessage = $"Socket connection error ({socketCode}/{nativeCode}): {ex.Message}";
-            }
-            return false;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            errorMessage = $"Access Denied: Current user does not have permission to write to socket '{path}'. {ex.Message}";
-            return false;
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"Failed to connect to socket '{path}': {ex.Message}";
-            return false;
-        }
-    } */
-
     private static void ValidateBinds(IList<string>? binds)
     {
         if (binds == null) return;
@@ -1149,16 +946,24 @@ return false;
             };
         }
 
-        // Canonicalize blocked paths
-        for (int i = 0; i < blockedPaths.Length; i++)
+        // Enforce both the raw and the canonical form of each blocked path. If canonicalization of a
+        // hardcoded blocked path fails, the raw form is still compared, so the gate cannot be weakened
+        // by a symlinked or differently-cased equivalent slipping past an un-canonicalized entry.
+        var blockedForms = new List<string>(blockedPaths.Length * 2);
+        foreach (var blockedPath in blockedPaths)
         {
+            blockedForms.Add(blockedPath);
             try
             {
-                blockedPaths[i] = GetCanonicalPath(blockedPaths[i]);
+                var canonical = GetCanonicalPath(blockedPath);
+                if (!string.Equals(canonical, blockedPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    blockedForms.Add(canonical);
+                }
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                // Fallback if resolving fails
+                // The raw form is already enrolled above, so the gate stays effective.
             }
         }
 
@@ -1182,7 +987,6 @@ return false;
                     throw new DockerExecutionException($"Invalid mount path: '{hostPath}'. Details: {ex.Message}", ex);
                 }
 
-                // In-place rewrite of binds
                 var reconstructed = fullPath;
                 if (parts.Length > 1)
                 {
@@ -1194,7 +998,7 @@ return false;
                 }
                 binds[i] = reconstructed;
 
-                foreach (var blocked in blockedPaths)
+                foreach (var blocked in blockedForms)
                 {
                     if (string.Equals(fullPath, blocked, StringComparison.OrdinalIgnoreCase))
                     {
@@ -1582,129 +1386,6 @@ return false;
         }
     }
 
-    /* private static string GetUnixId(string arg, string fallback)
-    {
-        if (OperatingSystem.IsWindows()) return fallback;
-        if (string.Equals(arg, "-u", StringComparison.Ordinal) && _cachedUid != null) return _cachedUid;
-        if (string.Equals(arg, "-g", StringComparison.Ordinal) && _cachedGid != null) return _cachedGid;
-
-        UnixIdSemaphore.Wait();
-        try
-        {
-            if (string.Equals(arg, "-u", StringComparison.Ordinal) && _cachedUid != null) return _cachedUid;
-            if (string.Equals(arg, "-g", StringComparison.Ordinal) && _cachedGid != null) return _cachedGid;
-
-            var val = GetUnixIdInternal(arg, fallback);
-            if (string.Equals(arg, "-u", StringComparison.Ordinal)) _cachedUid = val;
-            if (string.Equals(arg, "-g", StringComparison.Ordinal)) _cachedGid = val;
-            return val;
-        }
-        finally
-        {
-            UnixIdSemaphore.Release();
-        }
-    }
-
-    private static string GetUnixIdInternal(string arg, string fallback)
-    {
-        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
-        {
-            try
-            {
-                if (string.Equals(arg, "-u", StringComparison.Ordinal))
-                {
-                    return geteuid().ToString(System.Globalization.CultureInfo.InvariantCulture);
-                }
-                if (string.Equals(arg, "-g", StringComparison.Ordinal))
-                {
-                    return getegid().ToString(System.Globalization.CultureInfo.InvariantCulture);
-                }
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
-            {
-                // Fall back to executing "id"
-            }
-        }
-
-        Process? p = null;
-        try
-        {
-            p = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "id",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                }
-            };
-            p.StartInfo.ArgumentList.Add(arg);
-            p.Start();
-
-            var output = p.StandardOutput.ReadToEnd();
-            _ = p.StandardError.ReadToEnd();
-
-            if (p.WaitForExit(1000))
-            {
-                var id = output.Trim();
-                if (!string.IsNullOrEmpty(id) && int.TryParse(id, out _))
-                {
-                    return id;
-                }
-            }
-            else
-            {
-                try
-                {
-                    p.Kill();
-                    p.WaitForExit(500);
-                }
-                catch
-                {
-                    // Ignore
-                }
-                ContainerTelemetry.TrackError("DockerExecutionStrategy", $"UID/GID probe for '{arg}' timed out", null);
-            }
-        }
-        catch (System.ComponentModel.Win32Exception)
-        {
-            // Fallback gracefully
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            ContainerTelemetry.TrackError("DockerExecutionStrategy", $"UID/GID probe failed for '{arg}'", ex);
-        }
-        finally
-        {
-            if (p != null)
-            {
-                try
-                {
-                    if (!p.HasExited)
-                    {
-                        p.Kill();
-                        p.WaitForExit(500);
-                    }
-                }
-                catch
-                {
-                    // Ignore
-                }
-                try
-                {
-                    p.Dispose();
-                }
-                catch
-                {
-                    // Ignore
-                }
-            }
-        }
-        return fallback;
-    } */
-
     private static async Task<string> GetUnixIdInternalAsync(string arg, string fallback, CancellationToken ct)
     {
         if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
@@ -1782,7 +1463,8 @@ return false;
         }
         catch (System.ComponentModel.Win32Exception)
         {
-            // Fallback gracefully
+            // 'id' binary could not be launched on this platform; the caller falls back to the
+            // default 1000:1000 mapping.
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -1917,11 +1599,20 @@ return false;
         {
             return;
         }
-        if (_staticClientForCleanup == null)
+        var client = _staticClientForCleanup;
+        if (client == null)
         {
             return;
         }
+        CleanupContainers(client);
+    }
 
+    // Stops and force-removes every tracked container using the supplied client. Kept separate
+    // from the ProcessExit/CancelKeyPress handler so the Dispose path can pass its still-valid
+    // client explicitly: by the time Dispose runs the cleanup the CAS has already nulled the
+    // static field, which would otherwise make the field-reading handler a silent no-op.
+    private static void CleanupContainers(DockerClient client)
+    {
         var keys = ActiveContainers.Keys;
         if (keys.Count == 0)
         {
@@ -1935,10 +1626,10 @@ return false;
                 try
                 {
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                    _staticClientForCleanup.Containers.StopContainerAsync(key, new ContainerStopParameters { WaitBeforeKillSeconds = 1 }, cts.Token).GetAwaiter().GetResult();
+                    client.Containers.StopContainerAsync(key, new ContainerStopParameters { WaitBeforeKillSeconds = 1 }, cts.Token).GetAwaiter().GetResult();
                     if (shouldAutoRemove)
                     {
-                        _staticClientForCleanup.Containers.RemoveContainerAsync(key, new ContainerRemoveParameters { Force = true }, cts.Token).GetAwaiter().GetResult();
+                        client.Containers.RemoveContainerAsync(key, new ContainerRemoveParameters { Force = true }, cts.Token).GetAwaiter().GetResult();
                     }
                 }
                 catch (Exception)
@@ -1990,7 +1681,6 @@ return false;
             int lineEndRelative = newlineIdx;
             int absoluteLineEnd = start + lineEndRelative;
 
-            // Trim carriage return if present
             int lineEndTrimmed = absoluteLineEnd;
             if (lineEndTrimmed > start && textSpan[lineEndTrimmed - 1] == '\r')
             {
@@ -2134,6 +1824,10 @@ return false;
                 pullParams.Platform = platform;
             }
 
+            // The daemon reports registry pull failures as in-band JSON error frames over an HTTP 200
+            // response. Capture the first one so the real reason survives to the post-pull check below;
+            // CreateImageAsync itself returns successfully even when the pull failed.
+            string? lastPullError = null;
             var progressHandler = new Progress<JSONMessage>(msg =>
             {
                 if (msg == null)
@@ -2142,6 +1836,11 @@ return false;
                 }
                 try
                 {
+                    if (msg.Error != null || !string.IsNullOrEmpty(msg.ErrorMessage))
+                    {
+                        Volatile.Write(ref lastPullError, msg.ErrorMessage ?? msg.Error?.Message);
+                    }
+
                     var progressText = string.IsNullOrWhiteSpace(msg.ProgressMessage)
                         ? msg.Status
                         : $"{msg.Status} {msg.ProgressMessage}";
@@ -2182,16 +1881,28 @@ return false;
                 }
             }
 
-            SdkLog(command, $"[Docker SDK] Pull complete for '{image}'.");
+            var capturedPullError = Volatile.Read(ref lastPullError);
 
+            // Confirm the image materialized locally. A NotFound here means the pull failed despite
+            // CreateImageAsync returning normally, unless a cached local copy is being relied upon.
             try
             {
                 var postPull = await Client.Images.InspectImageAsync(image, ct).ConfigureAwait(false);
                 imageDigest = postPull.ID;
             }
+            catch (DockerApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound && !imageExistsLocally)
+            {
+                throw new DockerExecutionException(
+                  $"Failed to pull image '{image}': {capturedPullError ?? "image not found on registry."}", ex);
+            }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 ContainerTelemetry.TrackError("DockerExecutionStrategy", $"Post-pull digest inspect failed for '{image}'", ex);
+            }
+
+            if (capturedPullError == null)
+            {
+                SdkLog(command, $"[Docker SDK] Pull complete for '{image}'.");
             }
         }
 
@@ -2205,6 +1916,28 @@ return false;
     }
 
     internal record ResourceProfile(long PeakMemoryBytes, double MaxCpuPercent, int SampleCount, bool OomKilled);
+
+    // Hard cap on the in-memory output string returned to the host. The live stream is still
+    // forwarded to the tool console in full via the output/error handlers; only the aggregated
+    // return value is bounded, so a runaway or hostile container cannot exhaust IDE memory.
+    private const int MaxCapturedOutputChars = 32 * 1024 * 1024;
+
+    // Appends to the captured-output buffer up to the cap, then stops after a one-time marker.
+    // The caller must hold the lock on <paramref name="sb"/>.
+    private static void AppendCapped(StringBuilder sb, ReadOnlySpan<char> text)
+    {
+        if (sb.Length >= MaxCapturedOutputChars) return;
+        var remaining = MaxCapturedOutputChars - sb.Length;
+        if (text.Length <= remaining)
+        {
+            sb.Append(text);
+        }
+        else
+        {
+            sb.Append(text[..remaining]);
+            sb.Append("\n[output truncated: capture limit reached; full output was streamed to the tool console]\n");
+        }
+    }
 
     private async Task<ResourceProfile?> CollectResourceStatsAsync(
       string containerId, ToolCommand command, CancellationToken ct)
@@ -2279,9 +2012,11 @@ return false;
       CreateContainerParameters createParams, ToolCommand command, CancellationToken ct)
     {
         var outputBuilder = new StringBuilder();
-        var executable = (command.Executable ?? command.ToolName).Replace("\r", "");
+        var executable = (command.Executable ?? command.ToolName ?? string.Empty).Replace("\r", "");
         long exitCode = -1;
-        bool wasCancelled = false;
+        // Written from the cancellation-callback thread and read on the main path; accessed via
+        // Volatile to establish the cross-thread happens-before the EOF-drain decision relies on.
+        int wasCancelledFlag = 0;
 
         var container = await Client.Containers.CreateContainerAsync(createParams, ct).ConfigureAwait(false);
         var containerId = container.ID;
@@ -2291,7 +2026,7 @@ return false;
         var cancelRegistration = ct.CanBeCanceled
           ? ct.Register(() =>
           {
-              wasCancelled = true;
+              Volatile.Write(ref wasCancelledFlag, 1);
               try
               {
                   var stopTask = Client.Containers.StopContainerAsync(containerId,
@@ -2317,6 +2052,7 @@ return false;
         Task<ResourceProfile?>? statsTask = null;
         CancellationTokenSource? statsCts = null;
         CancellationTokenSource? readCts = null;
+        bool ranToCompletion = false;
 
         try
         {
@@ -2358,7 +2094,7 @@ return false;
                             var textSpan = charBuf.AsSpan(0, charCount);
                             lock (outputBuilder)
                             {
-                                outputBuilder.Append(textSpan);
+                                AppendCapped(outputBuilder, textSpan);
                             }
                             DrainLines(stderrBuf, textSpan, command.ErrorHandler);
                         }
@@ -2368,7 +2104,7 @@ return false;
                             var textSpan = charBuf.AsSpan(0, charCount);
                             lock (outputBuilder)
                             {
-                                outputBuilder.Append(textSpan);
+                                AppendCapped(outputBuilder, textSpan);
                             }
                             DrainLines(stdoutBuf, textSpan, command.OutputHandler);
                         }
@@ -2377,6 +2113,30 @@ return false;
                 catch (OperationCanceledException) { /* Ignore */ }
                 finally
                 {
+                    // Flush any bytes held back by the decoders (an incomplete trailing multibyte
+                    // sequence at EOF) before returning the rented buffer, so no output is lost.
+                    try
+                    {
+                        var tailOut = stdoutDecoder.GetChars(buffer, 0, 0, charBuf, 0, flush: true);
+                        if (tailOut > 0)
+                        {
+                            var tailSpan = charBuf.AsSpan(0, tailOut);
+                            lock (outputBuilder) { AppendCapped(outputBuilder, tailSpan); }
+                            DrainLines(stdoutBuf, tailSpan, command.OutputHandler);
+                        }
+                        var tailErr = stderrDecoder.GetChars(buffer, 0, 0, charBuf, 0, flush: true);
+                        if (tailErr > 0)
+                        {
+                            var tailSpan = charBuf.AsSpan(0, tailErr);
+                            lock (outputBuilder) { AppendCapped(outputBuilder, tailSpan); }
+                            DrainLines(stderrBuf, tailSpan, command.ErrorHandler);
+                        }
+                    }
+                    catch (Exception ex) when (ex is not OutOfMemoryException)
+                    {
+                        // Best-effort decoder flush; ignore decoding faults on the tail.
+                    }
+
                     System.Buffers.ArrayPool<char>.Shared.Return(charBuf);
                     if (stdoutBuf.Length > 0)
                     {
@@ -2402,14 +2162,38 @@ return false;
             }
             catch (OperationCanceledException)
             {
-                wasCancelled = true;
+                Volatile.Write(ref wasCancelledFlag, 1);
                 if (logRank >= RankErrors)
                     SafeInvoke(() => command.ErrorHandler?.Invoke("[Docker SDK] Container execution was cancelled."));
             }
 
             if (statsCts != null) await statsCts.CancelAsync().ConfigureAwait(false);
-            if (readCts != null) await readCts.CancelAsync().ConfigureAwait(false);
-            if (readTask != null) await readTask.ConfigureAwait(false);
+
+            // On a normal container exit, drain the attach stream to EOF instead of cancelling
+            // the read loop immediately — output written just before the container stopped may
+            // still be buffered in the stream and would otherwise be lost. Only force-cancel the
+            // read loop on the genuine cancellation/timeout path, or if EOF does not arrive in
+            // a bounded window.
+            if (readTask != null)
+            {
+                if (Volatile.Read(ref wasCancelledFlag) != 0)
+                {
+                    if (readCts != null) await readCts.CancelAsync().ConfigureAwait(false);
+                    await readTask.ConfigureAwait(false);
+                }
+                else
+                {
+                    try
+                    {
+                        await readTask.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch (TimeoutException)
+                    {
+                        if (readCts != null) await readCts.CancelAsync().ConfigureAwait(false);
+                        await readTask.ConfigureAwait(false);
+                    }
+                }
+            }
 
             try { profile = await statsTask.WaitAsync(TimeSpan.FromSeconds(2), CancellationToken.None).ConfigureAwait(false); }
             catch (TimeoutException)
@@ -2424,16 +2208,18 @@ return false;
             try
             {
                 var inspect = await Client.Containers.InspectContainerAsync(containerId, ct).ConfigureAwait(false);
-                if (inspect.State.OOMKilled && profile != null)
+                if (inspect.State.OOMKilled)
                 {
-                    profile = profile with { OomKilled = true };
+                    // Synthesize a minimal profile when OOM is detected but no stats sample was
+                    // captured (very short-lived container), so the OOM condition is never dropped.
+                    profile = profile is null ? new ResourceProfile(0, 0, 0, true) : profile with { OomKilled = true };
                 }
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                if (exitCode == 137 && profile != null)
+                if (exitCode == 137)
                 {
-                    profile = profile with { OomKilled = true };
+                    profile = profile is null ? new ResourceProfile(0, 0, 0, true) : profile with { OomKilled = true };
                 }
             }
 
@@ -2441,15 +2227,18 @@ return false;
 
             var peakInfo = profile != null
               ? $", peak RAM: {profile.PeakMemoryBytes / (1024 * 1024)} MB, max CPU: {profile.MaxCpuPercent:F1}%"
-               + (profile.OomKilled ? " ⚠️ OOM KILLED" : "")
+               + (profile.OomKilled ? " (OOM-killed)" : "")
               : "";
             SdkLog(command, $"[Docker SDK] Container {containerId.ShortId()} stopped — exit code {exitCode}, ran {containerStopwatch.Elapsed.TotalSeconds:F2}s{peakInfo}.", RankInfo);
+            ranToCompletion = true;
         }
         finally
         {
-#pragma warning disable VSTHRD103 
-            cancelRegistration?.Dispose();
-#pragma warning restore VSTHRD103
+            // DisposeAsync awaits an in-flight cancellation callback instead of blocking the thread on it.
+            if (cancelRegistration is { } cancelReg)
+            {
+                await cancelReg.DisposeAsync().ConfigureAwait(false);
+            }
 
             try { if (readCts != null) { await readCts.CancelAsync().ConfigureAwait(false); readCts.Dispose(); } } catch { /* Ignore */ }
             try { if (statsCts != null) { await statsCts.CancelAsync().ConfigureAwait(false); statsCts.Dispose(); } } catch { /* Ignore */ }
@@ -2461,12 +2250,29 @@ return false;
                 try { profile = await statsTask.WaitAsync(TimeSpan.FromSeconds(1), CancellationToken.None).ConfigureAwait(false); } catch { /* Ignore */ }
 
             ActiveContainers.TryRemove(containerId, out _);
+
+            // Defense in depth: if auto-remove was requested but the container never reached a
+            // clean auto-removing exit (start/attach/wait threw before completion), force-remove
+            // it so it does not linger. Harmless 404 if Docker already reaped it. Containers the
+            // user explicitly opted to keep (auto-remove off) are left untouched.
+            if (autoRemove && !ranToCompletion)
+            {
+                try
+                {
+                    await Client.Containers.RemoveContainerAsync(containerId,
+                        new ContainerRemoveParameters { Force = true }, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    // Already removed, or daemon unreachable — nothing more to do.
+                }
+            }
         }
 
         string finalOutput;
         lock (outputBuilder) { finalOutput = outputBuilder.ToString(); }
 
-        return (exitCode, finalOutput, wasCancelled, profile);
+        return (exitCode, finalOutput, Volatile.Read(ref wasCancelledFlag) != 0, profile);
     }
 
     /// <summary>
@@ -2483,8 +2289,13 @@ return false;
     internal async Task<(bool success, string output)> ExecuteAsync(ToolCommand command, CancellationToken cancellationToken)
     {
         using var activity = DockerActivitySource.StartActivity("DockerExecutionStrategy.Execute");
-        activity?.SetTag("tool.name", command.ToolName);
-        activity?.SetTag("tool.executable", command.Executable);
+        // Only emit telemetry tags when the user has not opted out, and never record the raw host
+        // path: it embeds the username. The leaf name alone is sufficient for diagnostics.
+        if (ContainerTelemetry.TelemetryOptedOutChecker?.Invoke() != true)
+        {
+            activity?.SetTag("tool.name", command.ToolName);
+            activity?.SetTag("tool.executable", System.IO.Path.GetFileNameWithoutExtension(command.Executable ?? string.Empty));
+        }
         ThrowIfDisposed();
         await EnsureInitializedAsync(_strategyCts.Token).ConfigureAwait(false);
 
@@ -2650,12 +2461,12 @@ return false;
                 await EnsureUnixIdsLoadedAsync(ct).ConfigureAwait(false);
             }
 
-            SdkLog(command, $"[Docker SDK] Step 1: Resolving image for tool '{executable}'...", RankInfo);
+            SdkLog(command, $"[Docker SDK] Resolving image for tool '{executable}'...", RankInfo);
             image = ResolveImage(command.ToolName ?? string.Empty);
 
-            SdkLog(command, $"[Docker SDK] Step 1: Resolved image: {image}", RankInfo);
+            SdkLog(command, $"[Docker SDK] Resolved image: {image}", RankInfo);
 
-            SdkLog(command, $"[Docker SDK] Step 2: Building container parameters...", RankInfo);
+            SdkLog(command, $"[Docker SDK] Building container parameters...", RankInfo);
             var createParams = BuildContainerParameters(image, command);
 
             var allowPrivileged = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowPrivilegedSetting, false);
@@ -2684,17 +2495,17 @@ return false;
 
             ValidateBinds(createParams.HostConfig?.Binds);
 
-            SdkLog(command, $"[Docker SDK] Step 2: Cmd = [{string.Join(", ", createParams.Cmd ?? [])}]", RankInfo);
-            SdkLog(command, $"[Docker SDK] Step 2: WorkingDir = {createParams.WorkingDir}, Binds = [{string.Join(", ", createParams.HostConfig?.Binds ?? [])}]", RankInfo);
+            SdkLog(command, $"[Docker SDK] Cmd = [{string.Join(", ", createParams.Cmd ?? [])}]", RankInfo);
+            SdkLog(command, $"[Docker SDK] WorkingDir = {createParams.WorkingDir}, Binds = [{string.Join(", ", createParams.HostConfig?.Binds ?? [])}]", RankInfo);
 
-            SdkLog(command, $"[Docker SDK] Step 3: Ensuring image '{image}' is available...", RankInfo);
+            SdkLog(command, $"[Docker SDK] Ensuring image '{image}' is available...", RankInfo);
             imageDigest = await EnsureImageAsync(image, command, ct).ConfigureAwait(false);
-            SdkLog(command, $"[Docker SDK] Step 3: Image ready. Digest = {imageDigest ?? "(none)"}", RankInfo);
+            SdkLog(command, $"[Docker SDK] Image ready. Digest = {imageDigest ?? "(none)"}", RankInfo);
 
             reconstructedDockerRun = ReconstructDockerRunCommand(createParams);
             SdkLog(command, $"[Docker SDK] Equivalent CLI: {reconstructedDockerRun}", RankInfo);
 
-            SdkLog(command, $"[Docker SDK] Step 4: Creating and starting container...", RankInfo);
+            SdkLog(command, $"[Docker SDK] Creating and starting container...", RankInfo);
             var result = await RunContainerAsync(createParams, command, ct).ConfigureAwait(false);
             exitCode = result.exitCode;
             wasCancelled = result.wasCancelled;
@@ -2875,6 +2686,11 @@ return false;
             catch (Exception ex)
             {
                 ContainerTelemetry.TrackError("DockerExecutionStrategy", "Failed to start dummy process in StartWeakProcess", ex);
+                // The sentinel never started, so the returned dummy's Exited event can no longer relay a
+                // kill into runCts. Cancel here so killing the replacement cannot leave the container
+                // running with its only host cancellation handle severed.
+                try { runCts.Cancel(); } catch (ObjectDisposedException) { /* already finished */ }
+                try { dummyProcess.Dispose(); } catch { /* original handle is being discarded */ }
                 dummyProcess = new Process();
             }
 
@@ -2949,7 +2765,9 @@ return false;
             // Ignore cancel/dispose errors
         }
 
-        if (Interlocked.CompareExchange(ref _staticClientForCleanup, null, _client) == _client)
+        var clientForCleanup = _client;
+        if (clientForCleanup != null &&
+            Interlocked.CompareExchange(ref _staticClientForCleanup, null, clientForCleanup) == clientForCleanup)
         {
             AppDomain.CurrentDomain.ProcessExit -= CleanupDanglingContainers;
             if (_cancelKeyPressHandler != null)
@@ -2964,11 +2782,21 @@ return false;
                 }
                 _cancelKeyPressHandler = null;
             }
-            CleanupDanglingContainers(null, EventArgs.Empty);
 
+            // Run dangling-container cleanup with the captured client. The CAS above already
+            // nulled the static field (so the unregistered ProcessExit handler is a no-op),
+            // therefore the field-reading handler cannot perform the cleanup here. Guard against
+            // a ProcessExit firing concurrently, then re-arm so a later strategy instance still
+            // cleans up on process exit.
+            if (Interlocked.Exchange(ref _cleanupExecuted, 1) == 0)
+            {
+                CleanupContainers(clientForCleanup);
+            }
             Volatile.Write(ref _cleanupExecuted, 0);
         }
 
+        _imageManager?.Dispose();
+        _containerManager?.Dispose();
         _connectionProvider?.Dispose();
         _client?.Dispose();
         _strategyLock.Dispose();
@@ -3180,8 +3008,8 @@ return false;
     }
 
     /// <summary>
-    /// Executes the specified tool command natively on the host operating system.
-    /// Captures standard output and error streams, handles cancellation recursively, and logs execution telemetry.
+    /// Fallback path that runs the tool natively on the host when the Docker daemon is unreachable.
+    /// Captures stdout and stderr, forwards cancellation to a process kill, and returns the combined output.
     /// </summary>
     /// <param name="command">The tool command payload detailing working directory and arguments.</param>
     /// <param name="resolvedExecutable">The absolute host file path of the executable binary.</param>
@@ -3192,6 +3020,9 @@ return false;
     {
         var executableName = Path.GetFileNameWithoutExtension(resolvedExecutable);
         var args = command.Arguments != null ? string.Join(" ", command.Arguments) : string.Empty;
+        // Unlike the container path (which rejects a non-absolute working directory because it becomes a
+        // bind mount), the native fallback runs the tool as a host process, so the current directory is an
+        // acceptable default when no working directory was supplied.
         var workingDir = string.IsNullOrWhiteSpace(command.WorkingDirectory) ? Directory.GetCurrentDirectory() : command.WorkingDirectory;
 
         SdkLog(command, $"[Docker SDK Fallback] Docker connection failed. Falling back to native execution of '{resolvedExecutable}'...", RankInfo);
@@ -3218,11 +3049,13 @@ return false;
         using var process = new Process { StartInfo = processStartInfo };
         var outputBuilder = new StringBuilder();
 
+        // stdout and stderr fire on separate threadpool threads; StringBuilder is not thread-safe,
+        // so guard both appends with the same lock the container path uses.
         process.OutputDataReceived += (sender, e) =>
         {
             if (e.Data != null)
             {
-                outputBuilder.AppendLine(e.Data);
+                lock (outputBuilder) { outputBuilder.AppendLine(e.Data); }
                 SafeInvoke(() => command.OutputHandler?.Invoke(e.Data));
             }
         };
@@ -3231,7 +3064,7 @@ return false;
         {
             if (e.Data != null)
             {
-                outputBuilder.AppendLine(e.Data);
+                lock (outputBuilder) { outputBuilder.AppendLine(e.Data); }
                 SafeInvoke(() => command.ErrorHandler?.Invoke(e.Data));
             }
         };
@@ -3264,18 +3097,16 @@ return false;
             var elapsedSeconds = stopwatch.Elapsed.TotalSeconds;
             SdkLog(command, $"[Docker SDK Fallback] Native execution finished. Exit code: {process.ExitCode} (ran {elapsedSeconds:F2}s)", RankInfo);
 
-            var finalOutput = outputBuilder.ToString();
+            string finalOutput;
+            lock (outputBuilder) { finalOutput = outputBuilder.ToString(); }
 
-            var maxEntries = 100;
+            // Mirror the container path's retention semantics: "Unlimited" (and the opted-out
+            // "None") map to 0, which disables trimming (maxEntries > 0 gates the trim). A
+            // numeric value is the entry cap; anything unparseable falls back to 100.
             var retentionStr = _settingsService.SafeGetSetting<string>(ContainerExtensionModule.TelemetryRetentionSetting, "100");
-            if (!string.Equals(retentionStr, "Unlimited", StringComparison.Ordinal) && int.TryParse(retentionStr, out var parsedRetention))
-            {
-                maxEntries = parsedRetention;
-            }
-            else if (string.Equals(retentionStr, "None", StringComparison.Ordinal))
-            {
-                maxEntries = 0;
-            }
+            var maxEntries = string.Equals(retentionStr, "Unlimited", StringComparison.Ordinal) ? 0
+                : string.Equals(retentionStr, "None", StringComparison.Ordinal) ? 0
+                : int.TryParse(retentionStr, out var parsedRetention) ? parsedRetention : 100;
 
             try
             {

@@ -189,9 +189,14 @@ public static partial class ContainerTelemetry
         try
         {
             var userName = CachedUserName;
-            var safeUserName = string.IsNullOrWhiteSpace(userName) ? "Default" : string.Concat(userName.Where(char.IsLetterOrDigit));
+            // Derive a stable, non-reversible per-user suffix so the Global\ kernel-object name does
+            // not expose the OS username to other sessions on a shared machine, while still keeping
+            // the lock unique per user (cross-session serialization of telemetry writes).
+            var userKey = string.IsNullOrWhiteSpace(userName)
+                ? "default"
+                : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(userName)))[..16];
             var prefix = OperatingSystem.IsWindows() ? "Global\\" : "";
-            return new Mutex(false, $"{prefix}OneWareContainerTelemetryLock_{safeUserName}");
+            return new Mutex(false, $"{prefix}OneWareContainerTelemetryLock_{userKey}");
         }
         catch
         {
@@ -245,7 +250,8 @@ public static partial class ContainerTelemetry
         Interlocked.Exchange(ref _isShutdown, 0);
         lock (MutexLock)
         {
-            try { RwLock.Dispose(); } catch { /* Ignore */ }
+            // Do not dispose the old lock: in-flight writers may still hold a reference to it.
+            // ReaderWriterLockSlim owns no unmanaged handle, so the orphaned instance is reclaimed by GC.
             RwLock = new ReaderWriterLockSlim();
             if (ProcessMutexLazy.IsValueCreated)
             {
@@ -540,6 +546,11 @@ public static partial class ContainerTelemetry
     [GeneratedRegex(@"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b|\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b|\b[a-zA-Z0-9\-]+(?:\.local|\.lan)\b", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]
     private static partial Regex IpRedactRegex();
 
+    // Redacts inline URI basic-auth credentials (scheme://user:pass@host) so tokens embedded in
+    // registry or daemon URLs never reach the telemetry log.
+    [GeneratedRegex(@"(?<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*://)[^/\s:@]+:[^/\s@]+@", RegexOptions.ExplicitCapture | RegexOptions.NonBacktracking)]
+    private static partial Regex UriCredentialsRegex();
+
     private static string? ScrubSecrets(string? commandLine)
     {
         if (string.IsNullOrEmpty(commandLine))
@@ -565,7 +576,15 @@ public static partial class ContainerTelemetry
             var home = CachedUserProfile;
             if (!string.IsNullOrEmpty(home))
             {
-                return path.Replace(home, "~");
+                var scrubbed = path.Replace(home, "~");
+                // The reconstructed docker-run command normalises Windows backslashes to forward
+                // slashes, so also collapse the forward-slash form of the profile path; otherwise
+                // C:/Users/<name> survives unredacted on Windows.
+                if (home.Contains('\\', StringComparison.Ordinal))
+                {
+                    scrubbed = scrubbed.Replace(home.Replace('\\', '/'), "~");
+                }
+                return scrubbed;
             }
         }
         catch (Exception)
@@ -580,6 +599,11 @@ public static partial class ContainerTelemetry
         if (string.IsNullOrEmpty(input)) return input;
         var scrubbed = ScrubHomePath(input);
         if (string.IsNullOrEmpty(scrubbed)) return scrubbed;
+        try
+        {
+            scrubbed = UriCredentialsRegex().Replace(scrubbed, "${scheme}***:***@");
+        }
+        catch { /* Ignore */ }
         try
         {
             scrubbed = UncShareRegex().Replace(scrubbed, "[REDACTED_UNC_SHARE]");
@@ -738,6 +762,27 @@ public static partial class ContainerTelemetry
     }
 
     /// <summary>
+    /// Builds append-mode stream options that, on POSIX, create the backing file with 0600
+    /// in a single syscall. This closes the window between creation at the umask default and
+    /// the subsequent SetUnixFileMode narrowing, and survives a failed write loop. On Windows
+    /// UnixCreateMode is unsupported and left unset; confidentiality there is enforced via EFS.
+    /// </summary>
+    private static FileStreamOptions CreateAppendStreamOptions()
+    {
+        var options = new FileStreamOptions
+        {
+            Mode = FileMode.Append,
+            Access = FileAccess.Write,
+            Share = FileShare.Read,
+        };
+        if (!OperatingSystem.IsWindows())
+        {
+            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+        return options;
+    }
+
+    /// <summary>
     /// Writes a structured telemetry entry to the unified execution log.
     /// Handles PII redaction and thread-safe file appends automatically.
     /// </summary>
@@ -782,7 +827,7 @@ public static partial class ContainerTelemetry
             var entry = new TelemetryEntry
             {
                 Timestamp = DateTime.UtcNow,
-                Image = image ?? string.Empty,
+                Image = ScrubSensitiveInfo(image) ?? string.Empty,
                 ImageDigest = imageDigest,
                 Tool = tool != null ? Path.GetFileNameWithoutExtension(tool) : string.Empty,
                 DurationSeconds = Math.Round(durationSeconds, 4),
@@ -792,7 +837,7 @@ public static partial class ContainerTelemetry
                 PeakMemoryBytes = peakMemoryBytes,
                 MaxCpuPercent = maxCpuPercent.HasValue ? Math.Round(maxCpuPercent.Value, 1) : null,
                 OomKilled = oomKilled,
-                ErrorMessage = ScrubSensitiveInfo(errorMessage)
+                ErrorMessage = ScrubSensitiveInfo(ScrubSecrets(errorMessage))
             };
 
             var mutex = ProcessMutex;
@@ -821,13 +866,14 @@ public static partial class ContainerTelemetry
                 try
                 {
                     EnsureFileLimit(_telemetryPath);
+                    var streamOptions = CreateAppendStreamOptions();
                     bool written = false;
                     int delay = 15;
                     for (int attempt = 0; attempt < 5; attempt++)
                     {
                         try
                         {
-                            using (var fs = new FileStream(_telemetryPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
+                            using (var fs = new FileStream(_telemetryPath, streamOptions))
                             {
                                 JsonSerializer.Serialize(fs, entry, TelemetryJsonContext.Default.TelemetryEntry);
                                 fs.WriteByte((byte)'\n');
@@ -853,13 +899,27 @@ public static partial class ContainerTelemetry
 
                     if (!OperatingSystem.IsWindows() && written)
                     {
+                        // Defensive no-op: the stream is already created with 0600 via UnixCreateMode.
                         try
                         {
                             File.SetUnixFileMode(_telemetryPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
                         }
                         catch (Exception)
                         {
-                            // Best-effort file permission enforcement 
+                            // Best-effort file permission enforcement
+                        }
+                    }
+                    else if (OperatingSystem.IsWindows() && written)
+                    {
+                        // The EFS latch in EnsureDirectoryAndFileSecure only encrypts a pre-existing file;
+                        // files first materialised here would otherwise never be encrypted.
+                        try
+                        {
+                            File.Encrypt(_telemetryPath);
+                        }
+                        catch (Exception)
+                        {
+                            // Best-effort encryption on Windows
                         }
                     }
 
@@ -961,7 +1021,7 @@ public static partial class ContainerTelemetry
             {
                 Timestamp = DateTime.UtcNow,
                 Component = component ?? string.Empty,
-                Action = action ?? string.Empty,
+                Action = ScrubSensitiveInfo(action) ?? string.Empty,
                 ExceptionMessage = ScrubSensitiveInfo(ex?.Message),
                 StackTrace = IsVerbose ? ScrubSensitiveInfo(ex?.StackTrace) : null,
                 Context = ScrubSensitiveInfo(context)
@@ -1039,13 +1099,14 @@ public static partial class ContainerTelemetry
                 localLock.EnterWriteLock();
                 try
                 {
+                    var streamOptions = CreateAppendStreamOptions();
                     bool written = false;
                     int delay = 15;
                     for (int attempt = 0; attempt < 5; attempt++)
                     {
                         try
                         {
-                            using (var fs = new FileStream(_errorTelemetryPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
+                            using (var fs = new FileStream(_errorTelemetryPath, streamOptions))
                             {
                                 JsonSerializer.Serialize(fs, entry, ErrorJsonContext.Default.TelemetryErrorEntry);
                                 fs.WriteByte((byte)'\n');
@@ -1071,6 +1132,7 @@ public static partial class ContainerTelemetry
 
                     if (!OperatingSystem.IsWindows() && written)
                     {
+                        // Defensive no-op: the stream is already created with 0600 via UnixCreateMode.
                         try
                         {
                             File.SetUnixFileMode(_errorTelemetryPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
@@ -1082,6 +1144,19 @@ public static partial class ContainerTelemetry
                         catch (Exception)
                         {
                             // Best-effort
+                        }
+                    }
+                    else if (OperatingSystem.IsWindows() && written)
+                    {
+                        // The EFS latch in EnsureDirectoryAndFileSecure only encrypts a pre-existing file;
+                        // files first materialised here would otherwise never be encrypted.
+                        try
+                        {
+                            File.Encrypt(_errorTelemetryPath);
+                        }
+                        catch (Exception)
+                        {
+                            // Best-effort encryption on Windows
                         }
                     }
 
@@ -1297,19 +1372,34 @@ public static partial class ContainerTelemetry
                             Directory.CreateDirectory(destDir);
                         }
 
-                        using var source = new FileStream(_telemetryPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                        using var dest = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.Read);
-
-                        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                        if (string.IsNullOrEmpty(home))
+                        using (var source = new FileStream(_telemetryPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                        using (var dest = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.Read))
                         {
-                            source.CopyTo(dest);
+                            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                            if (string.IsNullOrEmpty(home))
+                            {
+                                source.CopyTo(dest);
+                            }
+                            else
+                            {
+                                byte[] homeBytes = System.Text.Encoding.UTF8.GetBytes(home);
+                                byte[] replacementBytes = [(byte)'~'];
+                                CopyStreamWithReplacement(source, dest, homeBytes, replacementBytes);
+                            }
                         }
-                        else
+
+                        // The export carries the same execution history as the 0600 source; restrict
+                        // it to the owner so it does not land world-readable (umask 0644) on a shared host.
+                        if (!OperatingSystem.IsWindows())
                         {
-                            byte[] homeBytes = System.Text.Encoding.UTF8.GetBytes(home);
-                            byte[] replacementBytes = [(byte)'~'];
-                            CopyStreamWithReplacement(source, dest, homeBytes, replacementBytes);
+                            try
+                            {
+                                File.SetUnixFileMode(destinationPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                            }
+                            catch (Exception)
+                            {
+                                // Best-effort owner-only restriction on the export.
+                            }
                         }
                     }
                     finally
@@ -1981,30 +2071,11 @@ public static partial class ContainerTelemetry
                 }
                 if (!moveSuccess)
                 {
-                    try
-                    {
-                        using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
-                        using var writer = new StreamWriter(fs);
-                        foreach (var line in q)
-                        {
-                            writer.WriteLine(line);
-                        }
-                        if (!OperatingSystem.IsWindows())
-                        {
-                            try
-                            {
-                                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-                            }
-                            catch (Exception)
-                            {
-                                // Ignore
-                            }
-                        }
-                    }
-                    catch
-                    {
-                        // Best-effort fallback
-                    }
+                    // The temp-write-then-atomic-replace path failed after all retries. Do NOT
+                    // truncate the live file in place as a fallback: a write that fails after the
+                    // truncation (for example disk-full) would discard the entire telemetry history.
+                    // Leaving the file untrimmed is safe; the next successful trim reclaims the size.
+                    Console.Error.WriteLine("[ContainerTelemetry] Telemetry trim deferred: atomic replace failed; file left intact.");
                 }
             }
             finally

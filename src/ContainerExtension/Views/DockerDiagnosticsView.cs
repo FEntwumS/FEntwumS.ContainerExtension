@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.Input;
@@ -33,10 +34,11 @@ public partial class DockerDiagnosticsView : UserControl
     private static readonly int[] ThreeColumnIndices = { 0, 2, 4 };
     private static readonly int[] SevenColumnIndices = { 0, 2, 4, 6, 8, 10, 12 };
 
-    // Cached brushes and geometries to avoid allocations during rebuild loops (F14)
+    // Cached brushes and geometries to avoid allocations during rebuild loops.
+    // DockerBlueBrush is reserved for the brand whale PathIcon only; every other accent
+    // usage routes through the themeable AccentColor.
     private static readonly Geometry WhaleGeometry = Geometry.Parse(ContainerExtensionModule.WhaleIconPath);
     private static readonly SolidColorBrush DockerBlueBrush = new(Color.Parse(ContainerExtensionModule.DockerBlueHex));
-    private static readonly SolidColorBrush LightGreenBrush = new(Colors.LightGreen);
 
     // -- Instance State --------------------------------------------------
     private readonly DockerExecutionStrategy _strategy;
@@ -57,16 +59,17 @@ public partial class DockerDiagnosticsView : UserControl
     private readonly Border _statusBanner;
     private readonly TextBlock _statusBannerText;
 
-    // -- KPI Metrics Controls ---------------------------------------------
-    private TextBlock? _metricDaemonStatusText;
-    private TextBlock? _metricDaemonDetailText;
-    private Border? _metricDaemonBorder;
-    private TextBlock? _metricContainersText;
-    private TextBlock? _metricContainersDetailText;
-    private TextBlock? _metricImagesText;
-    private TextBlock? _metricImagesDetailText;
-    private TextBlock? _metricDiskText;
-    private TextBlock? _metricDiskDetailText;    // Tracks open container log windows to prevent duplicate spawning
+    // -- KPI Metrics Controls (assigned via CreateMetricCard in the constructor) ----------
+    private readonly TextBlock _metricDaemonStatusText;
+    private readonly TextBlock _metricDaemonDetailText;
+    private readonly Border _metricDaemonBorder;
+    private readonly TextBlock _metricContainersText;
+    private readonly TextBlock _metricContainersDetailText;
+    private readonly TextBlock _metricImagesText;
+    private readonly TextBlock _metricImagesDetailText;
+    private readonly TextBlock _metricDiskText;
+    private readonly TextBlock _metricDiskDetailText;
+    // Tracks open container log windows to prevent duplicate spawning
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Window> _openLogWindows = new(StringComparer.Ordinal);
 
     // Auto-refresh state
@@ -74,12 +77,15 @@ public partial class DockerDiagnosticsView : UserControl
     private CancellationTokenSource? _detachCleanupCts;
     private DispatcherTimer? _autoRefreshTimer;
     private readonly DispatcherTimer _searchDebounceTimer;
+    private readonly DispatcherTimer _indicatorBlinkTimer;
+    private int _indicatorBlinkTicks;
+    private readonly EventHandler _themeChangedHandler;
     private readonly Border _refreshIndicator;
     private readonly TextBlock _lastRefreshedText;
     private readonly TextBlock _countdownText;
     private int _refreshIntervalSeconds;
     private int _secondsUntilRefresh;
-    private bool _hasAttached; // Guard against duplicate AttachedToVisualTree handlers (F15)
+    private bool _hasAttached; // Guard against duplicate AttachedToVisualTree handlers
     private bool _justAttached;
     private IDisposable? _isVisibleSubscription;
 
@@ -121,8 +127,10 @@ public partial class DockerDiagnosticsView : UserControl
         // Resolve the IDE's theme background brush
         UpdateBackgroundBrush();
 
-        // Register to ActualThemeVariantChanged to dynamically repaint backgrounds when dark mode is toggled (F12)
-        ActualThemeVariantChanged += (sender, args) => UpdateThemeColors();
+        // Register to ActualThemeVariantChanged to repaint when the host theme is toggled.
+        // Held in a field so it can be detached in DetachedFromVisualTree (lifecycle hygiene).
+        _themeChangedHandler = (sender, args) => UpdateThemeColors();
+        ActualThemeVariantChanged += _themeChangedHandler;
 
         _pluginVersion = CachedPluginVersion;
 
@@ -136,6 +144,11 @@ public partial class DockerDiagnosticsView : UserControl
             ApplySearchFilter();
         };
 
+        // Single reusable timer drives the refresh-pulse blink; recreated per-refresh previously,
+        // which leaked a live timer if the control detached mid-blink. The Tick handler is
+        // wired after _refreshIndicator is constructed below.
+        _indicatorBlinkTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
+
         // -- Header ------------------------------------------------------
         var whaleIcon = new PathIcon
         {
@@ -148,7 +161,7 @@ public partial class DockerDiagnosticsView : UserControl
         _headerTitle = new TextBlock
         {
             Text = ContainerExtensionModule.DashboardTitle,
-            FontSize = 20,
+            FontSize = TitleFontSize,
             FontWeight = FontWeight.Bold,
             Foreground = FontColor,
             VerticalAlignment = VerticalAlignment.Center
@@ -167,13 +180,14 @@ public partial class DockerDiagnosticsView : UserControl
         // -- Global Search / Filter --------------------------------------
         _searchBox = new TextBox
         {
-            Watermark = "🔍  Filter containers, images, history... (Ctrl+F)",
+            Watermark = "Filter containers, images, history...  (Ctrl+F)",
             FontSize = 12,
             Margin = new Thickness(0, 2, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             TabIndex = 1
         };
         AutomationProperties.SetName(_searchBox, "Filter containers, images, history text search box");
+        AutomationProperties.SetHelpText(_searchBox, "Type to filter all sections. Press Ctrl+F to focus, Escape to clear.");
 
         var clearBtn = new Button
         {
@@ -184,12 +198,14 @@ public partial class DockerDiagnosticsView : UserControl
             IsVisible = false,
             Command = new RelayCommand(() => { _searchBox.Text = ""; })
         };
+        AutomationProperties.SetName(clearBtn, "Clear search filter");
+        ToolTip.SetTip(clearBtn, "Clear filter (Esc)");
         _searchBox.InnerRightContent = clearBtn;
 
-        // Use cached listener method instead of lambda to prevent delegate instantiation allocations (F16)
+        // Use cached listener method instead of lambda to prevent delegate instantiation allocations
         _searchBox.TextChanged += OnSearchBoxTextChanged;
 
-        // Implement drag-and-drop validation for setting and config file paths (F15)
+        // Implement drag-and-drop validation for setting and config file paths
         DragDrop.SetAllowDrop(_searchBox, true);
         _searchBox.AddHandler(DragDrop.DragOverEvent, OnSearchBoxDragOver);
         _searchBox.AddHandler(DragDrop.DropEvent, OnSearchBoxDrop);
@@ -198,16 +214,30 @@ public partial class DockerDiagnosticsView : UserControl
         {
             Width = 6,
             Height = 6,
-            CornerRadius = new CornerRadius(3),
-            Background = LightGreenBrush,
+            CornerRadius = PillCornerRadius,
+            Background = GreenColor,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 4, 0),
             Opacity = 0.0
+        };
+        _indicatorBlinkTimer.Tick += (s, e) =>
+        {
+            _indicatorBlinkTicks++;
+            if (_indicatorBlinkTicks > 6)
+            {
+                _refreshIndicator.Opacity = 0.0;
+                _indicatorBlinkTimer.Stop();
+            }
+            else
+            {
+                _refreshIndicator.Opacity = _indicatorBlinkTicks % 2 == 1 ? 1.0 : 0.2;
+            }
         };
 
         _lastRefreshedText = new TextBlock
         {
             Text = "",
+            FontFamily = MonoFont,
             FontSize = 11,
             Foreground = MutedColor,
             VerticalAlignment = VerticalAlignment.Center
@@ -215,6 +245,7 @@ public partial class DockerDiagnosticsView : UserControl
         _countdownText = new TextBlock
         {
             Text = "",
+            FontFamily = MonoFont,
             FontSize = 11,
             Foreground = MutedColor,
             VerticalAlignment = VerticalAlignment.Center,
@@ -228,7 +259,7 @@ public partial class DockerDiagnosticsView : UserControl
             Command = new AsyncRelayCommand(RefreshAllAsync),
             TabIndex = 2
         };
-        ToolTip.SetTip(refreshBtn, "Re-query the Docker daemon for live container, image, and system data (F5)");
+        ToolTip.SetTip(refreshBtn, "Re-query the Docker daemon for live container, image, and system data");
         AutomationProperties.SetName(refreshBtn, "Refresh dashboard data button");
 
         var statusBar = new StackPanel
@@ -283,12 +314,10 @@ public partial class DockerDiagnosticsView : UserControl
         kpiGrid.Children.Add(imagesCard);
         kpiGrid.Children.Add(diskCard);
 
-        // -- Section 1: Connection Status --------------------------------
         _statusContent = new StackPanel { Spacing = 4 };
         _statusContent.Children.Add(CreateLoadingText("Connecting to daemon..."));
         var statusSection = CreateCard("Connection Status", _statusContent);
 
-        // -- Section 2: Containers ---------------------------------------
         _containersContent = new StackPanel { Spacing = 2 };
         _containersContent.Children.Add(CreateLoadingText("Loading containers..."));
         var containersScroll = new ScrollViewer
@@ -299,7 +328,6 @@ public partial class DockerDiagnosticsView : UserControl
         };
         var containersSection = CreateCard("Containers", containersScroll);
 
-        // -- Section 3: Images & Disk Usage ------------------------------
         _imagesContent = new StackPanel { Spacing = 2 };
         _imagesContent.Children.Add(CreateLoadingText("Loading images..."));
         var imagesScroll = new ScrollViewer
@@ -310,12 +338,10 @@ public partial class DockerDiagnosticsView : UserControl
         };
         var imagesSection = CreateCard("Images & Disk Usage", imagesScroll);
 
-        // -- Section 4: Active Configuration -----------------------------
         _configContent = new StackPanel { Spacing = 2 };
         _configContent.Children.Add(CreateLoadingText("Reading settings..."));
         var configSection = CreateCard("Active Configuration", _configContent);
 
-        // -- Section 5: Recent Executions --------------------------------
         _telemetryContent = new StackPanel { Spacing = 2 };
         var telemetryScroll = new ScrollViewer
         {
@@ -325,7 +351,6 @@ public partial class DockerDiagnosticsView : UserControl
         };
         var telemetrySection = CreateCard("Execution History", telemetryScroll);
 
-        // -- Section 6: Toolchain Environment ----------------------------
         _toolchainContent = new StackPanel { Spacing = 4 };
         _toolchainContent.Children.Add(CreateLoadingText("Loading available versions..."));
         var toolchainSection = CreateCard("Toolchain Environment", _toolchainContent);
@@ -337,6 +362,8 @@ public partial class DockerDiagnosticsView : UserControl
             TextWrapping = TextWrapping.Wrap,
             Foreground = FontColor
         };
+        // Announce status/operation results to assistive technology as they appear.
+        AutomationProperties.SetLiveSetting(_statusBannerText, AutomationLiveSetting.Polite);
 
         var closeBannerBtn = new Button
         {
@@ -346,6 +373,8 @@ public partial class DockerDiagnosticsView : UserControl
             BorderBrush = null,
             VerticalAlignment = VerticalAlignment.Center
         };
+        AutomationProperties.SetName(closeBannerBtn, "Dismiss status message");
+        ToolTip.SetTip(closeBannerBtn, "Dismiss");
 
         var bannerGrid = new Grid
         {
@@ -358,8 +387,8 @@ public partial class DockerDiagnosticsView : UserControl
 
         _statusBanner = new Border
         {
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(4),
+            BorderThickness = HairlineThickness,
+            CornerRadius = InnerCornerRadius,
             Padding = new Thickness(12, 8),
             IsVisible = false,
             Child = bannerGrid,
@@ -400,10 +429,17 @@ public partial class DockerDiagnosticsView : UserControl
             }
         };
 
-        // Enable cycling tab focus within the dashboard layout boundary (F13)
+        // Enable cycling tab focus within the dashboard layout boundary
         KeyboardNavigation.SetTabNavigation(mainPanel, KeyboardNavigationMode.Cycle);
 
         Content = new ScrollViewer { Content = mainPanel };
+
+        // Dashboard-wide keyboard map (tunnelling so it wins before child controls consume keys):
+        //   Ctrl/Cmd+F -> focus + select the search box (fulfils the advertised watermark shortcut)
+        //   F5 / Ctrl+R -> refresh now
+        //   Ctrl/Cmd+, -> open settings
+        //   Escape (while the search box holds text) -> clear the filter
+        AddHandler(KeyDownEvent, OnDashboardKeyDown, RoutingStrategies.Tunnel);
 
         // Resolve settings service for auto-refresh interval
         _settingsService = serviceProvider.Resolve<ISettingsService>();
@@ -413,7 +449,7 @@ public partial class DockerDiagnosticsView : UserControl
         {
             if (_hasAttached)
             {
-                return; // Prevent duplicate handlers on dock/undock cycles (F15)
+                return; // Prevent duplicate handlers on dock/undock cycles
             }
             _hasAttached = true;
             _justAttached = true;
@@ -435,29 +471,34 @@ public partial class DockerDiagnosticsView : UserControl
             }
             _isVisibleSubscription = this.GetObservable(IsVisibleProperty).Subscribe(visible =>
             {
-                if (visible)
+                // The entire body must be guarded: an exception thrown here escapes the Rx OnNext
+                // and can tear down the dispatcher. Keep the timer calls inside the catch.
+                try
                 {
-                    try
+                    if (visible)
                     {
-                        Dispatcher.UIThread.Post(() => { _searchBox.Focus(); });
                         if (_justAttached)
                         {
+                            // Focus the search box only on the first appearance, never on subsequent
+                            // dock/undock or tab re-shows — yanking the caret otherwise steals focus
+                            // from whatever the user was doing in the IDE.
+                            Dispatcher.UIThread.Post(() => { _searchBox.Focus(); });
                             _justAttached = false;
                         }
                         else
                         {
-                            _ = RefreshAllAsync();
+                            _ = RefreshAllSafeAsync();
                         }
+                        StartAutoRefreshTimer();
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        ContainerTelemetry.TrackError("DockerDiagnosticsView", "AutoRefresh_IsVisible", ex);
+                        StopAutoRefreshTimer();
                     }
-                    StartAutoRefreshTimer();
                 }
-                else
+                catch (Exception ex)
                 {
-                    StopAutoRefreshTimer();
+                    ContainerTelemetry.TrackError("DockerDiagnosticsView", "AutoRefresh_IsVisible", ex);
                 }
             });
             StartAutoRefreshTimer();
@@ -474,13 +515,22 @@ public partial class DockerDiagnosticsView : UserControl
                 // Ignore errors during cleanup of pending detach task
             }
             _detachCleanupCts = null;
+
+            // Re-arm the theme handler detached on the previous teardown (idempotent: detach first).
+            ActualThemeVariantChanged -= _themeChangedHandler;
+            ActualThemeVariantChanged += _themeChangedHandler;
+
             attachCmd.Execute(null);
         };
         DetachedFromVisualTree += (_, _) =>
         {
             StopAutoRefreshTimer();
             _searchDebounceTimer.Stop();
-            _hasAttached = false; // Allow re-attach to refresh again (F15)
+            _indicatorBlinkTimer.Stop();
+            _hasAttached = false; // Allow re-attach to refresh again
+
+            // Detach the theme handler so a detached control does not react to host theme toggles.
+            ActualThemeVariantChanged -= _themeChangedHandler;
 
             _isVisibleSubscription?.Dispose();
             _isVisibleSubscription = null;
@@ -553,11 +603,57 @@ public partial class DockerDiagnosticsView : UserControl
         _searchBox.Foreground = FontColor;
         _lastRefreshedText.Foreground = MutedColor;
         _countdownText.Foreground = MutedColor;
+        _refreshIndicator.Background = GreenColor;
 
-        _ = RefreshAllAsync();
+        // Repaint the data sections from cached state rather than re-querying the daemon: a
+        // light/dark toggle must never trigger network I/O just to recolor the UI.
+        RepaintSectionsFromCache();
     }
 
-    // -- Drag & Drop Handlers for Search Box (F15) -----------------------
+    /// <summary>
+    /// Rebuilds the data-driven sections using the last cached daemon snapshot so a theme change
+    /// recolors every row without a Docker round-trip. Fingerprints are reset so the populate
+    /// methods do not short-circuit on unchanged data.
+    /// </summary>
+    private void RepaintSectionsFromCache()
+    {
+        IList<Docker.DotNet.Models.ContainerListResponse> containers;
+        IList<Docker.DotNet.Models.ImagesListResponse> images;
+        (int imageCount, long totalSizeBytes, long reclaimableBytes) diskUsage;
+        lock (_cachedDataLock)
+        {
+            containers = _cachedContainers;
+            images = _cachedImages;
+            diskUsage = _cachedDiskUsage;
+        }
+
+        // Force a rebuild even though the underlying data is unchanged.
+        _lastContainerFingerprint = 0;
+        _lastImageFingerprint = 0;
+        _lastTelemetryFingerprint = 0;
+
+        try
+        {
+            PopulateStatus(_wasDockerOnline == true, null);
+            if (_wasDockerOnline == true)
+            {
+                PopulateContainers(containers);
+                PopulateImages(images, diskUsage);
+            }
+            else
+            {
+                PopulateOfflineSections();
+            }
+            PopulateConfig(_strategy.GetActiveSettingsSummary());
+            _ = PopulateTelemetryAsync();
+        }
+        catch (Exception ex)
+        {
+            ContainerTelemetry.TrackError("DockerDiagnosticsView", "RepaintSectionsFromCache", ex);
+        }
+    }
+
+    // -- Drag & Drop Handlers for Search Box -----------------------------
     private static void OnSearchBoxDragOver(object? sender, DragEventArgs e)
     {
         if (e.DataTransfer.Contains(DataFormat.File))
@@ -611,7 +707,7 @@ public partial class DockerDiagnosticsView : UserControl
         return true;
     }
 
-    // -- TextChanged Event Handler (F16) ---------------------------------
+    // -- TextChanged Event Handler ---------------------------------------
     private void OnSearchBoxTextChanged(object? sender, EventArgs e)
     {
         if (_searchBox.InnerRightContent is Button clearBtn)
@@ -631,27 +727,57 @@ public partial class DockerDiagnosticsView : UserControl
     }
 
 
+    // -- Dashboard Keyboard Shortcuts ------------------------------------
+    private void OnDashboardKeyDown(object? sender, KeyEventArgs e)
+    {
+        var primaryModifier = OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control;
+
+        // Escape clears the filter when the search box holds text and has focus.
+        if (e.Key == Key.Escape && _searchBox.IsFocused && !string.IsNullOrEmpty(_searchBox.Text))
+        {
+            _searchBox.Text = "";
+            e.Handled = true;
+            return;
+        }
+
+        if (e.KeyModifiers == primaryModifier)
+        {
+            switch (e.Key)
+            {
+                case Key.F:
+                    _searchBox.Focus();
+                    _searchBox.SelectAll();
+                    e.Handled = true;
+                    return;
+                case Key.R:
+                    _ = RefreshAllSafeAsync();
+                    e.Handled = true;
+                    return;
+                case Key.OemComma:
+                    _ = ShowSettingsDialogAsync();
+                    e.Handled = true;
+                    return;
+                default:
+                    break;
+            }
+        }
+
+        if (e.Key == Key.F5 && e.KeyModifiers == KeyModifiers.None)
+        {
+            _ = RefreshAllSafeAsync();
+            e.Handled = true;
+        }
+    }
+
     /// <summary>Updates the "Last refreshed" timestamp display in the header status bar.</summary>
     private void UpdateLastRefreshedTimestamp()
     {
         _lastRefreshedText.Text = $"Last refreshed: {DateTime.Now.ToString("T", System.Globalization.CultureInfo.CurrentCulture)}";
 
-        int tickCount = 0;
-        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
-        timer.Tick += (s, e) =>
-        {
-            tickCount++;
-            if (tickCount > 6)
-            {
-                _refreshIndicator.Opacity = 0.0;
-                timer.Stop();
-            }
-            else
-            {
-                _refreshIndicator.Opacity = tickCount % 2 == 1 ? 1.0 : 0.2;
-            }
-        };
-        timer.Start();
+        // Restart the single shared blink timer instead of allocating a throwaway one each refresh.
+        _indicatorBlinkTicks = 0;
+        _indicatorBlinkTimer.Stop();
+        _indicatorBlinkTimer.Start();
     }
 
     /// <summary>
@@ -750,10 +876,6 @@ public partial class DockerDiagnosticsView : UserControl
         SafeCancelAndDisposeCts(ref _refreshCts);
     }
 
-    // =======================================================================
-    //  Live Data Refresh
-    // =======================================================================
-
     private int _isRefreshingFlag;
 
     /// <summary>
@@ -824,6 +946,11 @@ public partial class DockerDiagnosticsView : UserControl
                 ClipToBounds = false,
                 Command = new RelayCommand(() => onSort(capturedKey))
             };
+            // Announce the sort affordance and current direction in text (the ▲/▼ glyph is
+            // visual-only and the active column is otherwise distinguished by color alone).
+            Avalonia.Automation.AutomationProperties.SetName(btn, isActive
+                ? $"{label}, sorted {(currentSort.ascending ? "ascending" : "descending")}, activate to sort {(currentSort.ascending ? "descending" : "ascending")}"
+                : $"{label}, activate to sort");
             Grid.SetColumn(btn, col);
             grid.Children.Add(btn);
         }
@@ -898,112 +1025,12 @@ public partial class DockerDiagnosticsView : UserControl
                 // Compute disk usage from the already-fetched image list (avoids duplicate API call)
                 var diskUsage = DockerExecutionStrategy.ComputeDiskUsage(images);
 
-                // Update UI on the Avalonia dispatcher thread
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    if (!_hasAttached)
-                    {
-                        return;
-                    }
-                    _headerTitle.Text = $"{ContainerExtensionModule.DashboardTitle}";
-                    ToolTip.SetTip(_headerTitle, null);
-                    PopulateStatus(true, info);
-
-                    // Update KPI Metrics (Online state)
-                    if (_metricDaemonStatusText != null) _metricDaemonStatusText.Text = "Online";
-                    if (_metricDaemonDetailText != null) _metricDaemonDetailText.Text = $"{info.Name ?? "Connected"} ({_strategy.DetectedRuntime})";
-                    if (_metricDaemonBorder != null) _metricDaemonBorder.Background = GreenColor;
-
-                    var running = containers.Count(c => string.Equals(c.State, "running", StringComparison.OrdinalIgnoreCase));
-                    if (_metricContainersText != null) _metricContainersText.Text = $"{running} Running";
-                    if (_metricContainersDetailText != null) _metricContainersDetailText.Text = $"{containers.Count} total containers";
-
-                    if (_metricImagesText != null) _metricImagesText.Text = $"{images.Count} Images";
-                    if (_metricImagesDetailText != null) _metricImagesDetailText.Text = $"{FormatBytesBinary(diskUsage.totalSizeBytes)} total size";
-
-                    if (_metricDiskText != null) _metricDiskText.Text = FormatBytesBinary(diskUsage.reclaimableBytes);
-                    var unusedCount = images.Count(i => i.Containers == 0);
-                    if (_metricDiskDetailText != null) _metricDiskDetailText.Text = $"{unusedCount} unused images";
-
-                    if (_wasDockerOnline == false)
-                    {
-                        ShowTemporaryStatus("Docker Daemon is back online!");
-                    }
-                    else if (_wasDockerOnline == null)
-                    {
-                        _statusBanner.IsVisible = false;
-                    }
-                    _wasDockerOnline = true;
-
-                    // Skip-if-unchanged: compare a lightweight fingerprint of container/image data
-                    // to avoid full UI tree rebuild when nothing has changed (critical at 2s/5s refresh rates).
-                    var containerFp = containers.Count;
-                    foreach (var c in containers.Take(5))
-                    {
-                        containerFp = HashCode.Combine(containerFp, c.ID, c.State);
-                    }
-                    var imageFp = HashCode.Combine(images.Count, images.Sum(i => i.Size));
-
-                    if (containerFp != _lastContainerFingerprint)
-                    {
-                        _lastContainerFingerprint = containerFp;
-                        PopulateContainers(containers);
-                    }
-                    if (imageFp != _lastImageFingerprint)
-                    {
-                        _lastImageFingerprint = imageFp;
-                        PopulateImages(images, diskUsage);
-                    }
-
-                    PopulateConfig(settings);
-                    _quickActionsRow.IsEnabled = true;
-                    _quickActionsRow.Opacity = 1.0;
-                    _ = PopulateTelemetryAsync();
-                    UpdateHeaderBadge(containers.Count);
-                    UpdateLastRefreshedTimestamp();
-                });
+                await Dispatcher.UIThread.InvokeAsync(() => ApplyDaemonOnlineUi(info, containers, images, diskUsage, settings));
             }
             catch (Exception ex)
             {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "RefreshAllAsync_ParallelQuery", ex);
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    if (!_hasAttached)
-                    {
-                        return;
-                    }
-                    _headerTitle.Text = $"{ContainerExtensionModule.DashboardTitle} ⚠️ Offline / API Error";
-                    ToolTip.SetTip(_headerTitle, ex.Message);
-                    _quickActionsRow.IsEnabled = false;
-                    _quickActionsRow.Opacity = 0.5;
-                    PopulateStatus(false, null);
-
-                    // Update KPI Metrics (Offline state)
-                    if (_metricDaemonStatusText != null) _metricDaemonStatusText.Text = "Offline";
-                    if (_metricDaemonDetailText != null) _metricDaemonDetailText.Text = "Daemon unreachable";
-                    if (_metricDaemonBorder != null) _metricDaemonBorder.Background = RedColor;
-
-                    if (_metricContainersText != null) _metricContainersText.Text = "—";
-                    if (_metricContainersDetailText != null) _metricContainersDetailText.Text = "No active daemon";
-
-                    if (_metricImagesText != null) _metricImagesText.Text = "—";
-                    if (_metricImagesDetailText != null) _metricImagesDetailText.Text = "No active daemon";
-
-                    if (_metricDiskText != null) _metricDiskText.Text = "—";
-                    if (_metricDiskDetailText != null) _metricDiskDetailText.Text = "No active daemon";
-
-                    PopulateConfig(settings);
-                    PopulateOfflineSections(); // Clear stale lists and show offline sections
-                    _ = PopulateTelemetryAsync();
-                    UpdateHeaderBadge(0);
-                    UpdateLastRefreshedTimestamp();
-
-                    if (_wasDockerOnline == null || _wasDockerOnline == true)
-                    {
-                        ShowTemporaryError("Docker Daemon is offline", ex, isTemporary: false);
-                    }
-                    _wasDockerOnline = false;
-                });
+                await Dispatcher.UIThread.InvokeAsync(() => ApplyDaemonOfflineUi(ex, settings));
             }
         }
         finally
@@ -1012,9 +1039,107 @@ public partial class DockerDiagnosticsView : UserControl
         }
     }
 
-    // =======================================================================
-    //  Section Population
-    // =======================================================================
+    /// <summary>Applies the daemon-online snapshot to the header, KPI cards, and data sections.</summary>
+    private void ApplyDaemonOnlineUi(
+        Docker.DotNet.Models.SystemInfoResponse info,
+        IList<Docker.DotNet.Models.ContainerListResponse> containers,
+        IList<Docker.DotNet.Models.ImagesListResponse> images,
+        (int imageCount, long totalSizeBytes, long reclaimableBytes) diskUsage,
+        Dictionary<string, string> settings)
+    {
+        if (!_hasAttached)
+        {
+            return;
+        }
+        _headerTitle.Text = ContainerExtensionModule.DashboardTitle;
+        ToolTip.SetTip(_headerTitle, null);
+        PopulateStatus(true, info);
+
+        // KPI metrics (online state)
+        _metricDaemonStatusText.Text = "Online";
+        _metricDaemonDetailText.Text = $"{info.Name ?? "Connected"} ({_strategy.DetectedRuntime})";
+        _metricDaemonBorder.Background = GreenColor;
+
+        var running = containers.Count(c => string.Equals(c.State, "running", StringComparison.OrdinalIgnoreCase));
+        _metricContainersText.Text = $"{running} Running";
+        _metricContainersDetailText.Text = $"{containers.Count} total containers";
+
+        _metricImagesText.Text = $"{images.Count} Images";
+        _metricImagesDetailText.Text = $"{FormatBytesBinary(diskUsage.totalSizeBytes)} total size";
+
+        _metricDiskText.Text = FormatBytesBinary(diskUsage.reclaimableBytes);
+        _metricDiskDetailText.Text = $"{images.Count(i => i.Containers == 0)} unused images";
+
+        if (_wasDockerOnline == false)
+        {
+            ShowTemporaryStatus("Docker daemon is back online.");
+        }
+        else if (_wasDockerOnline == null)
+        {
+            _statusBanner.IsVisible = false;
+        }
+        _wasDockerOnline = true;
+
+        // Skip-if-unchanged: compare a lightweight fingerprint of container/image data to avoid a
+        // full UI tree rebuild when nothing has changed (critical at 2s/5s refresh rates).
+        var containerFp = DashboardFingerprint.ForContainers(containers);
+        var imageFp = HashCode.Combine(images.Count, images.Sum(i => i.Size));
+
+        if (containerFp != _lastContainerFingerprint)
+        {
+            _lastContainerFingerprint = containerFp;
+            PopulateContainers(containers);
+        }
+        if (imageFp != _lastImageFingerprint)
+        {
+            _lastImageFingerprint = imageFp;
+            PopulateImages(images, diskUsage);
+        }
+
+        PopulateConfig(settings);
+        _quickActionsRow.IsEnabled = true;
+        _quickActionsRow.Opacity = 1.0;
+        _ = PopulateTelemetryAsync();
+        UpdateHeaderBadge(containers.Count);
+        UpdateLastRefreshedTimestamp();
+    }
+
+    /// <summary>Applies the daemon-offline state to the header, KPI cards, and data sections.</summary>
+    private void ApplyDaemonOfflineUi(Exception ex, Dictionary<string, string> settings)
+    {
+        if (!_hasAttached)
+        {
+            return;
+        }
+        _headerTitle.Text = $"{ContainerExtensionModule.DashboardTitle} — Offline / API Error";
+        ToolTip.SetTip(_headerTitle, ex.Message);
+        _quickActionsRow.IsEnabled = false;
+        _quickActionsRow.Opacity = 0.5;
+        PopulateStatus(false, null);
+
+        // KPI metrics (offline state)
+        _metricDaemonStatusText.Text = "Offline";
+        _metricDaemonDetailText.Text = "Daemon unreachable";
+        _metricDaemonBorder.Background = RedColor;
+        _metricContainersText.Text = "—";
+        _metricContainersDetailText.Text = "No active daemon";
+        _metricImagesText.Text = "—";
+        _metricImagesDetailText.Text = "No active daemon";
+        _metricDiskText.Text = "—";
+        _metricDiskDetailText.Text = "No active daemon";
+
+        PopulateConfig(settings);
+        PopulateOfflineSections(); // Clear stale lists and show offline sections
+        _ = PopulateTelemetryAsync();
+        UpdateHeaderBadge(0);
+        UpdateLastRefreshedTimestamp();
+
+        if (_wasDockerOnline == null || _wasDockerOnline == true)
+        {
+            ShowTemporaryError("Docker daemon is offline", ex, isTemporary: false);
+        }
+        _wasDockerOnline = false;
+    }
 
     /// <summary>Populates the Toolchain Environment section by checking the remote registry for default image updates.</summary>
     private async Task PopulateToolchainEnvironmentAsync()
@@ -1091,6 +1216,7 @@ public partial class DockerDiagnosticsView : UserControl
                     FontSize = 12,
                     Margin = new Thickness(0, 4, 8, 4)
                 };
+                AutomationProperties.SetName(comboBox, "Active toolchain image and tag");
                 var lastColonIdx = currentImage.LastIndexOf(':');
                 var lastSlashIdx = currentImage.LastIndexOf('/');
                 string baseImage;
@@ -1114,11 +1240,12 @@ public partial class DockerDiagnosticsView : UserControl
                         try
                         {
                             _settingsService.SetSettingValue(ContainerExtensionModule.DefaultImageSetting, newImage);
-                            _ = RefreshAllAsync(); // refresh configuration display
+                            ShowTemporaryStatus($"Active toolchain image set to '{newImage}'.");
+                            _ = RefreshAllSafeAsync(); // refresh configuration display
                         }
                         catch (Exception ex)
                         {
-                            ContainerTelemetry.TrackError("DockerDiagnosticsView", "ChangeActiveImageSettings", ex);
+                            ShowTemporaryError("Failed to change active image", ex);
                         }
                     }
                 };
@@ -1173,7 +1300,24 @@ public partial class DockerDiagnosticsView : UserControl
                 });
 
                 var runtimePath = _strategy.GetRuntimePath();
-                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} pull \"{activeImg}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5)).ConfigureAwait(false);
+                var pull = await _terminalService.ExecuteInTerminalAsync($"{runtimePath} pull \"{activeImg}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5)).ConfigureAwait(false);
+
+                if (pull.TimedOut || pull.ExitCode != 0)
+                {
+                    // A failed pull must not trigger a prune; surface the failure and keep existing layers intact.
+                    var detail = pull.TimedOut ? "the operation timed out" : $"exit code {pull.ExitCode}";
+                    await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        btn.Content = "Error";
+                        ToolTip.SetTip(btn, $"Update failed: {detail}.");
+                    });
+                    await Task.Delay(3000).ConfigureAwait(false);
+                    await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        ToolTip.SetTip(btn, prevTip);
+                    });
+                    return;
+                }
 
                 // Prune dangling images to free disk space
                 _ = _strategy.PruneDanglingImagesAsync();
@@ -1183,7 +1327,7 @@ public partial class DockerDiagnosticsView : UserControl
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "UpdateAndPullImage", ex);
                 await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    btn.Content = "Error ✗";
+                    btn.Content = "Error";
                     ToolTip.SetTip(btn, $"Update failed: {ex.Message}");
                 });
                 await Task.Delay(3000).ConfigureAwait(false);
@@ -1202,6 +1346,7 @@ public partial class DockerDiagnosticsView : UserControl
             }
         });
             ToolTip.SetTip(btn, "Pulls the selected version of the toolchain and safely cleans up old dangling layers.");
+            AutomationProperties.SetName(btn, "Check for toolchain updates and pull");
 
             row.Children.Add(btn);
             _toolchainContent.Children.Add(row);
@@ -1222,11 +1367,13 @@ public partial class DockerDiagnosticsView : UserControl
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 8, 0)
         };
+        AutomationProperties.SetName(statusDot, isReachable ? "Daemon online" : "Daemon offline");
 
         var statusRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         statusRow.Children.Add(statusDot);
         statusRow.Children.Add(new TextBlock
         {
+            // Leading glyph conveys state without relying on the dot color alone (WCAG 1.4.1).
             Text = isReachable
             ? $"{_strategy.DetectedRuntime} daemon — connected"
             : $"{_strategy.DetectedRuntime} daemon — unreachable",
@@ -1253,12 +1400,20 @@ public partial class DockerDiagnosticsView : UserControl
                 openDesktopBtn.Content = "Opening...";
                 try
                 {
-                    await Task.Run(() => { LaunchDesktopApp(_strategy.DetectedRuntime); }).ConfigureAwait(true);
-                    await Task.Delay(1000).ConfigureAwait(true);
+                    var launched = await Task.Run(() => LaunchDesktopApp(_strategy.DetectedRuntime)).ConfigureAwait(true);
+                    if (launched)
+                    {
+                        await Task.Delay(1000).ConfigureAwait(true);
+                    }
+                    else
+                    {
+                        ShowTemporaryStatus($"Could not open {desktopAppName}. Make sure it is installed.", isError: true);
+                    }
                 }
                 catch (Exception ex)
                 {
                     ContainerTelemetry.TrackError("DockerDiagnosticsView", "OpenDesktopBtn_Click", ex);
+                    ShowTemporaryStatus($"Could not open {desktopAppName}: {ex.Message}", isError: true);
                 }
                 finally
                 {
@@ -1267,6 +1422,7 @@ public partial class DockerDiagnosticsView : UserControl
                 }
             });
             ToolTip.SetTip(openDesktopBtn, $"Launch {desktopAppName}");
+            AutomationProperties.SetName(openDesktopBtn, $"Open {desktopAppName}");
             statusRow.Children.Add(openDesktopBtn);
         }
 
@@ -1281,6 +1437,7 @@ public partial class DockerDiagnosticsView : UserControl
                 Command = new AsyncRelayCommand(RefreshAllAsync)
             };
             ToolTip.SetTip(reconnectBtn, "Re-run the daemon reachability test now");
+            AutomationProperties.SetName(reconnectBtn, "Retry daemon connection");
             statusRow.Children.Add(reconnectBtn);
         }
 
@@ -1303,12 +1460,19 @@ public partial class DockerDiagnosticsView : UserControl
         }
         else if (!isReachable)
         {
+            // Distinguish "no runtime installed" from "installed but stopped" so the user gets
+            // the right next step instead of a generic message.
+            var runtime = _strategy.DetectedRuntime;
+            var hint = string.IsNullOrEmpty(runtime)
+                ? "No container runtime detected. Install Docker Desktop, OrbStack, or Podman, then click Retry Connection. FPGA tools will run natively until a runtime is available."
+                : $"{runtime} is installed but its daemon is not running. Start {GetDesktopAppName(runtime) ?? runtime}, then click Retry Connection.";
             _statusContent.Children.Add(new TextBlock
             {
-                Text = "Start Docker Desktop or the Docker daemon to enable container execution.",
+                Text = hint,
                 Foreground = MutedColor,
                 FontSize = 11,
                 FontStyle = FontStyle.Italic,
+                TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(18, 4, 0, 0)
             });
         }
@@ -1329,9 +1493,9 @@ public partial class DockerDiagnosticsView : UserControl
                 telemetryPath = telemetryPath.Replace(home, "~", StringComparison.Ordinal);
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            _ = ex;
+            /* telemetry-path scrub failure is non-fatal */
         }
 
         var metaPanel = new StackPanel { Spacing = 6 };
@@ -1349,22 +1513,14 @@ public partial class DockerDiagnosticsView : UserControl
             ColumnDefinitions = new ColumnDefinitions("Auto,12,*"),
             RowDefinitions = new RowDefinitions("Auto,Auto,Auto")
         };
-        AddInfoRow(metaGrid, 0, "Extension", $"Container Extension {_pluginVersion}");
-        AddInfoRow(metaGrid, 1, "Runtime", $"{_strategy.DetectedRuntime} | .NET {Environment.Version}");
-        AddInfoRow(metaGrid, 2, "Telemetry", telemetryPath);
+        // labelIndent 0 aligns these labels flush with the grouped-settings labels below; the default
+        // 18 px indent is reserved for the daemon-details rows that sit under the status banner.
+        AddInfoRow(metaGrid, 0, "Extension", $"Container Extension {_pluginVersion}", labelIndent: 0);
+        AddInfoRow(metaGrid, 1, "Runtime", $"{_strategy.DetectedRuntime} | .NET {Environment.Version}", labelIndent: 0);
+        AddInfoRow(metaGrid, 2, "Telemetry", telemetryPath, labelIndent: 0);
         metaPanel.Children.Add(metaGrid);
 
-        var metaCard = new Border
-        {
-            Background = Brush.Parse("#0DFFFFFF"), // Sub card card background
-            BorderBrush = Brush.Parse("#2D2D30"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(4),
-            Padding = new Thickness(12, 10, 12, 10),
-            Margin = new Thickness(0, 0, 0, 8),
-            Child = metaPanel
-        };
-        _configContent.Children.Add(metaCard);
+        _configContent.Children.Add(CreateSubCard(metaPanel));
 
         // -- Grouped Settings --------------------------------------------
         var groups = new (string title, string[] keys)[]
@@ -1449,45 +1605,27 @@ public partial class DockerDiagnosticsView : UserControl
             }
             groupPanel.Children.Add(grid);
 
-            var groupCard = new Border
-            {
-                Background = Brush.Parse("#0DFFFFFF"),
-                BorderBrush = Brush.Parse("#2D2D30"),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(4),
-                Padding = new Thickness(12, 10, 12, 10),
-                Margin = new Thickness(0, 0, 0, 8),
-                Child = groupPanel
-            };
-
-            _configContent.Children.Add(groupCard);
+            _configContent.Children.Add(CreateSubCard(groupPanel));
         }
 
         var configureBtn = new Button
         {
-            Content = "⚙️ Configure Settings...",
+            Content = "Configure Settings...",
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Center,
             FontWeight = FontWeight.SemiBold,
             Margin = new Thickness(0, 8, 0, 4),
             Padding = new Thickness(12, 8),
-            CornerRadius = new CornerRadius(4),
-            Background = Brush.Parse("#1A2496ED"),
+            CornerRadius = InnerCornerRadius,
+            Background = SubCardBg,
             Foreground = AccentColor,
-            BorderBrush = Brush.Parse("#2D2D30"),
-            BorderThickness = new Thickness(1)
+            BorderBrush = BorderColor,
+            BorderThickness = HairlineThickness
         };
         configureBtn.Command = new AsyncRelayCommand(ShowSettingsDialogAsync);
+        ToolTip.SetTip(configureBtn, "Opens Settings > Binary Management > Container Engine");
+        AutomationProperties.SetName(configureBtn, "Configure container engine settings");
         _configContent.Children.Add(configureBtn);
-
-        _configContent.Children.Add(new TextBlock
-        {
-            Text = "Configure: Settings > Binary Management > Container Engine",
-            Foreground = MutedColor,
-            FontSize = 10,
-            FontStyle = FontStyle.Italic,
-            Margin = new Thickness(4, 4, 0, 0)
-        });
     }
 
     /// <summary>
@@ -1502,17 +1640,23 @@ public partial class DockerDiagnosticsView : UserControl
         _lastImageFingerprint = 0;
     }
 
+    /// <summary>
+    /// Applies the themed fill/border for the status banner. Single source of truth shared by
+    /// the temporary-status, deferred-reshow, and long-operation banner paths.
+    /// Uses the host NotificationCard backgrounds so the banner matches OneWare toast styling.
+    /// </summary>
+    private void ApplyBannerStyle(bool isError)
+    {
+        _statusBanner.Background = isError ? ErrorBannerBg : InfoBannerBg;
+        _statusBanner.BorderBrush = isError ? RedColor : AccentColor;
+    }
+
     private void ShowTemporaryStatus(string message, bool isError = false, bool isTemporary = true)
     {
         Dispatcher.UIThread.Post(() =>
         {
             _statusBannerText.Text = message;
-            _statusBanner.Background = isError
-                ? new SolidColorBrush(Color.FromArgb(30, 244, 67, 54))  // Subtle red for error
-                : new SolidColorBrush(Color.FromArgb(30, 36, 150, 237)); // Subtle blue for info
-            _statusBanner.BorderBrush = isError
-                ? new SolidColorBrush(Color.FromArgb(80, 244, 67, 54))
-                : new SolidColorBrush(Color.FromArgb(80, 36, 150, 237));
+            ApplyBannerStyle(isError);
             _statusBanner.IsVisible = true;
             _temporaryStatus = isTemporary ? message : null;
             if (!isTemporary)
@@ -1537,12 +1681,7 @@ public partial class DockerDiagnosticsView : UserControl
                             if (self._wasDockerOnline == false && self._lastPermanentMessage != null)
                             {
                                 self._statusBannerText.Text = self._lastPermanentMessage;
-                                self._statusBanner.Background = self._lastPermanentIsError
-                                    ? new SolidColorBrush(Color.FromArgb(30, 244, 67, 54))
-                                    : new SolidColorBrush(Color.FromArgb(30, 36, 150, 237));
-                                self._statusBanner.BorderBrush = self._lastPermanentIsError
-                                    ? new SolidColorBrush(Color.FromArgb(80, 244, 67, 54))
-                                    : new SolidColorBrush(Color.FromArgb(80, 36, 150, 237));
+                                self.ApplyBannerStyle(self._lastPermanentIsError);
                             }
                             else
                             {
@@ -1597,12 +1736,12 @@ public partial class DockerDiagnosticsView : UserControl
                 }
 
                 ShowTemporaryStatus($"{ContainerExtensionModule.DashboardTitle} — Configured {updatedCount} tools to Docker");
-                _ = RefreshAllAsync();
+                _ = RefreshAllSafeAsync();
             }
             catch (Exception ex)
             {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_AllToDocker", ex);
-                ShowTemporaryError("⚠️ Action failed", ex);
+                ShowTemporaryError("Action failed", ex);
             }
         }, "Switch the execution strategy of all supported FPGA tools to Docker"));
 
@@ -1632,12 +1771,12 @@ public partial class DockerDiagnosticsView : UserControl
                 }
 
                 ShowTemporaryStatus($"{ContainerExtensionModule.DashboardTitle} — Reset {updatedCount} tools to Native");
-                _ = RefreshAllAsync();
+                _ = RefreshAllSafeAsync();
             }
             catch (Exception ex)
             {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_AllToNative", ex);
-                ShowTemporaryError("⚠️ Action failed", ex);
+                ShowTemporaryError("Action failed", ex);
             }
         }, "Reset the execution strategy of all tools to their default native execution"));
 
@@ -1650,14 +1789,13 @@ public partial class DockerDiagnosticsView : UserControl
                 if (topLevel?.Clipboard != null)
                 {
                     await topLevel.Clipboard.SetTextAsync(cmd).ConfigureAwait(false);
-                    ShowTemporaryStatus("📋 Copied equivalent 'docker run' command to clipboard!");
-                    await Console.Out.WriteLineAsync($"[ContainerExtension] 📋 Copied to clipboard: {cmd}").ConfigureAwait(false);
+                    ShowTemporaryStatus("Copied equivalent 'docker run' command to clipboard.");
                 }
             }
             catch (Exception ex)
             {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_CopyDockerRun", ex);
-                ShowTemporaryError("⚠️ Copy failed", ex);
+                ShowTemporaryError("Copy failed", ex);
             }
         }, "Copy an equivalent 'docker run' command to the clipboard for manual debugging"));
 
@@ -1683,7 +1821,7 @@ public partial class DockerDiagnosticsView : UserControl
             catch (Exception ex)
             {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_PullImage", ex);
-                ShowTemporaryError("⚠️ Action failed", ex);
+                ShowTemporaryError("Action failed", ex);
             }
         }, "Download or update the configured default toolchain image"));
 
@@ -1731,29 +1869,31 @@ public partial class DockerDiagnosticsView : UserControl
                     throw new InvalidOperationException("Could not determine build context directory.");
                 }
                 var tag = "fentwums/oss-cad-suite:local";
-                var arch = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64
-                    ? "linux-arm64"
-                    : "linux-x64";
-                var extraArgs = $"--build-arg ARCH={arch} ";
+                // Always build linux/amd64: the upstream arm64 releases omit GHDL, and the pinned
+                // checksum is for the amd64 tarball. This matches docker/build_oss_cad_suite.sh.
+                const string arch = "linux-x64";
+                var extraArgs = $"--platform=linux/amd64 --build-arg ARCH={arch} ";
 
-                if (selection == "latest")
+                if (selection != PinnedBuildSelection)
                 {
-                    ShowTemporaryStatus("Querying latest release tag from GitHub...");
-
+                    // A specific dated release: pull its tarball and the GitHub-published checksum so
+                    // the build stays integrity-verified instead of silently dropping the pin.
+                    var releaseTag = selection;
+                    ShowTemporaryStatus($"Fetching checksum for oss-cad-suite {releaseTag}...");
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                    var latestTag = await ContainerExtension.Services.GitHubReleaseClient.GetLatestReleaseTagAsync(cts.Token).ConfigureAwait(true);
-                    if (string.IsNullOrWhiteSpace(latestTag))
+                    var sha256 = await ContainerExtension.Services.GitHubReleaseClient.GetAssetSha256Async(releaseTag, arch, cts.Token).ConfigureAwait(true);
+                    if (string.IsNullOrEmpty(sha256))
                     {
-                        throw new InvalidOperationException("Failed to fetch the latest release tag from GitHub.");
+                        throw new InvalidOperationException($"No published amd64 checksum found for oss-cad-suite {releaseTag}. The release may not include a linux-x64 asset.");
                     }
 
-                    var dateStr = latestTag.Replace("-", "", StringComparison.Ordinal);
-                    extraArgs += $"--build-arg RELEASE_TAG={latestTag} --build-arg RELEASE_DATE={dateStr} ";
-                    ShowTemporaryStatus($"Building newest release tag '{latestTag}' ({arch}) in terminal...");
+                    var dateStr = releaseTag.Replace("-", "", StringComparison.Ordinal);
+                    extraArgs += $"--build-arg RELEASE_TAG={releaseTag} --build-arg RELEASE_DATE={dateStr} --build-arg OSS_CAD_SUITE_SHA256={sha256} ";
+                    ShowTemporaryStatus($"Building oss-cad-suite {releaseTag} (linux/amd64) in terminal...");
                 }
                 else
                 {
-                    ShowTemporaryStatus($"Building pinned release version ({arch}) in terminal...");
+                    ShowTemporaryStatus("Building the repository-pinned version (linux/amd64) in terminal...");
                 }
 
                 var commandLine = $"{runtimePath} build {extraArgs}-t {tag} -f \"{dockerfilePath}\" \"{buildContextDir}\"";
@@ -1762,7 +1902,7 @@ public partial class DockerDiagnosticsView : UserControl
             catch (Exception ex)
             {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_BuildLocalImage", ex);
-                ShowTemporaryError("⚠️ Action failed", ex);
+                ShowTemporaryError("Action failed", ex);
             }
         }, "Build the local FPGA toolchain Docker image from source"));
 
@@ -1773,8 +1913,7 @@ public partial class DockerDiagnosticsView : UserControl
                 Dispatcher.UIThread.Post(() =>
                 {
                     _statusBannerText.Text = "Updating all local images...";
-                    _statusBanner.Background = new SolidColorBrush(Color.FromArgb(30, 36, 150, 237));
-                    _statusBanner.BorderBrush = new SolidColorBrush(Color.FromArgb(80, 36, 150, 237));
+                    ApplyBannerStyle(isError: false);
                     _statusBanner.IsVisible = true;
                 });
 
@@ -1785,21 +1924,28 @@ public partial class DockerDiagnosticsView : UserControl
                     })
                 ).ConfigureAwait(false);
 
-                ShowTemporaryStatus($"Successfully updated {result.pulled} image(s)" + (result.failed > 0 ? $", {result.failed} failed" : ""));
-                _ = RefreshAllAsync();
+                if (result.failed > 0)
+                {
+                    ShowTemporaryStatus($"Updated {result.pulled} image(s), {result.failed} failed", isError: true);
+                }
+                else
+                {
+                    ShowTemporaryStatus($"Successfully updated {result.pulled} image(s)");
+                }
+                _ = RefreshAllSafeAsync();
             }
             catch (Exception ex)
             {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_UpdateAllImages", ex);
-                ShowTemporaryError("⚠️ Action failed", ex);
+                ShowTemporaryError("Action failed", ex);
             }
         }, "Re-pull all local images to their latest tags (cross-platform, no shell required)"));
 
-        imageRow.Children.Add(CreateActionButton("⚠️ Prune All Images", async () =>
+        imageRow.Children.Add(CreateActionButton("Prune All Images", async () =>
         {
             try
             {
-                var confirm = await ShowConfirmDialogAsync("Prune All Images", "Are you sure you want to prune ALL unused images? This will delete all images not currently used by a container, and they will need to be re-pulled.");
+                var confirm = await ShowConfirmDialogAsync("Prune All Images", "Are you sure you want to prune ALL unused images? This will delete all images not currently used by a container, and they will need to be re-pulled.", "Prune");
                 if (!confirm)
                 {
                     return;
@@ -1811,9 +1957,9 @@ public partial class DockerDiagnosticsView : UserControl
             catch (Exception ex)
             {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_PruneAllImages", ex);
-                ShowTemporaryError("⚠️ Action failed", ex);
+                ShowTemporaryError("Action failed", ex);
             }
-        }, "⚠️ Remove ALL unused images (not just dangling). This frees disk space but deleted images must be re-pulled."));
+        }, "Remove ALL unused images (not just dangling). This frees disk space but deleted images must be re-pulled."));
 
         var imageCard = CreateCard("Image Operations", imageRow, defaultExpanded: false);
         actionsPanel.Children.Add(imageCard);
@@ -1835,7 +1981,7 @@ public partial class DockerDiagnosticsView : UserControl
             catch (Exception ex)
             {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_HelloWorldTest", ex);
-                ShowTemporaryError("⚠️ Action failed", ex);
+                ShowTemporaryError("Action failed", ex);
             }
         }, "Run a disposable hello-world container to verify Docker is working correctly"));
 
@@ -1850,15 +1996,15 @@ public partial class DockerDiagnosticsView : UserControl
             catch (Exception ex)
             {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_EngineInfo", ex);
-                ShowTemporaryError("⚠️ Action failed", ex);
+                ShowTemporaryError("Action failed", ex);
             }
         }, "Show detailed Docker engine configuration, storage driver, and runtime info"));
 
-        engineRow.Children.Add(CreateActionButton("⚠️ Prune System", async () =>
+        engineRow.Children.Add(CreateActionButton("Prune System", async () =>
         {
             try
             {
-                var confirm = await ShowConfirmDialogAsync("Prune System", "Are you sure you want to prune the system? This will delete all stopped containers, dangling images, and unused networks. This action cannot be undone.");
+                var confirm = await ShowConfirmDialogAsync("Prune System", "Are you sure you want to prune the system? This will delete all stopped containers, dangling images, and unused networks. This action cannot be undone.", "Prune");
                 if (!confirm)
                 {
                     return;
@@ -1870,9 +2016,9 @@ public partial class DockerDiagnosticsView : UserControl
             catch (Exception ex)
             {
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "Action_PruneSystem", ex);
-                ShowTemporaryError("⚠️ Action failed", ex);
+                ShowTemporaryError("Action failed", ex);
             }
-        }, "⚠️ Remove ALL stopped containers, dangling images, and unused networks. This cannot be undone."));
+        }, "Remove ALL stopped containers, dangling images, and unused networks. This cannot be undone."));
 
         var engineCard = CreateCard("Engine & Cleanup", engineRow, defaultExpanded: false);
         actionsPanel.Children.Add(engineCard);
@@ -1948,7 +2094,50 @@ public partial class DockerDiagnosticsView : UserControl
             }
         }
     }
-    private async Task<bool> ShowConfirmDialogAsync(string title, string message)
+    /// <summary>
+    /// Builds the shared dialog header (bold title + short accent underline) used by every modal
+    /// dialog, so the three dialogs do not each re-implement identical chrome.
+    /// </summary>
+    private static StackPanel CreateDialogHeader(string title, IBrush accent)
+    {
+        var headerPanel = new StackPanel { Spacing = 6 };
+        headerPanel.Children.Add(new TextBlock
+        {
+            Text = title,
+            FontSize = 15,
+            FontWeight = FontWeight.Bold,
+            Foreground = accent
+        });
+        headerPanel.Children.Add(new Border
+        {
+            Height = 2,
+            Background = accent,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Width = 60,
+            Margin = new Thickness(0, 2, 0, 8)
+        });
+        return headerPanel;
+    }
+
+    /// <summary>
+    /// Shows a modal dialog centered on the dashboard's owning window, falling back to a non-modal
+    /// Show() when no owner can be resolved. Centralizes the owner-resolution logic the three
+    /// dialogs previously duplicated.
+    /// </summary>
+    private async Task ShowDialogWithOwnerAsync(Window dialog)
+    {
+        var owner = TopLevel.GetTopLevel(this) as Window;
+        if (owner != null)
+        {
+            await dialog.ShowDialog(owner);
+        }
+        else
+        {
+            dialog.Show();
+        }
+    }
+
+    private async Task<bool> ShowConfirmDialogAsync(string title, string message, string confirmLabel = "Confirm")
     {
         var tcs = new TaskCompletionSource<bool>();
         var dialog = new Window
@@ -1962,25 +2151,7 @@ public partial class DockerDiagnosticsView : UserControl
 
         var mainPanel = new StackPanel { Spacing = 16 };
 
-        var headerPanel = new StackPanel { Spacing = 6 };
-        var titleText = new TextBlock
-        {
-            Text = title,
-            FontSize = 15,
-            FontWeight = FontWeight.Bold,
-            Foreground = Brush.Parse("#E05252") // Warning/Danger Red
-        };
-        var separator = new Border
-        {
-            Height = 2,
-            Background = Brush.Parse("#E05252"),
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Width = 60,
-            Margin = new Thickness(0, 2, 0, 8)
-        };
-        headerPanel.Children.Add(titleText);
-        headerPanel.Children.Add(separator);
-        mainPanel.Children.Add(headerPanel);
+        mainPanel.Children.Add(CreateDialogHeader(title, RedColor));
 
         var msgText = new TextBlock
         {
@@ -2002,18 +2173,20 @@ public partial class DockerDiagnosticsView : UserControl
 
         var yesBtn = new Button
         {
-            Content = "Yes, Prune",
+            Content = confirmLabel,
             FontWeight = FontWeight.SemiBold,
-            Background = Brush.Parse("#D32F2F"), // Accent Red
-            Foreground = Brushes.White,
+            Background = RedColor,
+            Foreground = OnAccentColor,
             Padding = new Thickness(16, 8),
-            CornerRadius = new CornerRadius(4)
+            CornerRadius = InnerCornerRadius
         };
         var noBtn = new Button
         {
             Content = "Cancel",
             Padding = new Thickness(16, 8),
-            CornerRadius = new CornerRadius(4)
+            CornerRadius = InnerCornerRadius,
+            // Cancel is the safe default on a destructive prompt: Escape dismisses, Enter does NOT confirm.
+            IsCancel = true
         };
 
         yesBtn.Command = new RelayCommand(() =>
@@ -2040,21 +2213,37 @@ public partial class DockerDiagnosticsView : UserControl
         dialog.Content = wrapper;
         dialog.Closed += (s, e) => { tcs.TrySetResult(false); };
 
-        var owner = TopLevel.GetTopLevel(this) as Window;
-        if (owner != null)
-        {
-            await dialog.ShowDialog(owner);
-        }
-        else
-        {
-            dialog.Show();
-        }
+        await ShowDialogWithOwnerAsync(dialog);
 
         return await tcs.Task;
     }
 
+    // Sentinel returned by the build dialog for the repository-pinned, checksum-verified build.
+    private const string PinnedBuildSelection = "pinned";
+    private const string PinnedBuildLabel = "Pinned (recommended)";
+
+    /// <summary>
+    /// Prompts for the oss-cad-suite version to build locally. Returns <see cref="PinnedBuildSelection"/>
+    /// for the repository-pinned build, a YYYY-MM-DD release tag for a specific GitHub release, or null
+    /// if cancelled. The version list is fetched from GitHub up front; if that fails, only the pinned
+    /// build is offered.
+    /// </summary>
     private async Task<string?> ShowBuildDialogAsync()
     {
+        IReadOnlyList<string> versions = Array.Empty<string>();
+        string? fetchNote = null;
+        try
+        {
+            ShowTemporaryStatus("Querying available oss-cad-suite versions from GitHub...");
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            versions = await ContainerExtension.Services.GitHubReleaseClient.GetRecentReleaseTagsAsync(20, cts.Token).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            fetchNote = "Could not reach GitHub; only the repository-pinned build is available.";
+            ContainerTelemetry.TrackError("DockerDiagnosticsView", "ShowBuildDialog_FetchVersions", ex);
+        }
+
         var tcs = new TaskCompletionSource<string?>();
         var dialog = new Window
         {
@@ -2066,45 +2255,47 @@ public partial class DockerDiagnosticsView : UserControl
         };
 
         var mainPanel = new StackPanel { Spacing = 16 };
-
-        var headerPanel = new StackPanel { Spacing = 6 };
-        var titleText = new TextBlock
+        mainPanel.Children.Add(CreateDialogHeader("Build Local FPGA Toolchain Image", AccentColor));
+        mainPanel.Children.Add(new TextBlock
         {
-            Text = "Build Local FPGA Toolchain Image",
-            FontSize = 15,
-            FontWeight = FontWeight.Bold,
-            Foreground = Brush.Parse("#007ACC") // Info Blue
-        };
-        var separator = new Border
-        {
-            Height = 2,
-            Background = Brush.Parse("#007ACC"),
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Width = 60,
-            Margin = new Thickness(0, 2, 0, 8)
-        };
-        headerPanel.Children.Add(titleText);
-        headerPanel.Children.Add(separator);
-        mainPanel.Children.Add(headerPanel);
-
-        var msgText = new TextBlock
-        {
-            Text = "How would you like to build the local FPGA toolchain image?",
+            Text = "Select the oss-cad-suite version to compile locally from source:",
             TextWrapping = TextWrapping.Wrap,
             FontSize = 13,
             FontWeight = FontWeight.SemiBold
-        };
-        mainPanel.Children.Add(msgText);
+        });
 
-        var detailsText = new TextBlock
+        var versionCombo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
+        versionCombo.Items.Add(PinnedBuildLabel);
+        foreach (var v in versions)
         {
-            Text = "• Build Pinned: Compiles the stable version defined locally in the repository.\n• Build Latest: Queries the GitHub API to fetch and compile the newest nightly release from YosysHQ.",
+            versionCombo.Items.Add(v);
+        }
+        versionCombo.SelectedIndex = 0;
+        AutomationProperties.SetName(versionCombo, "oss-cad-suite version to build");
+        mainPanel.Children.Add(versionCombo);
+
+        mainPanel.Children.Add(new TextBlock
+        {
+            Text = "Pinned builds the version verified in the repository. Choosing a dated release fetches that "
+                 + "tarball and its GitHub-published checksum so the build stays integrity-checked. Builds run as "
+                 + "linux/amd64 because GHDL is not compiled in the upstream arm64 releases.",
             TextWrapping = TextWrapping.Wrap,
             FontSize = 12,
             LineHeight = 18,
             Opacity = 0.75
-        };
-        mainPanel.Children.Add(detailsText);
+        });
+
+        if (fetchNote != null)
+        {
+            mainPanel.Children.Add(new TextBlock
+            {
+                Text = fetchNote,
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 11,
+                FontStyle = FontStyle.Italic,
+                Foreground = RedColor
+            });
+        }
 
         var buttonPanel = new StackPanel
         {
@@ -2113,549 +2304,41 @@ public partial class DockerDiagnosticsView : UserControl
             Spacing = 10,
             Margin = new Thickness(0, 10, 0, 0)
         };
-
-        var pinnedBtn = new Button
-        {
-            Content = "Build Pinned",
-            Padding = new Thickness(16, 8),
-            CornerRadius = new CornerRadius(4)
-        };
-        var latestBtn = new Button
-        {
-            Content = "Build Latest",
-            FontWeight = FontWeight.SemiBold,
-            Background = Brush.Parse("#007ACC"), // Accent Blue
-            Foreground = Brushes.White,
-            Padding = new Thickness(16, 8),
-            CornerRadius = new CornerRadius(4)
-        };
         var cancelBtn = new Button
         {
             Content = "Cancel",
             Padding = new Thickness(16, 8),
-            CornerRadius = new CornerRadius(4)
+            CornerRadius = InnerCornerRadius,
+            IsCancel = true
         };
-
-        pinnedBtn.Command = new RelayCommand(() =>
+        var buildBtn = new Button
         {
-            tcs.TrySetResult("pinned");
-            dialog.Close();
-        });
-        latestBtn.Command = new RelayCommand(() =>
+            Content = "Build",
+            FontWeight = FontWeight.SemiBold,
+            Background = AccentColor,
+            Foreground = OnAccentColor,
+            Padding = new Thickness(16, 8),
+            CornerRadius = InnerCornerRadius,
+            // Enter confirms the primary build action; safe here (non-destructive).
+            IsDefault = true
+        };
+        cancelBtn.Command = new RelayCommand(() => { tcs.TrySetResult(null); dialog.Close(); });
+        buildBtn.Command = new RelayCommand(() =>
         {
-            tcs.TrySetResult("latest");
-            dialog.Close();
-        });
-        cancelBtn.Command = new RelayCommand(() =>
-        {
-            tcs.TrySetResult(null);
+            var selected = versionCombo.SelectedItem as string;
+            tcs.TrySetResult(string.IsNullOrEmpty(selected) || selected == PinnedBuildLabel ? PinnedBuildSelection : selected);
             dialog.Close();
         });
 
         buttonPanel.Children.Add(cancelBtn);
-        buttonPanel.Children.Add(pinnedBtn);
-        buttonPanel.Children.Add(latestBtn);
+        buttonPanel.Children.Add(buildBtn);
         mainPanel.Children.Add(buttonPanel);
 
-        var wrapper = new Border
-        {
-            Padding = new Thickness(24),
-            Child = mainPanel
-        };
-
-        dialog.Content = wrapper;
+        dialog.Content = new Border { Padding = new Thickness(24), Child = mainPanel };
         dialog.Closed += (s, e) => { tcs.TrySetResult(null); };
 
-        var owner = TopLevel.GetTopLevel(this) as Window;
-        if (owner != null)
-        {
-            await dialog.ShowDialog(owner);
-        }
-        else
-        {
-            dialog.Show();
-        }
-
+        await ShowDialogWithOwnerAsync(dialog);
         return await tcs.Task;
-    }
-
-    private Panel CreateFormItem(string label, string desc, Control control)
-    {
-        var panel = new StackPanel { Spacing = 2, Margin = new Thickness(0, 0, 0, 10) };
-        panel.Children.Add(new TextBlock { Text = label, FontSize = 12, FontWeight = FontWeight.SemiBold, Foreground = FontColor });
-        if (!string.IsNullOrEmpty(desc))
-        {
-            panel.Children.Add(new TextBlock { Text = desc, FontSize = 10, Foreground = MutedColor, TextWrapping = TextWrapping.Wrap });
-        }
-        panel.Children.Add(control);
-        return panel;
-    }
-
-    private Panel CreateFormSectionHeader(string title)
-    {
-        var panel = new StackPanel { Spacing = 4, Margin = new Thickness(0, 12, 0, 8) };
-        panel.Children.Add(new TextBlock { Text = title, FontSize = 11, FontWeight = FontWeight.Bold, Foreground = AccentColor });
-        panel.Children.Add(new Border { Height = 1, Background = MutedColor, Opacity = 0.2 });
-        return panel;
-    }
-
-    private async Task ShowSettingsDialogAsync()
-    {
-        var dialog = new Window
-        {
-            Title = "Configure Container Engine Settings",
-            MinWidth = 520,
-            MinHeight = 500,
-            Width = 520,
-            Height = 650,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            CanResize = true
-        };
-
-        var mainGrid = new Grid
-        {
-            RowDefinitions = new RowDefinitions("Auto,*,Auto,Auto"),
-            RowSpacing = 16
-        };
-
-        var headerPanel = new StackPanel { Spacing = 6 };
-        var titleText = new TextBlock
-        {
-            Text = "Container Engine Settings",
-            FontSize = 15,
-            FontWeight = FontWeight.Bold,
-            Foreground = AccentColor
-        };
-        var separator = new Border
-        {
-            Height = 2,
-            Background = AccentColor,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Width = 60,
-            Margin = new Thickness(0, 2, 0, 8)
-        };
-        headerPanel.Children.Add(titleText);
-        headerPanel.Children.Add(separator);
-        Grid.SetRow(headerPanel, 0);
-        mainGrid.Children.Add(headerPanel);
-
-        var formPanel = new StackPanel { Spacing = 12 };
-
-        // 1. IMAGE & EXECUTION
-        formPanel.Children.Add(CreateFormSectionHeader("IMAGE & EXECUTION"));
-
-        var defaultImage = _settingsService.SafeGetSetting(ContainerExtensionModule.DefaultImageSetting, ContainerExtensionModule.FallbackImage);
-        var defaultImageTextBox = new TextBox { Text = defaultImage, FontSize = 12, MinHeight = 28, VerticalContentAlignment = VerticalAlignment.Center };
-        formPanel.Children.Add(CreateFormItem("Default Toolchain Image", "The default container image to pull and use for all tools.", defaultImageTextBox));
-
-        var pullPolicy = _settingsService.SafeGetSetting(ContainerExtensionModule.PullPolicySetting, "if-not-present");
-        var pullPolicyComboBox = new ComboBox
-        {
-            ItemsSource = new[] { "always", "if-not-present", "never" },
-            SelectedItem = pullPolicy,
-            FontSize = 12,
-            HorizontalAlignment = HorizontalAlignment.Stretch
-        };
-        formPanel.Children.Add(CreateFormItem("Image Pull Policy", "Determines when the plugin should pull images from the registry.", pullPolicyComboBox));
-
-        var platform = _settingsService.SafeGetSetting(ContainerExtensionModule.PlatformSetting, "auto");
-        var platformComboBox = new ComboBox
-        {
-            ItemsSource = new[] { "auto", "linux/amd64", "linux/arm64", "linux/arm/v7" },
-            SelectedItem = platform,
-            FontSize = 12,
-            HorizontalAlignment = HorizontalAlignment.Stretch
-        };
-        formPanel.Children.Add(CreateFormItem("Image Platform", "Forces a specific system architecture platform when running containers.", platformComboBox));
-
-        var networkMode = _settingsService.SafeGetSetting(ContainerExtensionModule.NetworkModeSetting, "bridge");
-        var networkModeComboBox = new ComboBox
-        {
-            ItemsSource = new[] { "bridge", "host", "none" },
-            SelectedItem = networkMode,
-            FontSize = 12,
-            HorizontalAlignment = HorizontalAlignment.Stretch
-        };
-        formPanel.Children.Add(CreateFormItem("Network Mode", "The Docker network mode used for containerized tool executions.", networkModeComboBox));
-
-        // 2. RESOURCE LIMITS
-        formPanel.Children.Add(CreateFormSectionHeader("RESOURCE LIMITS"));
-
-        var totalRam = ContainerExtensionModule.GetHostMemoryMB();
-        var currentMem = _settingsService.SafeGetSetting<double>(ContainerExtensionModule.MemoryLimitSetting, 0);
-        var memValueText = new TextBlock { Text = currentMem == 0 ? "Unlimited" : $"{currentMem:N0} MB", Width = 90, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center, FontSize = 12, FontFamily = MonoFont };
-        var memSlider = new Slider { Minimum = 0, Maximum = totalRam, Value = currentMem, SmallChange = 256, LargeChange = 1024, TickFrequency = 256, IsSnapToTickEnabled = true, VerticalAlignment = VerticalAlignment.Center };
-        memSlider.ValueChanged += (s, e) =>
-        {
-            var val = Math.Round(memSlider.Value);
-            memValueText.Text = val == 0 ? "Unlimited" : $"{val:N0} MB";
-        };
-        var memGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,12,Auto") };
-        Grid.SetColumn(memSlider, 0);
-        Grid.SetColumn(memValueText, 2);
-        memGrid.Children.Add(memSlider);
-        memGrid.Children.Add(memValueText);
-        formPanel.Children.Add(CreateFormItem($"Memory Limit (0 = unlimited) — Max: {totalRam:N0} MB", "Restricts memory consumption of container tasks.", memGrid));
-
-        var totalCores = (double)Environment.ProcessorCount;
-        var currentCpu = _settingsService.SafeGetSetting<double>(ContainerExtensionModule.CpuLimitSetting, 0);
-        var cpuValueText = new TextBlock { Text = currentCpu == 0 ? "Unlimited" : $"{currentCpu:F1} Cores", Width = 90, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center, FontSize = 12, FontFamily = MonoFont };
-        var cpuSlider = new Slider { Minimum = 0, Maximum = totalCores, Value = currentCpu, SmallChange = 0.5, LargeChange = 1.0, TickFrequency = 0.5, IsSnapToTickEnabled = true, VerticalAlignment = VerticalAlignment.Center };
-        cpuSlider.ValueChanged += (s, e) =>
-        {
-            var val = Math.Round(cpuSlider.Value * 2.0) / 2.0;
-            cpuValueText.Text = val == 0 ? "Unlimited" : $"{val:F1} Cores";
-        };
-        var cpuGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,12,Auto") };
-        Grid.SetColumn(cpuSlider, 0);
-        Grid.SetColumn(cpuValueText, 2);
-        cpuGrid.Children.Add(cpuSlider);
-        cpuGrid.Children.Add(cpuValueText);
-        formPanel.Children.Add(CreateFormItem($"CPU Cores Limit (0 = unlimited) — Max: {totalCores:N0} Cores", "Restricts CPU cores usage for container tasks.", cpuGrid));
-
-        var currentTimeout = _settingsService.SafeGetSetting<double>(ContainerExtensionModule.TimeoutSetting, 0);
-        var timeoutValueText = new TextBlock { Text = currentTimeout == 0 ? "No timeout" : $"{currentTimeout:N0} min", Width = 90, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center, FontSize = 12, FontFamily = MonoFont };
-        var timeoutSlider = new Slider { Minimum = 0, Maximum = 480, Value = currentTimeout, SmallChange = 5, LargeChange = 30, TickFrequency = 5, IsSnapToTickEnabled = true, VerticalAlignment = VerticalAlignment.Center };
-        timeoutSlider.ValueChanged += (s, e) =>
-        {
-            var val = Math.Round(timeoutSlider.Value);
-            timeoutValueText.Text = val == 0 ? "No timeout" : $"{val:N0} min";
-        };
-        var timeoutGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,12,Auto") };
-        Grid.SetColumn(timeoutSlider, 0);
-        Grid.SetColumn(timeoutValueText, 2);
-        timeoutGrid.Children.Add(timeoutSlider);
-        timeoutGrid.Children.Add(timeoutValueText);
-        formPanel.Children.Add(CreateFormItem("Execution Timeout (0 = no timeout)", "Maximum execution time for containers before cancellation.", timeoutGrid));
-
-        // 3. CONTAINER CONFIG
-        formPanel.Children.Add(CreateFormSectionHeader("CONTAINER CONFIG"));
-
-        var autoRemoveSetting = _settingsService.SafeGetSetting(ContainerExtensionModule.AutoRemoveSetting, true);
-        var autoRemoveCheckBox = new CheckBox { Content = "Auto-Remove Containers on Completion", IsChecked = autoRemoveSetting, FontSize = 12 };
-        formPanel.Children.Add(CreateFormItem("Auto-Remove Containers", "Automatically delete containers once the executable process exits.", autoRemoveCheckBox));
-
-        var allowPrivileged = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowPrivilegedSetting, false);
-        var allowPrivilegedCheckBox = new CheckBox { Content = "Allow Privileged Containers", IsChecked = allowPrivileged, FontSize = 12 };
-        formPanel.Children.Add(CreateFormItem("Allow Privileged Mode", "Runs containers with privileged capabilities (required in some complex mounting setups).", allowPrivilegedCheckBox));
-
-        var namePrefix = _settingsService.SafeGetSetting(ContainerExtensionModule.ContainerNamePrefixSetting, "containerextension-");
-        var prefixTextBox = new TextBox { Text = namePrefix, FontSize = 12, MinHeight = 28, VerticalContentAlignment = VerticalAlignment.Center };
-        formPanel.Children.Add(CreateFormItem("Container Name Prefix", "Prefix assigned to all containers spawned by this extension.", prefixTextBox));
-
-        var extraFlags = _settingsService.SafeGetSetting(ContainerExtensionModule.ExtraFlagsSetting, "");
-        var extraFlagsTextBox = new TextBox { Text = extraFlags, FontSize = 12, MinHeight = 28, VerticalContentAlignment = VerticalAlignment.Center };
-        formPanel.Children.Add(CreateFormItem("Extra Container Labels", "Additional labels applied to containers (format: key=value,key2=value2).", extraFlagsTextBox));
-
-        // 4. LOGGING & DASHBOARD
-        formPanel.Children.Add(CreateFormSectionHeader("LOGGING & DASHBOARD"));
-
-        var logLevel = _settingsService.SafeGetSetting(ContainerExtensionModule.LogLevelSetting, "Verbose");
-        var logLevelComboBox = new ComboBox
-        {
-            ItemsSource = new[] { "Off", "Errors Only", "Info", "Verbose" },
-            SelectedItem = logLevel,
-            FontSize = 12,
-            HorizontalAlignment = HorizontalAlignment.Stretch
-        };
-        formPanel.Children.Add(CreateFormItem("Log Level", "Detail level for container task diagnostics logs.", logLevelComboBox));
-
-        var showTimestamps = _settingsService.SafeGetSetting(ContainerExtensionModule.ShowTimestampsSetting, true);
-        var showTimestampsCheckBox = new CheckBox { Content = "Include Timestamps in Logs", IsChecked = showTimestamps, FontSize = 12 };
-        formPanel.Children.Add(CreateFormItem("Timestamps", "Prepend time signatures to stdout/stderr in log windows.", showTimestampsCheckBox));
-
-        var dashboardRefresh = _settingsService.SafeGetSetting(ContainerExtensionModule.DashboardRefreshSetting, "Manual");
-        var refreshComboBox = new ComboBox
-        {
-            ItemsSource = new[] { "Manual", "2s", "5s", "10s", "15s", "30s", "60s", "120s" },
-            SelectedItem = dashboardRefresh,
-            FontSize = 12,
-            HorizontalAlignment = HorizontalAlignment.Stretch
-        };
-        formPanel.Children.Add(CreateFormItem("Dashboard Refresh", "Auto-refresh frequency for container list, images, and metrics.", refreshComboBox));
-
-        var telemetryRetention = _settingsService.SafeGetSetting(ContainerExtensionModule.TelemetryRetentionSetting, "100");
-        var retentionComboBox = new ComboBox
-        {
-            ItemsSource = new[] { "None", "25", "50", "100", "250", "500", "1000", "Unlimited" },
-            SelectedItem = telemetryRetention,
-            FontSize = 12,
-            HorizontalAlignment = HorizontalAlignment.Stretch
-        };
-        formPanel.Children.Add(CreateFormItem("Telemetry Retention", "Number of recent executions to retain in history logs.", retentionComboBox));
-
-        // 5. ADVANCED PATHS
-        formPanel.Children.Add(CreateFormSectionHeader("ADVANCED PATHS"));
-
-        var runtimePath = _settingsService.SafeGetSetting(ContainerExtensionModule.DockerRuntimePathSetting, "");
-        var runtimePathTextBox = new TextBox { Text = runtimePath, FontSize = 12, MinHeight = 28, VerticalContentAlignment = VerticalAlignment.Center };
-        var browseBtn = new Button { Content = "Browse...", FontSize = 11, Padding = new Thickness(10, 4) };
-        browseBtn.Command = new AsyncRelayCommand(async () =>
-        {
-            try
-            {
-#pragma warning disable CS0618
-                var openFileDialog = new OpenFileDialog
-                {
-                    Title = "Select Container Runtime Executable",
-                    AllowMultiple = false
-                };
-                var result = await openFileDialog.ShowAsync(dialog);
-                if (result != null && result.Length > 0)
-                {
-                    runtimePathTextBox.Text = result[0];
-                }
-#pragma warning restore CS0618
-            }
-            catch (Exception ex)
-            {
-                ContainerTelemetry.TrackError("DockerDiagnosticsView", "BrowseRuntimePath", ex);
-            }
-        });
-        var runtimeGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,8,Auto") };
-        Grid.SetColumn(runtimePathTextBox, 0);
-        Grid.SetColumn(browseBtn, 2);
-        runtimeGrid.Children.Add(runtimePathTextBox);
-        runtimeGrid.Children.Add(browseBtn);
-        formPanel.Children.Add(CreateFormItem("Container Runtime Path", "Explicit path to docker or podman binary (leave empty for system auto-detection).", runtimeGrid));
-
-        var customSocket = _settingsService.SafeGetSetting(ContainerExtensionModule.DaemonSocketSetting, "");
-        var socketTextBox = new TextBox { Text = customSocket, FontSize = 12, MinHeight = 28, VerticalContentAlignment = VerticalAlignment.Center };
-        formPanel.Children.Add(CreateFormItem("Custom Daemon Socket", "Overrides the standard DOCKER_HOST endpoint (e.g. unix:///var/run/docker.sock).", socketTextBox));
-
-        var scroll = new ScrollViewer
-        {
-            Content = formPanel
-        };
-        Grid.SetRow(scroll, 1);
-        mainGrid.Children.Add(scroll);
-
-        // Validation Error Label
-        var errorText = new TextBlock
-        {
-            Foreground = RedColor,
-            FontSize = 11,
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 4, 0, 4),
-            IsVisible = false
-        };
-        Grid.SetRow(errorText, 2);
-        mainGrid.Children.Add(errorText);
-
-        // Register error cleaner to auto-hide error text on any user edit
-        RegisterErrorCleaner(formPanel, errorText);
-
-        // Footer Grid
-        var footerGrid = new Grid
-        {
-            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
-            Margin = new Thickness(0, 10, 0, 0)
-        };
-
-        var resetBtn = new Button
-        {
-            Content = "Reset to Defaults",
-            Padding = new Thickness(14, 8),
-            CornerRadius = new CornerRadius(4),
-            Background = Brush.Parse("#1AFFFFFF"),
-            Foreground = FontColor,
-            BorderBrush = Brush.Parse("#2D2D30"),
-            BorderThickness = new Thickness(1)
-        };
-
-        var rightButtonPanel = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 10
-        };
-
-        var saveBtn = new Button
-        {
-            Content = "Save Settings",
-            FontWeight = FontWeight.SemiBold,
-            Background = AccentColor,
-            Foreground = Brushes.White,
-            Padding = new Thickness(16, 8),
-            CornerRadius = new CornerRadius(4)
-        };
-        var cancelBtn = new Button
-        {
-            Content = "Cancel",
-            Padding = new Thickness(16, 8),
-            CornerRadius = new CornerRadius(4)
-        };
-
-        rightButtonPanel.Children.Add(cancelBtn);
-        rightButtonPanel.Children.Add(saveBtn);
-
-        Grid.SetColumn(resetBtn, 0);
-        Grid.SetColumn(rightButtonPanel, 2);
-        footerGrid.Children.Add(resetBtn);
-        footerGrid.Children.Add(rightButtonPanel);
-        Grid.SetRow(footerGrid, 3);
-        mainGrid.Children.Add(footerGrid);
-
-        resetBtn.Command = new RelayCommand(() =>
-        {
-            defaultImageTextBox.Text = ContainerExtensionModule.FallbackImage;
-            pullPolicyComboBox.SelectedItem = "if-not-present";
-            platformComboBox.SelectedItem = "auto";
-            networkModeComboBox.SelectedItem = "bridge";
-
-            memSlider.Value = 0;
-            cpuSlider.Value = 0;
-            timeoutSlider.Value = 0;
-
-            autoRemoveCheckBox.IsChecked = true;
-            allowPrivilegedCheckBox.IsChecked = false;
-            prefixTextBox.Text = "containerextension-";
-            extraFlagsTextBox.Text = "";
-
-            logLevelComboBox.SelectedItem = "Verbose";
-            showTimestampsCheckBox.IsChecked = true;
-            refreshComboBox.SelectedItem = "Manual";
-            retentionComboBox.SelectedItem = "100";
-
-            runtimePathTextBox.Text = "";
-            socketTextBox.Text = "";
-
-            errorText.IsVisible = false;
-        });
-
-        saveBtn.Command = new RelayCommand(() =>
-        {
-            // Perform validations
-            var imageVal = new ContainerExtension.Validations.DockerImageFormatValidation(allowEmpty: false);
-            var prefixVal = new ContainerExtension.Validations.ContainerNameValidation();
-            var socketVal = new ContainerExtension.Validations.DaemonSocketValidation();
-            var memVal = new ContainerExtension.Validations.ResourceThresholdValidation(totalRam * 0.75, totalRam, "memory");
-            var cpuVal = new ContainerExtension.Validations.ResourceThresholdValidation(totalCores * 0.75, totalCores, "CPU");
-
-            string? warn;
-            if (!imageVal.Validate(defaultImageTextBox.Text, out warn))
-            {
-                errorText.Text = $"Image Error: {warn}";
-                errorText.IsVisible = true;
-                return;
-            }
-            if (!prefixVal.Validate(prefixTextBox.Text, out warn))
-            {
-                errorText.Text = $"Prefix Error: {warn}";
-                errorText.IsVisible = true;
-                return;
-            }
-            if (!socketVal.Validate(socketTextBox.Text, out warn))
-            {
-                errorText.Text = $"Socket Error: {warn}";
-                errorText.IsVisible = true;
-                return;
-            }
-            if (!memVal.Validate(memSlider.Value, out warn))
-            {
-                errorText.Text = $"Memory Limit Error: {warn}";
-                errorText.IsVisible = true;
-                return;
-            }
-            if (!cpuVal.Validate(cpuSlider.Value, out warn))
-            {
-                errorText.Text = $"CPU limit Error: {warn}";
-                errorText.IsVisible = true;
-                return;
-            }
-
-            try
-            {
-                _settingsService.SetSettingValue(ContainerExtensionModule.DefaultImageSetting, defaultImageTextBox.Text?.Trim() ?? "");
-                _settingsService.SetSettingValue(ContainerExtensionModule.PullPolicySetting, pullPolicyComboBox.SelectedItem as string ?? "");
-                _settingsService.SetSettingValue(ContainerExtensionModule.PlatformSetting, platformComboBox.SelectedItem as string ?? "");
-                _settingsService.SetSettingValue(ContainerExtensionModule.NetworkModeSetting, networkModeComboBox.SelectedItem as string ?? "");
-
-                _settingsService.SetSettingValue(ContainerExtensionModule.MemoryLimitSetting, Math.Round(memSlider.Value));
-                _settingsService.SetSettingValue(ContainerExtensionModule.CpuLimitSetting, Math.Round(cpuSlider.Value * 2.0) / 2.0);
-                _settingsService.SetSettingValue(ContainerExtensionModule.TimeoutSetting, Math.Round(timeoutSlider.Value));
-
-                _settingsService.SetSettingValue(ContainerExtensionModule.AutoRemoveSetting, autoRemoveCheckBox.IsChecked == true);
-                _settingsService.SetSettingValue(ContainerExtensionModule.AllowPrivilegedSetting, allowPrivilegedCheckBox.IsChecked == true);
-                _settingsService.SetSettingValue(ContainerExtensionModule.ContainerNamePrefixSetting, prefixTextBox.Text?.Trim() ?? "");
-                _settingsService.SetSettingValue(ContainerExtensionModule.ExtraFlagsSetting, extraFlagsTextBox.Text?.Trim() ?? "");
-
-                _settingsService.SetSettingValue(ContainerExtensionModule.LogLevelSetting, logLevelComboBox.SelectedItem as string ?? "");
-                _settingsService.SetSettingValue(ContainerExtensionModule.ShowTimestampsSetting, showTimestampsCheckBox.IsChecked == true);
-                _settingsService.SetSettingValue(ContainerExtensionModule.DashboardRefreshSetting, refreshComboBox.SelectedItem as string ?? "");
-                _settingsService.SetSettingValue(ContainerExtensionModule.TelemetryRetentionSetting, retentionComboBox.SelectedItem as string ?? "");
-
-                _settingsService.SetSettingValue(ContainerExtensionModule.DockerRuntimePathSetting, runtimePathTextBox.Text?.Trim() ?? "");
-                _settingsService.SetSettingValue(ContainerExtensionModule.DaemonSocketSetting, socketTextBox.Text?.Trim() ?? "");
-
-                _ = RefreshAllAsync(); // Refresh dashboard display
-                dialog.Close();
-            }
-            catch (Exception ex)
-            {
-                errorText.Text = $"Save Error: {ex.Message}";
-                errorText.IsVisible = true;
-                ContainerTelemetry.TrackError("DockerDiagnosticsView", "SaveSettings", ex);
-            }
-        });
-
-        cancelBtn.Command = new RelayCommand(() => dialog.Close());
-
-        var wrapper = new Border
-        {
-            Padding = new Thickness(24),
-            Child = mainGrid
-        };
-
-        dialog.Content = wrapper;
-
-        var owner = TopLevel.GetTopLevel(this) as Window;
-        if (owner != null)
-        {
-            await dialog.ShowDialog(owner);
-        }
-        else
-        {
-            dialog.Show();
-        }
-    }
-
-    private static void RegisterErrorCleaner(Avalonia.Controls.Control control, Avalonia.Controls.TextBlock errorText)
-    {
-        if (control is Avalonia.Controls.TextBox tb)
-        {
-            tb.TextChanged += (s, e) => errorText.IsVisible = false;
-        }
-        else if (control is Avalonia.Controls.ComboBox cb)
-        {
-            cb.SelectionChanged += (s, e) => errorText.IsVisible = false;
-        }
-        else if (control is Avalonia.Controls.Slider sl)
-        {
-            sl.ValueChanged += (s, e) => errorText.IsVisible = false;
-        }
-        else if (control is Avalonia.Controls.CheckBox chk)
-        {
-            chk.IsCheckedChanged += (s, e) => errorText.IsVisible = false;
-        }
-        else if (control is Avalonia.Controls.Panel panel)
-        {
-            foreach (var child in panel.Children)
-            {
-                RegisterErrorCleaner(child, errorText);
-            }
-        }
-        else if (control is Avalonia.Controls.ContentControl cc && cc.Content is Avalonia.Controls.Control childControl)
-        {
-            RegisterErrorCleaner(childControl, errorText);
-        }
-        else if (control is Avalonia.Controls.ScrollViewer sv && sv.Content is Avalonia.Controls.Control svChild)
-        {
-            RegisterErrorCleaner(svChild, errorText);
-        }
-        else if (control is Avalonia.Controls.Border border && border.Child is Avalonia.Controls.Control borderChild)
-        {
-            RegisterErrorCleaner(borderChild, errorText);
-        }
     }
 
     private static readonly string CachedPluginVersion = GetPluginVersionString();
@@ -2686,7 +2369,8 @@ public partial class DockerDiagnosticsView : UserControl
         valText = new TextBlock
         {
             Text = initialVal,
-            FontSize = 16,
+            FontFamily = MonoFont, // tabular monospace for the most-glanced numeric KPIs
+            FontSize = MetricFontSize,
             FontWeight = FontWeight.Bold,
             Foreground = FontColor
         };
@@ -2722,11 +2406,10 @@ public partial class DockerDiagnosticsView : UserControl
         return new Border
         {
             Background = CardBg,
-            CornerRadius = new CornerRadius(6),
-            BorderThickness = new Thickness(1),
-            BorderBrush = Brush.Parse("#2D2D30"),
-            Child = grid,
-            Margin = new Thickness(0, 0, 6, 0)
+            CornerRadius = CardCornerRadius,
+            BorderThickness = HairlineThickness,
+            BorderBrush = BorderColor,
+            Child = grid
         };
     }
 }

@@ -139,16 +139,18 @@ public partial class DockerDiagnosticsView
                         HorizontalAlignment = HorizontalAlignment.Left
                     };
                     ToolTip.SetTip(saveBtn, "Save the full log output as a .txt file");
+                    Avalonia.Automation.AutomationProperties.SetName(saveBtn, "Save container logs to file");
 
                     var scrollToEndBtn = new Button
                     {
-                        Content = "Scroll to End ↓",
+                        Content = "Scroll to End",
                         FontSize = 10,
                         Padding = new Thickness(8, 4),
                         Margin = new Thickness(12, 4, 0, 0),
                         HorizontalAlignment = HorizontalAlignment.Left,
                         IsVisible = false
                     };
+                    Avalonia.Automation.AutomationProperties.SetName(scrollToEndBtn, "Scroll to end of logs");
 
                     var filterTextBox = new TextBox
                     {
@@ -157,6 +159,7 @@ public partial class DockerDiagnosticsView
                         Margin = new Thickness(12, 4, 12, 0),
                         VerticalAlignment = VerticalAlignment.Center
                     };
+                    Avalonia.Automation.AutomationProperties.SetName(filterTextBox, "Filter log lines");
 
                     var detailsGrid = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
                     var logWindow = new Window
@@ -321,7 +324,7 @@ public partial class DockerDiagnosticsView
                                         await writer.WriteAsync(liveLogText).ConfigureAwait(false);
                                     });
 
-                                    saveBtn.Content = $"Saved ✓";
+                                    saveBtn.Content = "Saved";
                                     return;
                                 }
                             }
@@ -332,7 +335,7 @@ public partial class DockerDiagnosticsView
                         catch (Exception ex)
                         {
                             ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "LogsSaveToFile", ex);
-                            saveBtn.Content = "Save failed ✗";
+                            saveBtn.Content = "Save failed";
                             ToolTip.SetTip(saveBtn, $"Export failed: {ex.Message}");
                             await Task.Delay(3000);
                             saveBtn.Content = "Save Logs";
@@ -575,190 +578,22 @@ public partial class DockerDiagnosticsView
             }
         });
 
-        _stopCommand = new AsyncRelayCommand<string>(async (containerId) =>
+        _stopCommand = new AsyncRelayCommand<string>(containerId =>
+            RunContainerActionAsync(containerId, "stop", "Stop", "Stopping", "stopped", id => _strategy.StopContainerAsync(id)));
+
+        _startCommand = new AsyncRelayCommand<string>(containerId =>
+            RunContainerActionAsync(containerId, "start", "Start", "Starting", "started", id => _strategy.StartContainerAsync(id)));
+
+        _removeCommand = new AsyncRelayCommand<string>(async containerId =>
         {
             if (string.IsNullOrEmpty(containerId)) return;
-            if (IsDebounced($"stop_{containerId}", 1000)) return;
-
-            Grid? rowGrid = null;
-            StackPanel? panel = null;
-            Button? btn = null;
-
-            await Dispatcher.UIThread.InvokeAsync(() =>
+            // Single-item deletion must match the confirmation rigor of the bulk prune actions.
+            var confirmName = GetContainerDisplayName(containerId);
+            if (!await ShowConfirmDialogAsync("Remove Container", $"Remove container '{confirmName}'? This is permanent and cannot be undone.", "Remove"))
             {
-                rowGrid = _containersContent.Children.OfType<Grid>().FirstOrDefault(g => string.Equals(g.Tag as string, containerId, StringComparison.Ordinal));
-                if (rowGrid != null)
-                {
-                    panel = rowGrid.Children.OfType<StackPanel>().FirstOrDefault();
-                    if (panel != null)
-                    {
-                        btn = panel.Children.OfType<Button>().FirstOrDefault(b => string.Equals(b.Tag as string, "stop", StringComparison.Ordinal));
-                    }
-                }
-            });
-
-            if (btn == null || panel == null) return;
-
-            var displayName = GetContainerDisplayName(containerId);
-            var prevTip = ToolTip.GetTip(btn);
-            try
-            {
-                ShowTemporaryStatus($"Stopping container '{displayName}'...");
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    panel.IsEnabled = false;
-                    var stopText = new TextBlock { Text = "Stopping...", VerticalAlignment = VerticalAlignment.Center };
-                    var stopProgress = new ProgressBar { IsIndeterminate = true, Width = 40, Height = 4, Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
-                    var stopStack = new StackPanel { Orientation = Orientation.Horizontal };
-                    stopStack.Children.Add(stopText);
-                    stopStack.Children.Add(stopProgress);
-                    btn.Content = stopStack;
-                });
-
-                await _strategy.StopContainerAsync(containerId);
-                await RefreshAllAsync();
-                ShowTemporaryStatus($"Container '{displayName}' stopped successfully.");
+                return;
             }
-            catch (Exception ex)
-            {
-                ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Action_StopContainer", ex);
-                ShowTemporaryError($"Failed to stop container '{displayName}'", ex);
-                await Dispatcher.UIThread.InvokeAsync(async () =>
-                {
-                    if (!_hasAttached) return;
-                    btn.Content = "Error ✗";
-                    ToolTip.SetTip(btn, $"Failed to stop: {ex.Message}");
-                    await Task.Delay(3000);
-                    if (!_hasAttached) return;
-                    btn.Content = "Stop";
-                    ToolTip.SetTip(btn, prevTip);
-                    panel.IsEnabled = true;
-                });
-            }
-        });
-
-        _startCommand = new AsyncRelayCommand<string>(async (containerId) =>
-        {
-            if (string.IsNullOrEmpty(containerId)) return;
-            if (IsDebounced($"start_{containerId}", 1000)) return;
-
-            Grid? rowGrid = null;
-            StackPanel? panel = null;
-            Button? btn = null;
-
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                rowGrid = _containersContent.Children.OfType<Grid>().FirstOrDefault(g => string.Equals(g.Tag as string, containerId, StringComparison.Ordinal));
-                if (rowGrid != null)
-                {
-                    panel = rowGrid.Children.OfType<StackPanel>().FirstOrDefault();
-                    if (panel != null)
-                    {
-                        btn = panel.Children.OfType<Button>().FirstOrDefault(b => string.Equals(b.Tag as string, "start", StringComparison.Ordinal));
-                    }
-                }
-            });
-
-            if (btn == null || panel == null) return;
-
-            var displayName = GetContainerDisplayName(containerId);
-            var prevTip = ToolTip.GetTip(btn);
-            try
-            {
-                ShowTemporaryStatus($"Starting container '{displayName}'...");
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    panel.IsEnabled = false;
-                    var startText = new TextBlock { Text = "Starting...", VerticalAlignment = VerticalAlignment.Center };
-                    var startProgress = new ProgressBar { IsIndeterminate = true, Width = 40, Height = 4, Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
-                    var startStack = new StackPanel { Orientation = Orientation.Horizontal };
-                    startStack.Children.Add(startText);
-                    startStack.Children.Add(startProgress);
-                    btn.Content = startStack;
-                });
-
-                await _strategy.StartContainerAsync(containerId);
-                await RefreshAllAsync();
-                ShowTemporaryStatus($"Container '{displayName}' started successfully.");
-            }
-            catch (Exception ex)
-            {
-                ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Action_StartContainer", ex);
-                ShowTemporaryError($"Failed to start container '{displayName}'", ex);
-                await Dispatcher.UIThread.InvokeAsync(async () =>
-                {
-                    if (!_hasAttached) return;
-                    btn.Content = "Error ✗";
-                    ToolTip.SetTip(btn, $"Failed to start: {ex.Message}");
-                    await Task.Delay(3000);
-                    if (!_hasAttached) return;
-                    btn.Content = "Start";
-                    ToolTip.SetTip(btn, prevTip);
-                    panel.IsEnabled = true;
-                });
-            }
-        });
-
-        _removeCommand = new AsyncRelayCommand<string>(async (containerId) =>
-        {
-            if (string.IsNullOrEmpty(containerId)) return;
-            if (IsDebounced($"remove_{containerId}", 1000)) return;
-
-            Grid? rowGrid = null;
-            StackPanel? panel = null;
-            Button? btn = null;
-
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                rowGrid = _containersContent.Children.OfType<Grid>().FirstOrDefault(g => string.Equals(g.Tag as string, containerId, StringComparison.Ordinal));
-                if (rowGrid != null)
-                {
-                    panel = rowGrid.Children.OfType<StackPanel>().FirstOrDefault();
-                    if (panel != null)
-                    {
-                        btn = panel.Children.OfType<Button>().FirstOrDefault(b => string.Equals(b.Tag as string, "remove", StringComparison.Ordinal));
-                    }
-                }
-            });
-
-            if (btn == null || panel == null) return;
-
-            var displayName = GetContainerDisplayName(containerId);
-            var prevTip = ToolTip.GetTip(btn);
-            try
-            {
-                ShowTemporaryStatus($"Removing container '{displayName}'...");
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    panel.IsEnabled = false;
-                    var rmText = new TextBlock { Text = "Removing...", VerticalAlignment = VerticalAlignment.Center };
-                    var rmProgress = new ProgressBar { IsIndeterminate = true, Width = 40, Height = 4, Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
-                    var rmStack = new StackPanel { Orientation = Orientation.Horizontal };
-                    rmStack.Children.Add(rmText);
-                    rmStack.Children.Add(rmProgress);
-                    btn.Content = rmStack;
-                });
-
-                await _strategy.RemoveContainerAsync(containerId);
-                await RefreshAllAsync();
-                ShowTemporaryStatus($"Container '{displayName}' removed successfully.");
-            }
-            catch (Exception ex)
-            {
-                ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "Action_RemoveContainer", ex);
-                ShowTemporaryError($"Failed to remove container '{displayName}'", ex);
-                await Dispatcher.UIThread.InvokeAsync(async () =>
-                {
-                    if (!_hasAttached) return;
-                    btn.Content = "Error ✗";
-                    ToolTip.SetTip(btn, $"Failed to remove: {ex.Message}");
-                    await Task.Delay(3000);
-                    if (!_hasAttached) return;
-                    btn.Content = "Remove";
-                    ToolTip.SetTip(btn, prevTip);
-                    panel.IsEnabled = true;
-                });
-            }
+            await RunContainerActionAsync(containerId, "remove", "Remove", "Removing", "removed", id => _strategy.RemoveContainerAsync(id));
         });
 
         _restartCommand = new AsyncRelayCommand<string>(async (containerId) =>
@@ -781,6 +616,78 @@ public partial class DockerDiagnosticsView
         });
     }
 
+    /// <summary>
+    /// Shared lifecycle driver for the per-row Stop/Start/Remove actions: debounces, locates the
+    /// row button by its buttonTag, swaps in a busy spinner, awaits the strategy call, refreshes,
+    /// and on failure restores the button with a transient error state. Factors out ~180 lines of
+    /// triplicated boilerplate so the behavior stays identical across actions. The verb
+    /// arguments are the imperative button label (restVerb, e.g. "Stop"), the progressive form
+    /// shown while busy (presentVerb, e.g. "Stopping"), and the past tense for the success banner
+    /// (pastVerb, e.g. "stopped").
+    /// </summary>
+    private async Task RunContainerActionAsync(string? containerId, string buttonTag,
+        string restVerb, string presentVerb, string pastVerb, Func<string, Task> op)
+    {
+        if (string.IsNullOrEmpty(containerId)) return;
+        if (IsDebounced($"{buttonTag}_{containerId}", 1000)) return;
+
+        Grid? rowGrid = null;
+        StackPanel? panel = null;
+        Button? btn = null;
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            rowGrid = _containersContent.Children.OfType<Grid>().FirstOrDefault(g => string.Equals(g.Tag as string, containerId, StringComparison.Ordinal));
+            if (rowGrid != null)
+            {
+                panel = rowGrid.Children.OfType<StackPanel>().FirstOrDefault();
+                if (panel != null)
+                {
+                    btn = panel.Children.OfType<Button>().FirstOrDefault(b => string.Equals(b.Tag as string, buttonTag, StringComparison.Ordinal));
+                }
+            }
+        });
+
+        if (btn == null || panel == null) return;
+
+        var displayName = GetContainerDisplayName(containerId);
+        var prevTip = ToolTip.GetTip(btn);
+        try
+        {
+            ShowTemporaryStatus($"{presentVerb} container '{displayName}'...");
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                panel.IsEnabled = false;
+                var busyText = new TextBlock { Text = $"{presentVerb}...", VerticalAlignment = VerticalAlignment.Center };
+                var busyProgress = new ProgressBar { IsIndeterminate = true, Width = 40, Height = 4, Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+                var busyStack = new StackPanel { Orientation = Orientation.Horizontal };
+                busyStack.Children.Add(busyText);
+                busyStack.Children.Add(busyProgress);
+                btn.Content = busyStack;
+            });
+
+            await op(containerId);
+            await RefreshAllAsync();
+            ShowTemporaryStatus($"Container '{displayName}' {pastVerb} successfully.");
+        }
+        catch (Exception ex)
+        {
+            ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", $"Action_{restVerb}Container", ex);
+            ShowTemporaryError($"Failed to {restVerb.ToLowerInvariant()} container '{displayName}'", ex);
+            await Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                if (!_hasAttached) return;
+                btn.Content = "Error";
+                ToolTip.SetTip(btn, $"Failed to {restVerb.ToLowerInvariant()}: {ex.Message}");
+                await Task.Delay(3000);
+                if (!_hasAttached) return;
+                btn.Content = restVerb;
+                ToolTip.SetTip(btn, prevTip);
+                panel.IsEnabled = true;
+            });
+        }
+    }
+
     private string GetContainerDisplayName(string containerId)
     {
         lock (_cachedDataLock)
@@ -799,7 +706,7 @@ public partial class DockerDiagnosticsView
     }
 
 
-    // -- Debouncer and Stats Cache State (F14, F15) ----------------------
+    // -- Debouncer and Stats Cache State ----------------------
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _lastActionTimes = new(StringComparer.Ordinal);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _liveStats = new(StringComparer.Ordinal);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _activeStatsQueries = new(StringComparer.Ordinal);
@@ -930,9 +837,9 @@ public partial class DockerDiagnosticsView
                     _recycledContainerRows.Add(grid);
                 }
             }
-            if (_recycledContainerRows.Count > 100)
+            if (_recycledContainerRows.Count > MaxRecycledRows)
             {
-                _recycledContainerRows.RemoveRange(100, _recycledContainerRows.Count - 100);
+                _recycledContainerRows.RemoveRange(MaxRecycledRows, _recycledContainerRows.Count - MaxRecycledRows);
             }
         }
         _containersContent.Children.Clear();
@@ -1028,14 +935,13 @@ public partial class DockerDiagnosticsView
               : searchable.OrderByDescending(c => c.Names?.FirstOrDefault()?.TrimStart('/') ?? c.ID.ShortId(), StringComparer.OrdinalIgnoreCase),
         };
 
-        var itemsToShow = _showAllContainers ? sorted : sorted.Take(15);
+        var itemsToShow = _showAllContainers ? sorted : sorted.Take(MaxVisibleRows);
         foreach (var c in itemsToShow)
         {
             var name = c.Names?.FirstOrDefault()?.TrimStart('/') ?? c.ID.ShortId();
             var image = Truncate(c.Image, 30);
             var isRunning = c.State?.Equals("running", StringComparison.OrdinalIgnoreCase) ?? false;
 
-            // Show live container CPU/RAM stats tags dynamically (F162)
             var statsStr = "";
             if (isRunning)
             {
@@ -1073,7 +979,6 @@ public partial class DockerDiagnosticsView
                 row.Children.Add(btnPanel);
             }
 
-            // Detailed visual network diagram representing container ports mappings (F154)
             var diagram = BuildNetworkDiagram(c.Ports);
             var rowToolTip = new TextBlock
             {
@@ -1100,6 +1005,7 @@ public partial class DockerDiagnosticsView
             logsBtn.Command ??= _logsCommand;
             logsBtn.CommandParameter = c.ID;
             ToolTip.SetTip(logsBtn, "View the stdout/stderr output of this container");
+            Avalonia.Automation.AutomationProperties.SetName(logsBtn, $"View logs for container {name}");
 
             var stopBtn = btnPanel.Children.OfType<Button>().FirstOrDefault(b => string.Equals(b.Tag as string, "stop", StringComparison.Ordinal));
             if (stopBtn == null)
@@ -1118,6 +1024,7 @@ public partial class DockerDiagnosticsView
             stopBtn.Content = "Stop";
             stopBtn.IsEnabled = true;
             ToolTip.SetTip(stopBtn, "Send a graceful stop signal to this running container");
+            Avalonia.Automation.AutomationProperties.SetName(stopBtn, $"Stop container {name}");
             stopBtn.IsVisible = isRunning;
 
             var startBtn = btnPanel.Children.OfType<Button>().FirstOrDefault(b => string.Equals(b.Tag as string, "start", StringComparison.Ordinal));
@@ -1137,6 +1044,7 @@ public partial class DockerDiagnosticsView
             startBtn.Content = "Start";
             startBtn.IsEnabled = true;
             ToolTip.SetTip(startBtn, "Restart this stopped container");
+            Avalonia.Automation.AutomationProperties.SetName(startBtn, $"Start container {name}");
             startBtn.IsVisible = !isRunning;
 
             var removeBtn = btnPanel.Children.OfType<Button>().FirstOrDefault(b => string.Equals(b.Tag as string, "remove", StringComparison.Ordinal));
@@ -1156,9 +1064,9 @@ public partial class DockerDiagnosticsView
             removeBtn.Content = "Remove";
             removeBtn.IsEnabled = true;
             ToolTip.SetTip(removeBtn, "Delete this stopped container and free its resources");
+            Avalonia.Automation.AutomationProperties.SetName(removeBtn, $"Remove container {name}");
             removeBtn.IsVisible = !isRunning;
 
-            // Add right-click context menu options to start, stop, restart, delete, and view logs (F163)
             var contextMenu = new ContextMenu();
             var menuItems = new List<MenuItem>();
 
@@ -1198,44 +1106,20 @@ public partial class DockerDiagnosticsView
             newChildren.Add(row);
         }
 
-        if (!_showAllContainers && searchable.Count > 15)
+        if (!_showAllContainers && searchable.Count > MaxVisibleRows)
         {
-            var remaining = searchable.Count - 15;
-            var showAllBtn = new Button
-            {
-                Content = $"... and {remaining} more (click to show all)",
-                Foreground = MutedColor,
-                Background = new SolidColorBrush(Colors.Transparent),
-                BorderBrush = new SolidColorBrush(Colors.Transparent),
-                FontSize = 11,
-                FontStyle = FontStyle.Italic,
-                Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
-                Command = new RelayCommand(() =>
-                {
-                    _showAllContainers = true;
-                    PopulateContainers(_cachedContainers);
-                })
-            };
-            newChildren.Add(showAllBtn);
+            var remaining = searchable.Count - MaxVisibleRows;
+            newChildren.Add(CreateToggleMoreButton(
+                $"... and {remaining} more (click to show all)",
+                () => { _showAllContainers = true; PopulateContainers(_cachedContainers); },
+                $"Show all {remaining} additional containers"));
         }
-        else if (_showAllContainers && searchable.Count > 15)
+        else if (_showAllContainers && searchable.Count > MaxVisibleRows)
         {
-            var showLessBtn = new Button
-            {
-                Content = "Show less",
-                Foreground = MutedColor,
-                Background = new SolidColorBrush(Colors.Transparent),
-                BorderBrush = new SolidColorBrush(Colors.Transparent),
-                FontSize = 11,
-                FontStyle = FontStyle.Italic,
-                Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
-                Command = new RelayCommand(() =>
-                {
-                    _showAllContainers = false;
-                    PopulateContainers(_cachedContainers);
-                })
-            };
-            newChildren.Add(showLessBtn);
+            newChildren.Add(CreateToggleMoreButton(
+                "Show less",
+                () => { _showAllContainers = false; PopulateContainers(_cachedContainers); },
+                "Show fewer containers"));
         }
 
         _containersContent.Children.AddRange(newChildren);
@@ -1288,28 +1172,21 @@ public partial class DockerDiagnosticsView
     private static string BuildNetworkDiagram(IList<Docker.DotNet.Models.Port> ports)
     {
         if (ports == null || ports.Count == 0) return "No active port mappings.";
+        // Plain, layout-tolerant text (no box-drawing art): each line maps host -> container, and
+        // alignment is left to the renderer so long IPv6/host strings cannot corrupt the layout.
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine("╔===========================================╗");
-        sb.AppendLine("║          PORT MAPPING DIAGRAM             ║");
-        sb.AppendLine("╠===========================================╣");
+        sb.AppendLine("Port mappings:");
         foreach (var p in ports)
         {
-            string lineContent;
             if (p.PublicPort != 0)
             {
-                var hostStr = $"{p.IP}:{p.PublicPort}";
-                var containerStr = $"{p.PrivatePort}/{p.Type}";
-                lineContent = $"[Host] {hostStr} -> [Cont] {containerStr}";
+                sb.AppendLine($"  host {p.IP}:{p.PublicPort} -> container {p.PrivatePort}/{p.Type}");
             }
             else
             {
-                lineContent = $"[Exposure] {p.PrivatePort}/{p.Type}";
+                sb.AppendLine($"  exposed {p.PrivatePort}/{p.Type}");
             }
-
-            var paddedContent = lineContent.Length > 39 ? lineContent[..39] : lineContent.PadRight(39);
-            sb.AppendLine($"║  {paddedContent}  ║");
         }
-        sb.AppendLine("╚===========================================╝");
-        return sb.ToString();
+        return sb.ToString().TrimEnd();
     }
 }

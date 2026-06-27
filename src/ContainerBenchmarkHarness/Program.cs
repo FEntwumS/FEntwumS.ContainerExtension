@@ -103,10 +103,29 @@ sealed class Program
         {
             if (args[i].Equals("--processes", StringComparison.Ordinal) && i + 1 < args.Length)
             {
-                processes = Math.Clamp(int.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture), 1, 16);
+                if (!int.TryParse(args[++i], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var p))
+                {
+                    await Console.Error.WriteLineAsync($"Invalid integer for --processes: '{args[i]}'").ConfigureAwait(false);
+                    return 2;
+                }
+                processes = Math.Clamp(p, 1, 16);
             }
-            else if (args[i].Equals("--threads", StringComparison.Ordinal) && i + 1 < args.Length) threads = int.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
-            else if (args[i].Equals("--iterations", StringComparison.Ordinal) && i + 1 < args.Length) iterations = int.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+            else if (args[i].Equals("--threads", StringComparison.Ordinal) && i + 1 < args.Length)
+            {
+                if (!int.TryParse(args[++i], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out threads))
+                {
+                    await Console.Error.WriteLineAsync($"Invalid integer for --threads: '{args[i]}'").ConfigureAwait(false);
+                    return 2;
+                }
+            }
+            else if (args[i].Equals("--iterations", StringComparison.Ordinal) && i + 1 < args.Length)
+            {
+                if (!int.TryParse(args[++i], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out iterations))
+                {
+                    await Console.Error.WriteLineAsync($"Invalid integer for --iterations: '{args[i]}'").ConfigureAwait(false);
+                    return 2;
+                }
+            }
             else if (args[i].Equals("--child", StringComparison.Ordinal)) isChild = true;
         }
 

@@ -1,5 +1,5 @@
 using System;
-using System.Runtime.Serialization; // Required for [OnDeserialized]
+using System.Runtime.Serialization;
 using OneWare.Essentials.ViewModels;
 using Avalonia;
 using OneWare.Essentials.Services;
@@ -85,13 +85,12 @@ public class DockerDiagnosticsViewModel : ExtendedTool
         KeepPinnedDockableVisible = true;
     }
 
-    // Intercept the JSON payload mapping to cleanly migrate the stale layout cache component
+    // Migrate a deserialized layout cache to the current dock identity.
     [OnDeserialized]
     private void OnDeserializedMethod(StreamingContext context)
     {
-        // Forcefully overwrite the stale cache payload properties (e.g., Id="Docker")
-        // with the correct modern identity. This seamlessly merges the restored tool
-        // with the programmatic layout registration and purges the Ghost icon fallback.
+        // Restored layouts carry the legacy Id="Docker"; rewrite to the current identity so the
+        // tool binds to the programmatic registration instead of falling back to a placeholder.
         Id = "Container_Dashboard";
         Title = ContainerExtensionModule.DashboardTitle;
         CanFloat = true;

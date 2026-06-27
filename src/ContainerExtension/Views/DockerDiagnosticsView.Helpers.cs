@@ -23,10 +23,6 @@ public partial class DockerDiagnosticsView
     private static readonly string CachedDesktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
     private static readonly string[] MetricUnits = { "B", "KB", "MB", "GB", "TB" };
 
-    // =======================================================================
-    //  Formatting Helpers
-    // =======================================================================
-
     /// <summary>Truncates a string to <paramref name="maxLen"/> characters, appending "..." if needed.</summary>
     private static string Truncate(string? s, int maxLen) =>
     string.IsNullOrEmpty(s) ? "" : s.Length <= maxLen ? s : string.Concat(s.AsSpan(0, maxLen - 3), "...");
@@ -78,10 +74,6 @@ public partial class DockerDiagnosticsView
         return string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{diff.Days / 365}y ago");
     }
 
-    // ====================================================================
-    //  Cross-platform launch helpers
-    // ====================================================================
-
     /// <summary>
     /// Opens a file or URL with the system's default application.
     /// Uses <c>open</c> on macOS, <c>xdg-open</c> on Linux, and <c>UseShellExecute</c> on Windows.
@@ -94,17 +86,17 @@ public partial class DockerDiagnosticsView
             {
                 var psi = new ProcessStartInfo("open");
                 psi.ArgumentList.Add(path);
-                Process.Start(psi);
+                using var _ = Process.Start(psi);
             }
             else if (OperatingSystem.IsWindows())
             {
-                Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+                using var _ = Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
             }
             else
             {
                 var psi = new ProcessStartInfo("xdg-open");
                 psi.ArgumentList.Add(path);
-                Process.Start(psi);
+                using var _ = Process.Start(psi);
             }
         }
         catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView.Helpers", "OpenWithSystemDefault", ex); }
@@ -124,36 +116,67 @@ public partial class DockerDiagnosticsView
     }
 
     /// <summary>
-    /// Launches the container runtime's desktop GUI application.
-    /// Best-effort: silently fails if the app is not installed.
+    /// The macOS application-bundle name, which differs from the display name: Docker Desktop ships
+    /// as <c>Docker.app</c>, so <c>open -a "Docker Desktop"</c> fails. Returns null for runtimes with
+    /// no launchable bundle.
     /// </summary>
-    private static void LaunchDesktopApp(string runtime)
+    private static string? GetMacOsAppBundle(string runtime)
     {
-        var appName = GetDesktopAppName(runtime);
-        if (appName == null) return;
+        if (string.IsNullOrEmpty(runtime)) return null;
+        if (runtime.Contains("orbstack", StringComparison.OrdinalIgnoreCase)) return "OrbStack";
+        if (runtime.Contains("podman", StringComparison.OrdinalIgnoreCase)) return "Podman Desktop";
+        if (runtime.Contains("docker", StringComparison.OrdinalIgnoreCase)) return "Docker";
+        return null;
+    }
+
+    /// <summary>Common Linux executable name for the runtime's desktop app, or null if none is known.</summary>
+    private static string? GetLinuxDesktopCommand(string runtime)
+    {
+        if (string.IsNullOrEmpty(runtime)) return null;
+        if (runtime.Contains("docker", StringComparison.OrdinalIgnoreCase)) return "docker-desktop";
+        if (runtime.Contains("podman", StringComparison.OrdinalIgnoreCase)) return "podman-desktop";
+        if (runtime.Contains("orbstack", StringComparison.OrdinalIgnoreCase)) return "orbstack";
+        return null;
+    }
+
+    /// <summary>
+    /// Launches the container runtime's desktop GUI application. Returns false when the launch could
+    /// not be initiated (app not installed, or the OS rejected the request) so the caller can notify
+    /// the user instead of failing silently. On macOS the <c>open</c> exit code is checked.
+    /// </summary>
+    private static bool LaunchDesktopApp(string runtime)
+    {
+        if (GetDesktopAppName(runtime) is null) return false;
 
         try
         {
             if (OperatingSystem.IsMacOS())
             {
-                Process.Start("open", new[] { "-a", appName });
+                if (GetMacOsAppBundle(runtime) is not { } bundle) return false;
+                using var proc = Process.Start("open", new[] { "-a", bundle });
+                if (proc is null) return false;
+                // `open` exits non-zero when the app bundle is not found; a still-running process
+                // after the grace period means it launched.
+                return !proc.WaitForExit(3000) || proc.ExitCode == 0;
             }
-            else if (OperatingSystem.IsWindows())
+
+            if (OperatingSystem.IsWindows())
             {
-                // Docker Desktop and Podman Desktop register URI schemes on Windows
-                var scheme = appName.Contains("Docker", StringComparison.OrdinalIgnoreCase) ? "docker-desktop:" : "podman-desktop:";
-                Process.Start(new ProcessStartInfo(scheme) { UseShellExecute = true });
+                // Docker Desktop and Podman Desktop register URI schemes on Windows.
+                var scheme = runtime.Contains("podman", StringComparison.OrdinalIgnoreCase) ? "podman-desktop:" : "docker-desktop:";
+                using var proc = Process.Start(new ProcessStartInfo(scheme) { UseShellExecute = true });
+                return proc is not null;
             }
-            else // Linux
-            {
-                // Try common flatpak/snap/native executable names
-                var cmd = appName.Contains("Docker", StringComparison.OrdinalIgnoreCase) ? "docker-desktop"
-          : appName.Contains("Podman", StringComparison.OrdinalIgnoreCase) ? "podman-desktop"
-          : appName.Contains("OrbStack", StringComparison.OrdinalIgnoreCase) ? "orbstack" : null;
-                if (cmd != null)
-                    Process.Start(cmd);
-            }
+
+            // Linux: try common flatpak/snap/native executable names.
+            if (GetLinuxDesktopCommand(runtime) is not { } cmd) return false;
+            using var lp = Process.Start(new ProcessStartInfo(cmd) { UseShellExecute = false });
+            return lp is not null;
         }
-        catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView.Helpers", "LaunchDesktopApp", ex); }
+        catch (Exception ex)
+        {
+            ContainerTelemetry.TrackError("DockerDiagnosticsView.Helpers", "LaunchDesktopApp", ex);
+            return false;
+        }
     }
 }

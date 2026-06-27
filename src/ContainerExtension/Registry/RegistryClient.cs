@@ -22,15 +22,16 @@ public sealed class RegistryConnectionException : Exception
 }
 
 /// <summary>
-/// Static client for interacting with Docker/OCI container registries (e.g., ghcr.io, Docker Hub).
-/// Handles authentication logic, image manifest retrieval, and blob downloads.
+/// Static client for listing tags from Docker/OCI registries (e.g. ghcr.io, Docker Hub). Resolves
+/// Bearer-token challenges, scopes forwarded credentials to the matching host, and rejects references
+/// that would steer requests at loopback or internal addresses (SSRF defense).
 /// </summary>
 public static partial class RegistryClient
 {
     [System.Text.RegularExpressions.GeneratedRegex(@"(?<type>token|bearer)(?<sep>\s*=\s*|\s+)[a-zA-Z0-9_\-\.\+\/=]+", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
     private static partial System.Text.RegularExpressions.Regex SecretScrubRegex();
 
-    [System.Text.RegularExpressions.GeneratedRegex(@"(?<key>[a-zA-Z0-9_\-\.]+)\s*=\s*""(?<value>[^""]*)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
+    [System.Text.RegularExpressions.GeneratedRegex(@"(?<key>[a-zA-Z0-9_\-\.]+)\s*=\s*""(?<value>[^""]*)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.ExplicitCapture | System.Text.RegularExpressions.RegexOptions.NonBacktracking)]
     private static partial System.Text.RegularExpressions.Regex ChallengeParameterRegex();
 
     private static readonly string CachedUserName = Environment.UserName;
@@ -109,6 +110,45 @@ public static partial class RegistryClient
             DnsCache[host] = (ips, Environment.TickCount64);
         }
         return ips;
+    }
+
+    // Treat a registry only as loopback when the host (port stripped) is exactly localhost or a
+    // loopback IP. A prefix test would accept attacker-controlled names such as 127.0.0.1.evil.com,
+    // which are publicly routable yet would otherwise be contacted over cleartext HTTP.
+    private static bool IsLoopbackRegistry(string registryHost)
+    {
+        if (string.IsNullOrEmpty(registryHost))
+        {
+            return false;
+        }
+        var colon = registryHost.IndexOf(':', StringComparison.Ordinal);
+        var hostOnly = colon < 0 ? registryHost : registryHost[..colon];
+        if (string.Equals(hostOnly, "localhost", StringComparison.Ordinal) ||
+            string.Equals(hostOnly, "127.0.0.1", StringComparison.Ordinal) ||
+            string.Equals(hostOnly, "::1", StringComparison.Ordinal))
+        {
+            return true;
+        }
+        return System.Net.IPAddress.TryParse(hostOnly, out var ip) && System.Net.IPAddress.IsLoopback(ip);
+    }
+
+    // SSRF gate: reject any address that targets the local host or a non-routable / internal range.
+    private static bool IsDisallowedAddress(System.Net.IPAddress address)
+    {
+        if (System.Net.IPAddress.IsLoopback(address) || address.IsIPv6LinkLocal || address.IsIPv6UniqueLocal)
+        {
+            return true;
+        }
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            var b = address.GetAddressBytes();
+            if (b[0] == 10) return true;                                  // 10.0.0.0/8
+            if (b[0] == 172 && b[1] >= 16 && b[1] <= 31) return true;     // 172.16.0.0/12
+            if (b[0] == 192 && b[1] == 168) return true;                 // 192.168.0.0/16
+            if (b[0] == 169 && b[1] == 254) return true;                 // 169.254.0.0/16 link-local
+            if (b[0] == 100 && b[1] >= 64 && b[1] <= 127) return true;   // 100.64.0.0/10 CGNAT
+        }
+        return false;
     }
 
     private static bool IsValidRegistryIdentifier(string input)
@@ -253,7 +293,9 @@ public static partial class RegistryClient
             var maxAgeMs = cached.tags.Count == 0 ? 10_000 : 60_000;
             if ((Environment.TickCount64 - cached.cacheTimeTicks) < maxAgeMs)
             {
-                return cached.tags;
+                // Hand out a copy: callers (e.g. a ViewModel sorting a combo box) must not mutate the
+                // shared cached list.
+                return new List<string>(cached.tags);
             }
         }
 
@@ -276,9 +318,7 @@ public static partial class RegistryClient
                     {
                         var parts = ParseImageReference(key);
 
-                        bool isLoopback = string.Equals(parts.Registry, "localhost", StringComparison.OrdinalIgnoreCase) ||
-                                          parts.Registry.StartsWith("localhost:", StringComparison.OrdinalIgnoreCase) ||
-                                          parts.Registry.StartsWith("127.0.0.1", StringComparison.OrdinalIgnoreCase);
+                        bool isLoopback = IsLoopbackRegistry(parts.Registry);
 
                         if (!isLoopback && (parts.Registry.Contains("http:", StringComparison.OrdinalIgnoreCase) ||
                                             parts.Registry.Contains("http", StringComparison.OrdinalIgnoreCase)))
@@ -292,14 +332,29 @@ public static partial class RegistryClient
                             return [];
                         }
 
-                        try
+                        var hostToResolve = string.IsNullOrEmpty(parts.Registry) ? "hub.docker.com" : parts.Registry;
+                        // SSRF gate. The well-known public endpoints and explicit loopback are exempt; any
+                        // other host is rejected when DNS resolves it to a loopback or internal address,
+                        // preventing a crafted reference from steering requests at the local network.
+                        bool isKnownPublic = string.IsNullOrEmpty(parts.Registry) ||
+                            string.Equals(parts.Registry, "docker.io", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(parts.Registry, "ghcr.io", StringComparison.OrdinalIgnoreCase);
+                        if (!isKnownPublic && !isLoopback)
                         {
-                            var hostToResolve = string.IsNullOrEmpty(parts.Registry) ? "hub.docker.com" : parts.Registry;
-                            _ = await ResolveDnsAsync(hostToResolve, ct).ConfigureAwait(false);
-                        }
-                        catch (Exception)
-                        {
-                            // Allow execution to fail downstream if DNS resolution fails completely
+                            System.Net.IPAddress[] resolved;
+                            try
+                            {
+                                resolved = await ResolveDnsAsync(hostToResolve, ct).ConfigureAwait(false);
+                            }
+                            catch (Exception)
+                            {
+                                // Allow execution to fail downstream if DNS resolution fails completely
+                                resolved = [];
+                            }
+                            if (Array.Exists(resolved, IsDisallowedAddress))
+                            {
+                                throw new InvalidOperationException($"Registry host '{hostToResolve}' resolves to a disallowed internal address.");
+                            }
                         }
 
                         List<string> result;
@@ -374,7 +429,10 @@ public static partial class RegistryClient
             }
         }
 
-        return cancellationToken.CanBeCanceled ? await task.WaitAsync(cancellationToken).ConfigureAwait(false) : await task.ConfigureAwait(false);
+        var fetched = cancellationToken.CanBeCanceled
+            ? await task.WaitAsync(cancellationToken).ConfigureAwait(false)
+            : await task.ConfigureAwait(false);
+        return new List<string>(fetched);
     }
 
     public static void InvalidateTagsCache()
@@ -709,9 +767,7 @@ public static partial class RegistryClient
         if (string.IsNullOrEmpty(repo)) return [];
         var registryHost = string.IsNullOrEmpty(registry) ? "registry-1.docker.io" : registry;
         var scheme = "https";
-        if (string.Equals(registryHost, "localhost", StringComparison.OrdinalIgnoreCase) ||
-            registryHost.StartsWith("localhost:", StringComparison.OrdinalIgnoreCase) ||
-            registryHost.StartsWith("127.0.0.1", StringComparison.OrdinalIgnoreCase))
+        if (IsLoopbackRegistry(registryHost))
         {
             scheme = "http";
         }
@@ -746,7 +802,15 @@ public static partial class RegistryClient
                         else if (key.Equals("scope", StringComparison.OrdinalIgnoreCase)) scope = val;
                     }
 
-                    if (!string.IsNullOrEmpty(realm))
+                    // Validate the server-supplied token endpoint before contacting it. Require an
+                    // absolute HTTPS URL (blocks an http downgrade and SSRF to internal/plaintext
+                    // services), and forward the local Docker credential only when the realm is on
+                    // the same host as the registry. Otherwise a malicious registry could name an
+                    // arbitrary realm host in its WWW-Authenticate challenge and exfiltrate the
+                    // stored credential.
+                    if (!string.IsNullOrEmpty(realm) &&
+                        Uri.TryCreate(realm, UriKind.Absolute, out var realmUri) &&
+                        string.Equals(realmUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
                     {
                         var tokenUrl = realm;
                         var separator = realm.Contains('?') ? "&" : "?";
@@ -761,7 +825,10 @@ public static partial class RegistryClient
                         }
 
                         using var tokenReq = new HttpRequestMessage(HttpMethod.Get, tokenUrl);
-                        if (authHeader != null)
+                        var realmHostIsRegistry =
+                            string.Equals(realmUri.Host, registryHost, StringComparison.OrdinalIgnoreCase) ||
+                            registryHost.StartsWith(realmUri.Host + ":", StringComparison.OrdinalIgnoreCase);
+                        if (authHeader != null && realmHostIsRegistry)
                         {
                             tokenReq.Headers.TryAddWithoutValidation("Authorization", authHeader);
                         }
@@ -857,6 +924,7 @@ internal class GhcrTokenResponse
 {
     [JsonPropertyName("token")] public string? Token { get; set; }
     [JsonPropertyName("access_token")] public string? AccessToken { get; set; }
+    // Mirror the GHCR token payload; serializer-bound and retained for forward use (token lifetime handling).
     [JsonPropertyName("expires_in")] public int? ExpiresIn { get; set; }
     [JsonPropertyName("issued_at")] public string? IssuedAt { get; set; }
 }

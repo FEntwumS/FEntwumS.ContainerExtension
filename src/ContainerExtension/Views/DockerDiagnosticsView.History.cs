@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
@@ -25,7 +26,7 @@ public partial class DockerDiagnosticsView
     private int _currentTelemetryToken;
     private long _lastTelemetryPopulationTime;
 
-    /// <summary>Populates the Execution History section with a tabular display of the last 10 telemetry entries and aggregate stats.</summary>
+    /// <summary>Populates the Execution History section with a tabular display of the most recent telemetry entries and aggregate stats.</summary>
     private async Task PopulateTelemetryAsync()
     {
         var now = Environment.TickCount64;
@@ -52,8 +53,13 @@ public partial class DockerDiagnosticsView
             // Check if telemetry is disabled via the Retention = None setting
             var retentionStr = _settingsService.SafeGetSetting(ContainerExtensionModule.TelemetryRetentionSetting, "100");
 
-            // Run I/O intensive operation on a background thread to prevent UI freezing
-            var (entries, totalRuns, successRate, avgDuration) = await Task.Run(() => ContainerTelemetry.GetRecentEntriesWithStats(50)).ConfigureAwait(false);
+            // Run I/O intensive operation on a background thread to prevent UI freezing.
+            // The telemetry-log File.Exists probe is hoisted here too so the UI lambda does zero I/O.
+            var (entries, totalRuns, successRate, avgDuration, logExists) = await Task.Run(() =>
+            {
+                var stats = ContainerTelemetry.GetRecentEntriesWithStats(50);
+                return (stats.entries, stats.totalRuns, stats.successRate, stats.avgDuration, File.Exists(ContainerTelemetry.TelemetryFilePath));
+            }).ConfigureAwait(false);
 
             if (System.Threading.Volatile.Read(ref _currentTelemetryToken) != localToken)
             {
@@ -98,7 +104,7 @@ public partial class DockerDiagnosticsView
                         return;
                     }
 
-                    var statsRow = BuildTelemetryStatsRow(totalRuns, successRate, avgDuration);
+                    var statsRow = BuildTelemetryStatsRow(totalRuns, successRate, avgDuration, logExists);
                     if (statsRow != null)
                     {
                         newChildren.Add(statsRow);
@@ -132,7 +138,6 @@ public partial class DockerDiagnosticsView
                     {
                         newChildren.Add(BuildHistoricalTrendsPanel(entries));
 
-                        // Sortable header row
                         newChildren.Add(CreateSortableHeaderRow(
                             [("STATUS", "status"), ("TOOL", "tool"), ("IMAGE", "image"), ("DURATION", "duration"), ("PEAK RAM", "ram"), ("MAX CPU", "cpu"), ("TIME", "time")],
                             _historySort,
@@ -195,7 +200,7 @@ public partial class DockerDiagnosticsView
         }
     }
 
-    private StackPanel? BuildTelemetryStatsRow(int totalRuns, double successRate, double avgDuration)
+    private StackPanel? BuildTelemetryStatsRow(int totalRuns, double successRate, double avgDuration, bool logExists)
     {
         var statsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         if (totalRuns > 0)
@@ -212,7 +217,8 @@ public partial class DockerDiagnosticsView
             });
         }
 
-        if (File.Exists(ContainerTelemetry.TelemetryFilePath))
+        // logExists is probed off the UI thread by the caller; no filesystem stat here.
+        if (logExists)
         {
             var openLogBtn = new Button
             {
@@ -223,6 +229,7 @@ public partial class DockerDiagnosticsView
                 Command = new RelayCommand(() => OpenWithSystemDefault(ContainerTelemetry.TelemetryFilePath))
             };
             ToolTip.SetTip(openLogBtn, $"Open {ContainerTelemetry.TelemetryFilePath}");
+            AutomationProperties.SetName(openLogBtn, "Open telemetry log file");
             statsRow.Children.Add(openLogBtn);
         }
 
@@ -359,7 +366,7 @@ public partial class DockerDiagnosticsView
         var imageShort = Truncate(entry.Image ?? "", 24);
 
         var peakRamLabel = entry.PeakMemoryBytes.HasValue
-          ? (entry.OomKilled ? "⚠️ " : "") + FormatBytes(entry.PeakMemoryBytes.Value)
+          ? (entry.OomKilled ? "OOM " : "") + FormatBytes(entry.PeakMemoryBytes.Value)
           : "—";
         var maxCpuLabel = entry.MaxCpuPercent.HasValue && entry.MaxCpuPercent.Value > 0.0
           ? $"{entry.MaxCpuPercent.Value:F1}%"
@@ -408,7 +415,7 @@ public partial class DockerDiagnosticsView
                         if (topLevel?.Clipboard != null)
                         {
                             await topLevel.Clipboard.SetTextAsync(pinRef);
-                            pinBtn!.Content = "Pinned!";
+                            pinBtn!.Content = "Pinned";
                             _ = ResetButtonTextAsync(pinBtn!, "Pin", 2000);
                         }
                     }
@@ -419,6 +426,7 @@ public partial class DockerDiagnosticsView
               ? string.Concat(entry.ImageDigest.AsSpan(7, 12), "...")
               : entry.ImageDigest;
             ToolTip.SetTip(pinBtn, $"Copy pinned reference: {entry.Image}@{shortDigest}");
+            Avalonia.Automation.AutomationProperties.SetName(pinBtn, $"Copy pinned image reference for {entry.Tool}");
             actionsPanel.Children.Add(pinBtn);
         }
 
@@ -433,10 +441,9 @@ public partial class DockerDiagnosticsView
                     cmdText = cmdText.Replace(home, "~", StringComparison.Ordinal);
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                // Ignored to prevent clipboard failures from interrupting operation
-                _ = ex;
+                // clipboard-path scrub failure is non-fatal
             }
 
             Button? copyBtn = null;
@@ -454,7 +461,7 @@ public partial class DockerDiagnosticsView
                         if (topLevel?.Clipboard != null)
                         {
                             await topLevel.Clipboard.SetTextAsync(cmdText);
-                            copyBtn!.Content = "Copied!";
+                            copyBtn!.Content = "Copied";
                             _ = ResetButtonTextAsync(copyBtn!, "Copy", 2000);
                         }
                     }
@@ -467,6 +474,7 @@ public partial class DockerDiagnosticsView
                 escapedCmd = string.Concat(escapedCmd.AsSpan(0, 200), "...");
             }
             ToolTip.SetTip(copyBtn, $"Copy Docker Run: {escapedCmd}");
+            Avalonia.Automation.AutomationProperties.SetName(copyBtn, $"Copy docker run command for {entry.Tool}");
             actionsPanel.Children.Add(copyBtn);
         }
 
@@ -501,18 +509,17 @@ public partial class DockerDiagnosticsView
           ResolveExportDirectory(),
           $"container_telemetry_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
             var success = ContainerTelemetry.ExportTo(destPath);
-            if (success)
+            _telemetryContent.Children.Add(new TextBlock
             {
-                _telemetryContent.Children.Add(new TextBlock
-                {
-                    Text = $"Exported to {destPath}",
-                    FontSize = 10,
-                    Foreground = GreenColor,
-                    FontStyle = FontStyle.Italic,
-                    Margin = new Thickness(0, 2, 0, 0),
-                    TextWrapping = TextWrapping.Wrap
-                });
-            }
+                Text = success
+                    ? $"Exported to {destPath}"
+                    : $"Export failed — could not write to {destPath}",
+                FontSize = 10,
+                Foreground = success ? GreenColor : RedColor,
+                FontStyle = FontStyle.Italic,
+                Margin = new Thickness(0, 2, 0, 0),
+                TextWrapping = TextWrapping.Wrap
+            });
             return Task.CompletedTask;
         }, "Export the full telemetry log as a .jsonl file"));
 
