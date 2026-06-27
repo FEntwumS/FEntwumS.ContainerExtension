@@ -473,6 +473,13 @@ internal static class DockerCommandBuilder
                 NetworkMode = networkMode,
                 Init = true,
                 CapDrop = new List<string> { "ALL" },
+                // Defence-in-depth on the default (non-privileged) path. no-new-privileges blocks
+                // setuid/setgid privilege escalation inside the container — a primary escape primitive —
+                // and PidsLimit caps the task count as a fork-bomb backstop (generous so multi-threaded
+                // synthesis and place-and-route are unaffected). Privileged execution is gated separately
+                // in DockerExecutionStrategy and is the only way to opt out of this baseline.
+                SecurityOpt = new List<string> { "no-new-privileges:true" },
+                PidsLimit = 4096,
                 Binds = new List<string>(4) { $"{workingDirFull}:{ContainerWorkDir}{bindSuffix}" }
             }
         };
