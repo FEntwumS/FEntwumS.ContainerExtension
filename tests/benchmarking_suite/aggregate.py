@@ -44,11 +44,24 @@ def load_results(results_dir):
     return out
 
 
+def holm_bonferroni(pvals):
+    """Holm-Bonferroni step-down adjustment controlling the family-wise error rate across the full set
+    of reported overhead tests. Input: list of (key, p). Output: {key: adjusted_p}."""
+    valid = [(k, p) for k, p in pvals if isinstance(p, (int, float))]
+    m = len(valid)
+    out = {}
+    running = 0.0
+    for rank, (k, p) in enumerate(sorted(valid, key=lambda kp: kp[1])):
+        running = max(running, min(1.0, (m - rank) * p))  # step-down; enforce monotonicity
+        out[k] = round(running, 6)
+    return out
+
+
 def write_csv(data, out_csv):
     cols = ["platform", "cpu_model", "workload", "backend", "n", "mean_s", "ci95_low_s",
             "ci95_high_s", "cv_percent", "overhead_x_vs_native", "overhead_p_value",
-            "overhead_x_vs_cli", "overhead_p_vs_cli"]
-    rows = []
+            "overhead_p_holm", "overhead_x_vs_cli", "overhead_p_vs_cli", "overhead_p_vs_cli_holm"]
+    raw, family = [], []
     for plat, workloads in sorted(data.items()):
         for wl, d in sorted(workloads.items()):
             cpu = d.get("system", {}).get("cpu_model", "")
@@ -62,8 +75,7 @@ def write_csv(data, out_csv):
                 centry = comp.get(f"native_vs_{jkey}")
                 if centry:
                     overhead_x = centry.get("relative_overhead_x", "")
-                    w = centry.get("welch") or {}
-                    overhead_p = w.get("p_value", "")
+                    overhead_p = (centry.get("welch") or {}).get("p_value", "")
                 # The extension's overhead beyond raw containerization (strategy vs docker CLI) belongs
                 # on the strategy row; it is blank for the native and cli rows.
                 ext_x = ext_p = ""
@@ -71,11 +83,19 @@ def write_csv(data, out_csv):
                     eentry = comp.get("cli_vs_dotnet")
                     if eentry:
                         ext_x = eentry.get("relative_overhead_x", "")
-                        ew = eentry.get("welch") or {}
-                        ext_p = ew.get("p_value", "")
-                rows.append([plat, cpu, wl, label, s["n"], round(s["mean"], 6),
+                        ext_p = (eentry.get("welch") or {}).get("p_value", "")
+                nat_key, cli_key = f"{plat}|{wl}|{label}|nat", f"{plat}|{wl}|{label}|cli"
+                if isinstance(overhead_p, (int, float)):
+                    family.append((nat_key, overhead_p))
+                if isinstance(ext_p, (int, float)):
+                    family.append((cli_key, ext_p))
+                raw.append(([plat, cpu, wl, label, s["n"], round(s["mean"], 6),
                              round(s["ci95_low"], 6), round(s["ci95_high"], 6),
-                             s["cv_percent"], overhead_x, overhead_p, ext_x, ext_p])
+                             s["cv_percent"], overhead_x, overhead_p, ext_x, ext_p], nat_key, cli_key))
+    # Holm-Bonferroni across the whole family of reported overhead tests (FWER control).
+    adjusted = holm_bonferroni(family)
+    rows = [r[:11] + [adjusted.get(nat_key, "")] + r[11:13] + [adjusted.get(cli_key, "")]
+            for r, nat_key, cli_key in raw]
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(cols)

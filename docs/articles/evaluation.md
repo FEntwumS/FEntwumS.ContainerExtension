@@ -232,7 +232,7 @@ the tables do not.
 
 | Artifact | Content |
 | --- | --- |
-| `results/summary.csv` | One row per platform × workload × backend: `n`, mean, 95% CI bounds, CV%, and the native-versus-container overhead factor and Welch p-value. The machine-readable source of every reported number. |
+| `results/summary.csv` | One row per platform × workload × backend: `n`, mean, 95% CI bounds, CV%, the native-versus-container overhead factor with its Welch p-value, and the cli-versus-strategy extension-overhead factor with its p-value. Both p-values also carry a Holm-Bonferroni-adjusted column (`overhead_p_holm`, `overhead_p_vs_cli_holm`) controlling the family-wise error rate across the whole workload × platform × backend matrix. The machine-readable source of every reported number. |
 | `results/determinism.md` | The cross-machine artifact-hash matrix; the `Identical?` column is the portability result per artifact. |
 | `results/summary.md` | Human-readable per-platform table: mean (95% CI), CV and overhead factor per workload and backend, headed by the machine's CPU, RAM, core count and Docker version. |
 | `results/figures/*.png` | Per-platform grouped bar charts of mean execution time with 95% CI error bars (strategy backend), generated only when `matplotlib` is installed. |
