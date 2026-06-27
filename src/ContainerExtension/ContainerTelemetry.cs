@@ -551,6 +551,20 @@ public static partial class ContainerTelemetry
     [GeneratedRegex(@"(?<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*://)[^/\s:@]+:[^/\s@]+@", RegexOptions.ExplicitCapture | RegexOptions.NonBacktracking)]
     private static partial Regex UriCredentialsRegex();
 
+    // Provider-issued access tokens that a KEY=value scrub misses when they appear bare in a path,
+    // URL, argument, or free-text field: GitHub PATs/OAuth/installation tokens and Slack tokens.
+    [GeneratedRegex(@"\b(?:gh[a-z]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})\b", RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex ProviderTokenRegex();
+
+    // JSON Web Tokens (header.payload.signature, each base64url) — bearer credentials in plain sight.
+    [GeneratedRegex(@"\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b", RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex JwtRegex();
+
+    // PEM-encoded private key blocks. Lazy across newlines, so it cannot be NonBacktracking; bounded by a
+    // match timeout instead.
+    [GeneratedRegex(@"-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z]+ )?PRIVATE KEY-----", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex PemPrivateKeyRegex();
+
     private static string? ScrubSecrets(string? commandLine)
     {
         if (string.IsNullOrEmpty(commandLine))
@@ -594,7 +608,7 @@ public static partial class ContainerTelemetry
         return path;
     }
 
-    private static string? ScrubSensitiveInfo(string? input)
+    internal static string? ScrubSensitiveInfo(string? input)
     {
         if (string.IsNullOrEmpty(input)) return input;
         var scrubbed = ScrubHomePath(input);
@@ -616,10 +630,21 @@ public static partial class ContainerTelemetry
         catch { /* Ignore */ }
         try
         {
+            scrubbed = ProviderTokenRegex().Replace(scrubbed, "[REDACTED_TOKEN]");
+            scrubbed = JwtRegex().Replace(scrubbed, "[REDACTED_JWT]");
+            scrubbed = PemPrivateKeyRegex().Replace(scrubbed, "[REDACTED_PRIVATE_KEY]");
+        }
+        catch { /* Ignore */ }
+        try
+        {
             var user = CachedUserName;
-            if (!string.IsNullOrWhiteSpace(user))
+            // Replace the account name only at identifier boundaries: a bare substring replace corrupts
+            // unrelated text when the username is short or a common token (the prior behaviour). Guard a
+            // 3-character floor and escape the name so it is matched literally, never as a pattern.
+            if (!string.IsNullOrWhiteSpace(user) && user.Length >= 3)
             {
-                scrubbed = scrubbed.Replace(user, "***", StringComparison.OrdinalIgnoreCase);
+                scrubbed = Regex.Replace(scrubbed, $@"(?<![A-Za-z0-9]){Regex.Escape(user)}(?![A-Za-z0-9])", "***",
+                    RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(1000));
             }
         }
         catch { /* Ignore */ }
