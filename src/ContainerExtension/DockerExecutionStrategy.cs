@@ -488,90 +488,44 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             // Negotiate Docker API Version
             System.Version apiVersion = new System.Version(1, 44);
             var tempClient = config.CreateClient();
-            var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
-            Task? vTask = null;
             try
             {
-                var apiTask = Task.Run(async () =>
+                // Cold daemons routinely need well over the previous 500 ms for the first socket connect
+                // and version round-trip; too tight a budget misnegotiates a healthy-but-slow daemon down
+                // to the fallback API version and adds a cold-start confounder to overhead measurements.
+                // Bound the probe at 3 s, honour strategy shutdown, and fall back only on a genuine failure.
+                // Docker.DotNet honours the cancellation token, so a direct await cannot hang past the budget.
+                using var verCts = CancellationTokenSource.CreateLinkedTokenSource(_strategyCts.Token);
+                verCts.CancelAfter(TimeSpan.FromSeconds(3));
+                var version = await tempClient.System.GetVersionAsync(verCts.Token).ConfigureAwait(false);
+                var apiVerStr = version?.APIVersion;
+                if (!string.IsNullOrEmpty(apiVerStr))
                 {
-                    try
+                    int endIdx = 0;
+                    while (endIdx < apiVerStr.Length && (char.IsDigit(apiVerStr[endIdx]) || apiVerStr[endIdx] == '.'))
                     {
-                        return await tempClient.System.GetVersionAsync(cts.Token).ConfigureAwait(false);
+                        endIdx++;
                     }
-                    catch (Exception)
+                    if (System.Version.TryParse(apiVerStr[..endIdx], out var parsedVersion))
                     {
-                        return null;
-                    }
-                });
-                vTask = apiTask;
-                using (var delayCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token))
-                {
-                    var completedTask = await Task.WhenAny(apiTask, Task.Delay(TimeSpan.FromMilliseconds(500), delayCts.Token)).ConfigureAwait(false);
-                    if (completedTask == apiTask && apiTask.IsCompletedSuccessfully)
-                    {
-                        await delayCts.CancelAsync().ConfigureAwait(false);
-                        var v = await apiTask.ConfigureAwait(false);
-                        var apiVerStr = v?.APIVersion;
-                        if (!string.IsNullOrEmpty(apiVerStr))
-                        {
-                            int endIdx = 0;
-                            while (endIdx < apiVerStr.Length && (char.IsDigit(apiVerStr[endIdx]) || apiVerStr[endIdx] == '.'))
-                            {
-                                endIdx++;
-                            }
-                            var cleanApiVerStr = apiVerStr[..endIdx];
-                            if (System.Version.TryParse(cleanApiVerStr, out var parsedVersion))
-                            {
-                                apiVersion = parsedVersion;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        try
-                        {
-                            await cts.CancelAsync().ConfigureAwait(false);
-                        }
-                        catch (ObjectDisposedException)
-                        {
-                            // Already disposed, ignore
-                        }
-                        catch (AggregateException)
-                        {
-                            // Catch cancellation callbacks, ignore
-                        }
-                        apiVersion = new System.Version(1, 45);
+                        apiVersion = parsedVersion;
                     }
                 }
             }
             catch (Exception ex)
             {
-                var isOffline = ex is OperationCanceledException ||
-                                ex is TaskCanceledException ||
-                                ex is System.Net.Sockets.SocketException ||
+                var isOffline = ex is OperationCanceledException or System.Net.Sockets.SocketException ||
                                 ex.InnerException is System.Net.Sockets.SocketException ||
                                 (ex is HttpRequestException httpEx && (httpEx.InnerException is System.Net.Sockets.SocketException || httpEx.Message.Contains("connection refused", StringComparison.OrdinalIgnoreCase)));
                 if (!isOffline)
                 {
-                    ContainerTelemetry.TrackError("DockerExecutionStrategy", "API version negotiation failed, falling back to 1.45", ex);
+                    ContainerTelemetry.TrackError("DockerExecutionStrategy", "API version negotiation failed; falling back to 1.45", ex);
                 }
                 apiVersion = new System.Version(1, 45);
             }
             finally
             {
-                if (vTask != null)
-                {
-                    _ = vTask.ContinueWith(t =>
-                    {
-                        tempClient.Dispose();
-                        cts.Dispose();
-                    }, TaskScheduler.Default);
-                }
-                else
-                {
-                    tempClient.Dispose();
-                    cts.Dispose();
-                }
+                tempClient.Dispose();
             }
             _client = config.CreateClient(apiVersion);
             _connectionProvider = new DockerConnectionProvider(_client);
