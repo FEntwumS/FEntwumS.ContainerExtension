@@ -49,7 +49,12 @@ The plugin coordinates execution through a hybrid strategy:
 
 ## Security
 
-- Non-root container execution with host UID/GID injection; `tini` as PID 1.
+- Non-root container execution with host UID/GID injection; `tini` as PID 1. The default
+  (non-privileged) path drops all capabilities (`--cap-drop=ALL`), forbids privilege escalation
+  (`--security-opt no-new-privileges`), and caps the task count as a fork-bomb backstop.
+- Host paths that escape the mounted workspace are remapped to an in-workspace sentinel rather than
+  their real location; an explicit device/library allowlist is the only pass-through. The behaviour is
+  pinned by an adversarial path-containment test corpus that runs in CI.
 - Mount allow-listing rejects binds of critical host paths (`/etc`, `/proc`, `/sys`, the Docker socket, …).
 - The registry client is HTTPS-only, scopes forwarded credentials to the matching host, and rejects
   references that resolve to loopback or internal addresses (SSRF defense).
