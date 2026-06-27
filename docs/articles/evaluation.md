@@ -195,6 +195,17 @@ outside it.
 
 ## How to Reproduce
 
+### Measurement hygiene
+
+Because the workloads are short and the per-invocation container floor is small, host
+noise is the dominant residual variance. Each measurement machine should be quiesced
+before the run: pin the CPU frequency governor to `performance` (Linux:
+`cpupower frequency-set -g performance`), disable turbo/thermal-throttling variability
+where possible, close background workloads, and keep the machine on AC power with thermal
+headroom. Where the runtime permits, pin the harness to dedicated cores (`taskset`/core
+affinity). These conditions, together with the recorded CPU model, core count and Docker
+version in each result file, are the controls behind the reported confidence intervals.
+
 ### One command per machine
 
 On each host (macOS/arm64, Linux/amd64, Windows/amd64), with a container runtime
