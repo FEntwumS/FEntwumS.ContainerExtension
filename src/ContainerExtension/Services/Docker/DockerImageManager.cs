@@ -90,7 +90,7 @@ public sealed class DockerImageManager : IDisposable
             _cachedImages = null;
             _cacheExpiration = 0;
         }
-        FEntwumS.ContainerExtension.Registry.RegistryClient.InvalidateTagsCache();
+        ContainerExtension.Registry.RegistryClient.InvalidateTagsCache();
     }
 
     public async Task<IList<ImagesListResponse>> ListImagesAsync(CancellationToken ct = default)

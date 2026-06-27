@@ -732,7 +732,7 @@ public sealed class ContainerExtensionTests : IDisposable
     [InlineData("ghcr.io/namespace/repository/subrepo", "ghcr.io", "namespace/repository", "subrepo")]
     public void RegistryClient_ParseImageReference_SplitsCorrectly(string input, string expectedRegistry, string expectedNs, string expectedRepo)
     {
-        var tuple = FEntwumS.ContainerExtension.Registry.RegistryClient.ParseImageReference(input);
+        var tuple = ContainerExtension.Registry.RegistryClient.ParseImageReference(input);
         Assert.Equal(expectedRegistry, tuple.Registry);
         Assert.Equal(expectedNs, tuple.Namespace);
         Assert.Equal(expectedRepo, tuple.Repository);
@@ -1351,7 +1351,7 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public void ParseImageReference_HandlesRegistryWithPortSpecs()
     {
-        var method = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetMethod("ParseImageReference", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var method = typeof(ContainerExtension.Registry.RegistryClient).GetMethod("ParseImageReference", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
 
         var res1 = ((string Registry, string Namespace, string Repository))method.Invoke(null, new object[] { "localhost:5000/myrepo:latest" })!;
@@ -1718,7 +1718,7 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public void RegistryClient_PrunesCacheToMaxLimit()
     {
-        var tagsCacheField = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetField("TagsCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var tagsCacheField = typeof(ContainerExtension.Registry.RegistryClient).GetField("TagsCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(tagsCacheField);
         var cache = (System.Collections.Concurrent.ConcurrentDictionary<string, (List<string> tags, long cacheTimeTicks)>)tagsCacheField.GetValue(null)!;
 
@@ -1733,7 +1733,7 @@ public sealed class ContainerExtensionTests : IDisposable
 
         Assert.Equal(105, cache.Count);
 
-        var addToCacheMethod = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetMethod("AddToCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var addToCacheMethod = typeof(ContainerExtension.Registry.RegistryClient).GetMethod("AddToCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(addToCacheMethod);
 
         addToCacheMethod.Invoke(null, new object[] { "new_image", new List<string> { "v1" } });
@@ -1800,7 +1800,7 @@ public sealed class ContainerExtensionTests : IDisposable
     [InlineData("helloW", false)]
     public void IsAllLowercase_ValidatesCorrectly(string input, bool expectedResult)
     {
-        var method = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetMethod("IsAllLowercase", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var method = typeof(ContainerExtension.Registry.RegistryClient).GetMethod("IsAllLowercase", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
         var result = (bool)method.Invoke(null, new object[] { input })!;
         Assert.Equal(expectedResult, result);
@@ -1809,10 +1809,10 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public async Task RegistryClient_DnsCache_EvictsCorrectly()
     {
-        var method = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetMethod("ResolveDnsAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var method = typeof(ContainerExtension.Registry.RegistryClient).GetMethod("ResolveDnsAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
 
-        var cacheField = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetField("DnsCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var cacheField = typeof(ContainerExtension.Registry.RegistryClient).GetField("DnsCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(cacheField);
         var dnsCache = (System.Collections.Concurrent.ConcurrentDictionary<string, (System.Net.IPAddress[] ips, long cacheTimeTicks)>)cacheField.GetValue(null)!;
 
@@ -2178,12 +2178,12 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public void RegistryClient_ParseImageReference_HandlesDigestsWithTagsCorrectly()
     {
-        var result1 = FEntwumS.ContainerExtension.Registry.RegistryClient.ParseImageReference("ubuntu:latest@sha256:45b23d8157d0e1b6567d0e1b6567d0e1b6567d0e1b6567d0e1b6567d0e1b6567");
+        var result1 = ContainerExtension.Registry.RegistryClient.ParseImageReference("ubuntu:latest@sha256:45b23d8157d0e1b6567d0e1b6567d0e1b6567d0e1b6567d0e1b6567d0e1b6567");
         Assert.Equal("", result1.Registry);
         Assert.Equal("", result1.Namespace);
         Assert.Equal("ubuntu", result1.Repository);
 
-        var result2 = FEntwumS.ContainerExtension.Registry.RegistryClient.ParseImageReference("registry-1.docker.io/library/ubuntu:latest@sha256:45b23d8157d0e1b6567d0e1b6567d0e1b6567d0e1b6567d0e1b6567d0e1b6567");
+        var result2 = ContainerExtension.Registry.RegistryClient.ParseImageReference("registry-1.docker.io/library/ubuntu:latest@sha256:45b23d8157d0e1b6567d0e1b6567d0e1b6567d0e1b6567d0e1b6567d0e1b6567");
         Assert.Equal("registry-1.docker.io", result2.Registry);
         Assert.Equal("library", result2.Namespace);
         Assert.Equal("ubuntu", result2.Repository);
@@ -2192,7 +2192,7 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public void RegistryClient_ScrubSecrets_ScrubsTokensAndProfiles()
     {
-        var method = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetMethod("ScrubSecrets", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var method = typeof(ContainerExtension.Registry.RegistryClient).GetMethod("ScrubSecrets", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
 
         // Test token scrubbing
@@ -2201,7 +2201,7 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.Equal("GET /v2/token=*** HTTP/1.1", tokenResult);
 
         // Test user profile home directory scrubbing
-        var homeField = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetField("CachedUserProfile", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var homeField = typeof(ContainerExtension.Registry.RegistryClient).GetField("CachedUserProfile", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(homeField);
         var originalHome = homeField.GetValue(null) as string;
         if (!string.IsNullOrEmpty(originalHome))
@@ -2212,7 +2212,7 @@ public sealed class ContainerExtensionTests : IDisposable
         }
 
         // Test username scrubbing
-        var userField = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetField("CachedUserName", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var userField = typeof(ContainerExtension.Registry.RegistryClient).GetField("CachedUserName", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(userField);
         var originalUser = userField.GetValue(null) as string;
         if (!string.IsNullOrEmpty(originalUser))
@@ -2321,7 +2321,7 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public async Task RegistryClient_ResolveDnsAsync_EvictsCacheWhenFull()
     {
-        var cacheField = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetField("DnsCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var cacheField = typeof(ContainerExtension.Registry.RegistryClient).GetField("DnsCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(cacheField);
         var dnsCache = (System.Collections.Concurrent.ConcurrentDictionary<string, (System.Net.IPAddress[] ips, long cacheTimeTicks)>)cacheField.GetValue(null)!;
 
@@ -2331,7 +2331,7 @@ public sealed class ContainerExtensionTests : IDisposable
             dnsCache[$"host{i}.com"] = (Array.Empty<System.Net.IPAddress>(), Environment.TickCount64);
         }
 
-        var method = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetMethod("ResolveDnsAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var method = typeof(ContainerExtension.Registry.RegistryClient).GetMethod("ResolveDnsAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
 
         var task = method.Invoke(null, new object[] { "localhost", CancellationToken.None }) as Task<System.Net.IPAddress[]>;
@@ -2497,7 +2497,7 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public void RegistryClient_ChallengeParameterRegex_ParsesCommasInQuotes()
     {
-        var method = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetMethod("ChallengeParameterRegex", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var method = typeof(ContainerExtension.Registry.RegistryClient).GetMethod("ChallengeParameterRegex", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
         var regex = method.Invoke(null, null) as System.Text.RegularExpressions.Regex;
         Assert.NotNull(regex);
@@ -2529,14 +2529,14 @@ public sealed class ContainerExtensionTests : IDisposable
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
         {
-            await FEntwumS.ContainerExtension.Registry.RegistryClient.FetchTagsAsync("ubuntu", cts.Token);
+            await ContainerExtension.Registry.RegistryClient.FetchTagsAsync("ubuntu", cts.Token);
         });
     }
 
     [Fact]
     public async Task RegistryClient_SendWithRetryAsync_ImmediateAbortOnCancellation()
     {
-        var method = typeof(FEntwumS.ContainerExtension.Registry.RegistryClient).GetMethod("SendWithRetryAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var method = typeof(ContainerExtension.Registry.RegistryClient).GetMethod("SendWithRetryAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
 
         using var cts = new CancellationTokenSource();

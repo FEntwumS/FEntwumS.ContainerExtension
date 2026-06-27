@@ -10,7 +10,7 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace FEntwumS.ContainerExtension.Registry;
+namespace ContainerExtension.Registry;
 
 /// <summary>
 /// Represents an error that occurs during a registry connection or operation.
@@ -386,14 +386,14 @@ public static partial class RegistryClient
                     catch (TimeoutException ex)
                     {
                         var scrubbedMsg = ScrubSecrets(ex.Message);
-                        global::ContainerExtension.ContainerTelemetry.TrackError("RegistryClient", $"HTTP request timed out: {scrubbedMsg}", ex);
+                        ContainerTelemetry.TrackError("RegistryClient", $"HTTP request timed out: {scrubbedMsg}", ex);
                         return [];
                     }
                     catch (JsonException ex)
                     {
                         AddToCache(key, []);
                         var scrubbedMsg = ScrubSecrets(ex.Message);
-                        global::ContainerExtension.ContainerTelemetry.TrackError("RegistryClient", $"JSON deserialization failed: {scrubbedMsg}", ex);
+                        ContainerTelemetry.TrackError("RegistryClient", $"JSON deserialization failed: {scrubbedMsg}", ex);
                         return [];
                     }
                     catch (HttpRequestException ex)
@@ -405,7 +405,7 @@ public static partial class RegistryClient
                         else
                         {
                             var scrubbedMsg = ScrubSecrets(ex.Message);
-                            global::ContainerExtension.ContainerTelemetry.TrackError("RegistryClient", $"HTTP request failed (transient): {scrubbedMsg}", null);
+                            ContainerTelemetry.TrackError("RegistryClient", $"HTTP request failed (transient): {scrubbedMsg}", null);
                         }
                         return [];
                     }
@@ -413,7 +413,7 @@ public static partial class RegistryClient
                     {
                         var scrubbedMsg = ScrubSecrets(ex.Message);
                         var scrubbedEx = new RegistryConnectionException(scrubbedMsg, ex);
-                        global::ContainerExtension.ContainerTelemetry.TrackError("RegistryClient", "Global fetch trap triggered (transient)", scrubbedEx);
+                        ContainerTelemetry.TrackError("RegistryClient", "Global fetch trap triggered (transient)", scrubbedEx);
                         return [];
                     }
                     finally

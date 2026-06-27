@@ -22,7 +22,7 @@ public sealed class SecurityAndParsingTests
     private const BindingFlags InstanceNonPublic = BindingFlags.NonPublic | BindingFlags.Instance;
 
     private static readonly Type RegistryClientType =
-        typeof(FEntwumS.ContainerExtension.Registry.RegistryClient);
+        typeof(ContainerExtension.Registry.RegistryClient);
 
     private static MethodInfo RegistryMethod(string name)
     {

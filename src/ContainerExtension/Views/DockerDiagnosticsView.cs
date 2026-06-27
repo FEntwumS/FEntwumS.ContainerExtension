@@ -1176,7 +1176,7 @@ public partial class DockerDiagnosticsView : UserControl
         }
         try
         {
-            tags = await FEntwumS.ContainerExtension.Registry.RegistryClient.FetchTagsAsync(currentImage, refreshCt).ConfigureAwait(false);
+            tags = await ContainerExtension.Registry.RegistryClient.FetchTagsAsync(currentImage, refreshCt).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
