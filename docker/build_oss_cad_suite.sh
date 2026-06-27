@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# build_oss_cad_suite.sh
-# ==============================================================================
+# Builds the hardened oss-cad-suite image for the host platform and runs a Trivy scan.
 set -Eeuo pipefail
 trap 'echo -e "\nCritical failure at line $LINENO"; exit 1' ERR
 
@@ -23,8 +21,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-RELEASE_TAG="2026-06-20"
-RELEASE_DATE="20260620"
+RELEASE_TAG="2026-06-26"
+RELEASE_DATE="20260626"
 IMAGE_NAME="fentwums/oss-cad-suite"
 
 # Force linux-x64 (linux/amd64) for GHDL compatibility.

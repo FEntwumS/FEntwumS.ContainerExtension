@@ -23,11 +23,7 @@ Desktop.ini
 
 # -- IDEs & Editors -----------------------------------------------------------
 .idea/
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
+.vscode/
 .vs/
 *.user
 *.suo
@@ -35,8 +31,6 @@ Desktop.ini
 *.DotSettings.user
 riderModule.iml
 /_ReSharper.Caches/
-.gemini/
-.agents/
 
 # -- .NET Build & Tooling -----------------------------------------------------
 bin/
@@ -59,6 +53,8 @@ project.assets.json
 .nuget_packages/
 .nuget_scratch/
 .tmp/
+.tmp.nosync/
+*.nosync
 Library/
 
 # -- Quality & Security Scans ----------------------------------------------------
@@ -88,9 +84,6 @@ final_*.txt
 # -- Logs & Debugging ---------------------------------------------------------
 full_source_bundle.md
 *.log
-
-# -- Local Headless Testing ---------------------------------------------------
-local_test*.sh
 
 # -- Avalonia UI Previewer & Caches --------------------------------------------
 .avalonia/

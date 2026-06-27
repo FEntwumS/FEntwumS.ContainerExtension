@@ -11,13 +11,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tar \
     && rm -rf /var/lib/apt/lists/*
 
-ARG RELEASE_TAG=2026-06-20
-ARG RELEASE_DATE=20260620
+ARG RELEASE_TAG=2026-06-26
+ARG RELEASE_DATE=20260626
 ARG ARCH=linux-x64
+# SHA-256 of the release asset (GitHub-published digest for the pinned tag/date/arch).
+# The build fails closed if the downloaded tarball does not match.
+ARG OSS_CAD_SUITE_SHA256=091122431af82e0229ee693e1a126096cb88ba8979896a586518af957ae68cf0
 
-# Download
+# Download and verify integrity before extraction
 RUN wget --progress=dot:giga --retry-connrefused --read-timeout=60 --timeout=30 -O /tmp/oss-cad-suite.tgz \
     "https://github.com/YosysHQ/oss-cad-suite-build/releases/download/${RELEASE_TAG}/oss-cad-suite-${ARCH}-${RELEASE_DATE}.tgz" \
+    && echo "${OSS_CAD_SUITE_SHA256}  /tmp/oss-cad-suite.tgz" | sha256sum -c - \
     && mkdir -p /opt \
     && tar xzf /tmp/oss-cad-suite.tgz -C /opt \
     && rm -f /tmp/oss-cad-suite.tgz \

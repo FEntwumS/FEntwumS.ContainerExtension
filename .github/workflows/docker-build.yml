@@ -27,7 +27,7 @@ concurrency:
 jobs:
   docker-build:
     name: Build & Scan Container
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
@@ -49,10 +49,10 @@ jobs:
         platforms: linux/amd64
         tags: |
           fentwums/oss-cad-suite:latest
-          fentwums/oss-cad-suite:2026-06-20
+          fentwums/oss-cad-suite:2026-06-26
         build-args: |
-          RELEASE_TAG=2026-06-20
-          RELEASE_DATE=20260620
+          RELEASE_TAG=2026-06-26
+          RELEASE_DATE=20260626
           ARCH=linux-x64
         load: true
         cache-from: type=gha

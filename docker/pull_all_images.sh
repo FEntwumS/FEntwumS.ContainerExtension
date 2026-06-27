@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# pull_all_images.sh
-# ==============================================================================
+# Pulls the toolchain images the plugin references, for offline use.
 set -Eeuo pipefail
 trap 'echo -e "\nProcess terminated abnormally." ; exit 1' ERR INT TERM
 

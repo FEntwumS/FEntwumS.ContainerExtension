@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to suggest a feature!
+        Describe the proposed feature and its motivation.
   - type: textarea
     id: problem
     attributes:

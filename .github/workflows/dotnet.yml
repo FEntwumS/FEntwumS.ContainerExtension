@@ -8,59 +8,84 @@ on:
 
 permissions:
   contents: read
-  security-events: write # Required for CodeQL
-  actions: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-test-scan:
-    runs-on: ubuntu-26.04
-    name: Build, Test & Scan
-    timeout-minutes: 20
-
+  format:
+    name: Format
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v6
-      with:
-        submodules: recursive
-        fetch-depth: 0
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore
+        run: dotnet restore OneWare.ContainerExtension.slnx
+      - name: Verify formatting
+        run: dotnet format OneWare.ContainerExtension.slnx --verify-no-changes --no-restore
 
-    - name: Setup .NET SDK
-      uses: actions/setup-dotnet@v5
-      with:
-        dotnet-version: '10.0.x'
+  build-test:
+    name: Build & Test (${{ matrix.os }})
+    needs: format
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-24.04, windows-latest, macos-latest ]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/global.json', '**/Directory.Packages.props', '**/Directory.Build.props', '**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+      - name: Restore
+        run: dotnet restore OneWare.ContainerExtension.slnx
+      - name: Build (deterministic, warnings as errors)
+        run: dotnet build OneWare.ContainerExtension.slnx --no-restore -warnaserror -c Release
+        env:
+          GITHUB_ACTIONS: true
+      - name: Test
+        run: dotnet test OneWare.ContainerExtension.slnx --no-build --verbosity normal -warnaserror -c Release
+        env:
+          GITHUB_ACTIONS: true
 
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v4
-      with:
-        languages: csharp
-
-    - name: Cache NuGet packages
-      uses: actions/cache@v5
-      with:
-        path: ~/.nuget/packages
-        key: ${{ runner.os }}-nuget-${{ hashFiles('**/global.json', '**/Directory.Packages.props', '**/Directory.Build.props', '**/*.csproj') }}
-        restore-keys: ${{ runner.os }}-nuget-
-
-    - name: Restore dependencies
-      run: dotnet restore OneWare.ContainerExtension.slnx
-
-    - name: Verify Formatting
-      run: dotnet format OneWare.ContainerExtension.slnx --verify-no-changes --no-restore
-
-    - name: Build (Deterministic Mode)
-      run: dotnet build OneWare.ContainerExtension.slnx --no-restore -warnaserror -c Release
-      env:
-        GITHUB_ACTIONS: true
-
-    - name: Test
-      run: dotnet test OneWare.ContainerExtension.slnx --no-build --verbosity normal -warnaserror -c Release
-
-    - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v4
-      continue-on-error: true
-      with:
-        category: "/language:csharp"
+  codeql:
+    name: CodeQL
+    needs: format
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: csharp
+      - name: Build for analysis
+        run: dotnet build OneWare.ContainerExtension.slnx -c Release
+        env:
+          GITHUB_ACTIONS: true
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:csharp"

@@ -6,8 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to fill out this bug report! 
-        **Security Notice:** If this issue involves a security vulnerability (e.g., container escape, credential leakage, network exfiltration), please refer to our [SECURITY.md](../SECURITY.md) and report it privately.
+        Provide the following details so the issue can be reproduced.
+        **Security notice:** if this involves a vulnerability (container escape, credential leakage, network exfiltration), do not file it here; follow the private process in [SECURITY.md](https://github.com/FEntwumS/FEntwumS.ContainerExtension/blob/main/.github/SECURITY.md).
   - type: textarea
     id: description
     attributes:

@@ -37,8 +37,7 @@ sbom.spdx.json
 TestResults/
 coverage/
 
-# Exclude tests and benchmarking harness
+# Exclude tests and benchmarking harness (fixtures, integration scripts, unit tests)
 tests/
-scripts/
-local_tests/
-local_test_workflows.sh
+__pycache__/
+.DS_Store
