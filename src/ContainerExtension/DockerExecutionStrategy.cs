@@ -2511,6 +2511,20 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             wasCancelled = result.wasCancelled;
             resourceProfile = result.profile;
 
+            if (wasCancelled)
+            {
+                // RunContainerAsync drains output and returns on cancellation rather than throwing, so
+                // the OperationCanceledException catch below never runs on the timeout path. Surface the
+                // timeout cause here, where the timeout source is distinguishable from a caller cancel,
+                // so the user sees "timed out after N minutes" instead of a bare exit code of -1.
+                if (timeoutMinutes > 0 && timeoutCts?.IsCancellationRequested == true && !cancellationToken.IsCancellationRequested)
+                {
+                    errorMessage = $"Execution timed out after {timeoutMinutes:N0} minute(s).";
+                    SafeInvoke(() => command.ErrorHandler?.Invoke($"[Docker SDK] {errorMessage}"));
+                }
+                return (false, result.output);
+            }
+
             SdkLog(command, $"[Docker SDK] Container finished. Exit code: {exitCode}", RankInfo);
             return (exitCode == 0, result.output);
         }

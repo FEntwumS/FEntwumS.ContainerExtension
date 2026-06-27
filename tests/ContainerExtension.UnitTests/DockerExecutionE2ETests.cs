@@ -877,6 +877,40 @@ public sealed class DockerExecutionE2ETests : IDisposable
     }
 
     [FactIfNoCI]
+    public async Task F1_Timeout_DuringExecution_SurfacesTimeoutMessage()
+    {
+        // A timeout that expires while the container is running (i.e. while WaitContainerAsync blocks)
+        // must surface a "timed out" message, not a bare exit code. RunContainerAsync drains and returns
+        // on cancellation instead of throwing, so this path is handled in ExecuteAsync rather than the
+        // OperationCanceledException catch. A 30 s sleep against a ~3 s timeout reliably lands in the wait.
+        var tempDir = Path.Combine(Path.GetTempPath(), "F1_TimeoutMsg_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            using var provider = new E2ETestServiceProvider();
+            provider.SettingsService.SetSettingValue(ContainerExtensionModule.TimeoutSetting, 0.05); // ~3 s
+            provider.SettingsService.SetSettingValue("ContainerImage_sh", "hdlc/ghdl:yosys");
+            using var strategy = new DockerExecutionStrategy(provider);
+
+            var messages = new System.Collections.Concurrent.ConcurrentBag<string>();
+            var cmd = new ToolCommand
+            {
+                Executable = "sh",
+                ToolName = "sh",
+                WorkingDirectory = tempDir,
+                CommandArguments = BuildArgs("-c", "sleep 30"),
+                ErrorHandler = s => { messages.Add(s); return true; },
+            };
+
+            var (success, _) = await strategy.ExecuteAsync(cmd);
+
+            Assert.False(success);
+            Assert.Contains(messages, m => m.Contains("timed out", StringComparison.OrdinalIgnoreCase));
+        }
+        finally { try { Directory.Delete(tempDir, true); } catch { } }
+    }
+
+    [FactIfNoCI]
     public async Task F1_GHDL_EmptySource_Boundary()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F1_Empty_" + Guid.NewGuid().ToString("N"));
