@@ -39,6 +39,14 @@ DEFAULT_IMAGE = "fentwums/oss-cad-suite:latest"
 # for the next. `artifacts` are SHA-256 hashed after the run for cross-platform
 # output-determinism.
 WORKLOADS = [
+    # Container lifecycle floor: a no-op command measures the fixed per-invocation container overhead
+    # (create / start / exec / wait / teardown) with zero tool compute, through the same backend image
+    # resolution as the real workloads. It lets aggregate.py decompose each workload's wall-clock into
+    # the lifecycle floor and a compute estimate (mean - floor), separating cold-start from compute.
+    {
+        "name": "lifecycle_floor", "category": "lifecycle", "workdir": "Verilog_Blink",
+        "cmd": ["true"], "artifacts": [],
+    },
     # --- iCE40 (Lattice) flow ---
     {
         "name": "synth_ice40_yosys", "category": "synthesis", "workdir": "iCE40_Flow",
