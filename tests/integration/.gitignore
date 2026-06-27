@@ -17,3 +17,4 @@ build/
 obj_dir/
 Blink/
 test_report.md
+harness_smoke_report.md

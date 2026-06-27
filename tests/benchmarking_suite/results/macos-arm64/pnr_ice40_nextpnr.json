@@ -1,0 +1,131 @@
+{
+  "schema_version": 2,
+  "timestamp": "2026-06-27T11:28:40.321491+02:00",
+  "system": {
+    "os": "Darwin",
+    "release": "25.6.0",
+    "machine": "arm64",
+    "cpu_model": "Apple M4 Max",
+    "logical_cores": 16,
+    "total_ram_gb": 128.0,
+    "python_version": "3.9.6",
+    "docker": {
+      "server_version": "29.4.0",
+      "operating_system": "OrbStack",
+      "storage_driver": "overlayfs",
+      "architecture": "aarch64"
+    }
+  },
+  "experiment": {
+    "workload": "nextpnr-ice40 --hx1k --json ice40_blink.json --pcf ice40_blink.pcf --asc ice40_blink.asc",
+    "native_tool_version": "Unknown or executable missing",
+    "image": "fentwums/oss-cad-suite:2026-06-26",
+    "image_digest": "fentwums/oss-cad-suite@sha256:fb1213ad512efa5a0b3ff9cfa433a54bbbc3da5861b536a46f7afb9726ca7af2",
+    "platform_override": null,
+    "backend": "all",
+    "interleaved": false,
+    "iterations": 10,
+    "warmup": 1,
+    "target_cv_percent": 12.0,
+    "max_iterations": 20,
+    "input_file_sha256": {
+      "ice40_blink.json": "e4749c3dcfe7655d291d64db8e27b6cc50ccbe39ebfee627e3bedaf48ecfb310",
+      "ice40_blink.pcf": "963e0816fa5067cfe60e2e34275c0d29f1ec286f09bac805972da0055380e2ec",
+      "ice40_blink.asc": "31350507657f945e90cce6c6f4224410e55193cfdcbdcafcd206f3f380f045ba"
+    },
+    "harness_git_commit": "8491aa1efc89",
+    "benchmark_py_sha256": "81630b835f86e4a18bff43051492f3c74c379ef59ddae8587f60f67cf2467f39"
+  },
+  "results": {
+    "native": {
+      "times": [],
+      "return_codes": [],
+      "statistics": null
+    },
+    "docker": {
+      "times": [
+        0.603798584,
+        0.6108378340000002,
+        0.5565731659999997,
+        0.6068176249999997,
+        0.6063855,
+        0.5606997920000003,
+        0.6053522089999994,
+        0.609096375,
+        0.5619807909999999,
+        0.600100125
+      ],
+      "return_codes": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "statistics": {
+        "n": 10,
+        "mean": 0.5921642000999999,
+        "stdev": 0.022589086902522107,
+        "sem": 0.007143296487544778,
+        "ci95_halfwidth": 0.01615813665482629,
+        "ci95_low": 0.5760060634451737,
+        "ci95_high": 0.6083223367548262,
+        "min": 0.5565731659999997,
+        "max": 0.6108378340000002,
+        "median": 0.6045753964999997,
+        "p95": 0.6108378340000002,
+        "cv_percent": 3.81
+      },
+      "peak_rss_bytes": 48758784
+    },
+    "docker_dotnet": {
+      "times": [
+        0.7664364169999995,
+        0.7530507919999998,
+        0.7576342919999988,
+        0.7567667079999989,
+        0.7641767080000008,
+        0.7780548330000006,
+        0.7606237499999988,
+        0.7684610420000002,
+        0.7090807080000001,
+        0.7526472920000007
+      ],
+      "return_codes": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "statistics": {
+        "n": 10,
+        "mean": 0.7566932541999998,
+        "stdev": 0.018435053633238604,
+        "sem": 0.005829675826839635,
+        "ci95_halfwidth": 0.013186726720311254,
+        "ci95_low": 0.7435065274796885,
+        "ci95_high": 0.7698799809203111,
+        "min": 0.7090807080000001,
+        "max": 0.7780548330000006,
+        "median": 0.7591290209999988,
+        "p95": 0.7780548330000006,
+        "cv_percent": 2.44
+      },
+      "peak_rss_bytes": 107692032
+    }
+  },
+  "output_artifacts_sha256": {
+    "ice40_blink.asc": "31350507657f945e90cce6c6f4224410e55193cfdcbdcafcd206f3f380f045ba"
+  }
+}
