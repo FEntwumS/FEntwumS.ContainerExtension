@@ -60,7 +60,8 @@ def holm_bonferroni(pvals):
 def write_csv(data, out_csv):
     cols = ["platform", "cpu_model", "workload", "backend", "n", "mean_s", "ci95_low_s",
             "ci95_high_s", "cv_percent", "overhead_x_vs_native", "overhead_p_value",
-            "overhead_p_holm", "overhead_x_vs_cli", "overhead_p_vs_cli", "overhead_p_vs_cli_holm"]
+            "overhead_p_holm", "overhead_x_vs_cli", "overhead_p_vs_cli", "overhead_p_vs_cli_holm",
+            "container_peak_mem_mb"]
     raw, family = [], []
     for plat, workloads in sorted(data.items()):
         for wl, d in sorted(workloads.items()):
@@ -84,6 +85,8 @@ def write_csv(data, out_csv):
                     if eentry:
                         ext_x = eentry.get("relative_overhead_x", "")
                         ext_p = (eentry.get("welch") or {}).get("p_value", "")
+                cmem = blk.get("container_peak_mem_bytes")
+                cmem_mb = round(cmem / (1024 * 1024), 1) if isinstance(cmem, (int, float)) else ""
                 nat_key, cli_key = f"{plat}|{wl}|{label}|nat", f"{plat}|{wl}|{label}|cli"
                 if isinstance(overhead_p, (int, float)):
                     family.append((nat_key, overhead_p))
@@ -91,10 +94,10 @@ def write_csv(data, out_csv):
                     family.append((cli_key, ext_p))
                 raw.append(([plat, cpu, wl, label, s["n"], round(s["mean"], 6),
                              round(s["ci95_low"], 6), round(s["ci95_high"], 6),
-                             s["cv_percent"], overhead_x, overhead_p, ext_x, ext_p], nat_key, cli_key))
+                             s["cv_percent"], overhead_x, overhead_p, ext_x, ext_p, cmem_mb], nat_key, cli_key))
     # Holm-Bonferroni across the whole family of reported overhead tests (FWER control).
     adjusted = holm_bonferroni(family)
-    rows = [r[:11] + [adjusted.get(nat_key, "")] + r[11:13] + [adjusted.get(cli_key, "")]
+    rows = [r[:11] + [adjusted.get(nat_key, "")] + r[11:13] + [adjusted.get(cli_key, "")] + [r[13]]
             for r, nat_key, cli_key in raw]
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)

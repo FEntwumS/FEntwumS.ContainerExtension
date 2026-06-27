@@ -426,6 +426,24 @@ def run_command(cmd: Sequence[str], cwd: Optional[str] = None,
         return -1.0, None
 
 
+def capture_container_peak_mem(cmd: Sequence[str], cwd: Optional[str],
+                              timeout: Optional[int]) -> Optional[int]:
+    """Run the strategy harness once, untimed, and parse the real in-container peak memory it reports on
+    stderr (``BENCH_PEAK_MEM_BYTES=...``). Host-side RUSAGE measures only the harness/CLI process, not
+    the container, so this is the only faithful container-memory figure; only the dotnet backend emits it."""
+    try:
+        r = subprocess.run(list(cmd), capture_output=True, text=True, cwd=cwd, timeout=timeout, check=False)
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    for line in (r.stderr or "").splitlines():
+        if line.startswith("BENCH_PEAK_MEM_BYTES="):
+            try:
+                return int(line.split("=", 1)[1].strip())
+            except ValueError:
+                return None
+    return None
+
+
 def measure_pull_cost(image: str, platform_flag: Optional[str], timeout: int) -> Optional[dict]:
     """Remove the image then time a cold pull, to separate pull cost from run cost."""
     logging.info("Measuring cold image-pull cost for %s ...", image)
@@ -642,11 +660,13 @@ def export_json(args, native_times, native_rcs, docker_results: Dict[str, Dict],
     if not args.output:
         return
 
-    def block(times, rcs, peak=None):
+    def block(times, rcs, peak=None, container_mem=None):
         b = {"times": times or [], "return_codes": rcs or [],
              "statistics": calculate_stats(times) if times else None}
         if peak is not None:
             b["peak_rss_bytes"] = peak
+        if container_mem is not None:
+            b["container_peak_mem_bytes"] = container_mem
         return b
 
     data = {
@@ -682,7 +702,8 @@ def export_json(args, native_times, native_rcs, docker_results: Dict[str, Dict],
     }
     for backend, res in docker_results.items():
         key = "docker" if backend == "cli" else f"docker_{backend}"
-        data["results"][key] = block(res.get("times"), res.get("rcs"), res.get("peak_rss"))
+        data["results"][key] = block(res.get("times"), res.get("rcs"), res.get("peak_rss"),
+                                     res.get("container_mem"))
 
     # Comparison block. Native-vs-backend rows require a native baseline; the cli-vs-dotnet row (the
     # extension's overhead beyond raw containerization) does not, so it is computed whenever both
@@ -874,6 +895,13 @@ def main():
     if args.artifacts:
         extra["artifacts"] = hash_artifacts(args.artifacts, workspace)
         logging.info("Hashed %s output artifact(s) for determinism comparison.", len(args.artifacts))
+
+    # Capture the real in-container peak memory from the strategy backend via one untimed run; host-side
+    # RUSAGE sees only the harness process, not the container. The raw-CLI backend has no such side
+    # channel and is left unset rather than reported with a misleading host-side value.
+    if "dotnet" in docker_results and docker_results["dotnet"].get("times"):
+        docker_results["dotnet"]["container_mem"] = capture_container_peak_mem(
+            backend_cmds["dotnet"], workspace, args.timeout)
 
     wall_elapsed = time.perf_counter() - wall_start
     print_results(native_times, docker_results.get("cli", {}).get("times"),

@@ -79,6 +79,17 @@ sealed class Program
             };
 
             var result = await strategy.ExecuteAsync(command).ConfigureAwait(false);
+
+            // Emit the real in-container peak memory (from the strategy's stats stream) on stderr as a
+            // machine-readable line the benchmark driver can parse. Host-side RUSAGE measures only this
+            // harness process, not the container, so this is the only faithful container-memory figure.
+            var profile = strategy.LastResourceProfile;
+            if (profile is not null && profile.PeakMemoryBytes > 0)
+            {
+                await Console.Error.WriteLineAsync(
+                    $"BENCH_PEAK_MEM_BYTES={profile.PeakMemoryBytes.ToString(System.Globalization.CultureInfo.InvariantCulture)}")
+                    .ConfigureAwait(false);
+            }
             return result.success ? 0 : 1;
         }
         finally
