@@ -121,9 +121,16 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     internal static double GetHostMemoryMB()
     {
         var mem = Volatile.Read(ref _cachedHostMemoryMb);
-        if (mem < 0)
+        if (mem <= 0)
         {
             mem = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / (1024.0 * 1024.0);
+            // Detection can report 0 (or an implausibly small value) on constrained or unusual hosts.
+            // Fall back to a sane default so the memory-limit slider keeps a usable Maximum instead of
+            // collapsing to the degenerate [0, 0] range.
+            if (mem < 512)
+            {
+                mem = 8192;
+            }
             Volatile.Write(ref _cachedHostMemoryMb, mem);
         }
         return mem;

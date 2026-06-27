@@ -174,14 +174,16 @@ public partial class DockerDiagnosticsView
                 Command = new AsyncRelayCommand(async () =>
                 {
                     var prevTip = ToolTip.GetTip(removeBtn);
-                    // Image deletion is destructive and irreversible without a re-pull.
+                    // Image deletion is destructive and irreversible without a re-pull. Disable the
+                    // button before the confirm dialog so a rapid second click cannot stack dialogs.
+                    removeBtn.IsEnabled = false;
                     if (!await ShowConfirmDialogAsync("Remove Image", $"Remove image '{repoTag}'? This deletes it from local storage and fails if a container is using it.", "Remove"))
                     {
+                        removeBtn.IsEnabled = true;
                         return;
                     }
                     try
                     {
-                        removeBtn.IsEnabled = false;
                         removeBtn.Content = "Removing...";
                         await _strategy.RemoveImageAsync(imageId);
                         await RefreshAllAsync();

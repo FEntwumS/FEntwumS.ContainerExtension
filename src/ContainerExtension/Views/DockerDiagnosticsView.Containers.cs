@@ -69,7 +69,13 @@ public partial class DockerDiagnosticsView
                     return;
                 }
             }
-            _openLogWindows[logContainerId] = null!;
+            // Atomically claim the slot so a rapid double-click cannot open two windows for the same
+            // container. The check above already focuses an already-open window; a failed claim here
+            // means another click is mid-open, so this one bails rather than leaking a second window.
+            if (!_openLogWindows.TryAdd(logContainerId, null!))
+            {
+                return;
+            }
 
             try
             {
