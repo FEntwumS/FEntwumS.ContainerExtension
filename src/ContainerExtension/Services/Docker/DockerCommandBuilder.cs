@@ -15,8 +15,9 @@ using OneWare.Essentials.ToolEngine;
 namespace ContainerExtension.Services.Docker;
 
 /// <summary>
-/// Static utility class for constructing Docker 'run' arguments, validating environment variables, 
-/// and securely escaping shell parameters for container execution.
+/// Constructs Docker 'run' argument lists, escapes shell parameters, and parses <c>.env</c> files
+/// for container execution. Environment keys and values are validated against shell-injection
+/// vectors before inclusion.
 /// </summary>
 internal static class DockerCommandBuilder
 {
@@ -57,13 +58,11 @@ internal static class DockerCommandBuilder
             {
                 if (arg == null) continue;
 
-                // Check for shell output redirection (e.g. > or >>)
                 if (arg.Contains('>') || arg.Contains(">>"))
                 {
                     return true;
                 }
 
-                // Check for write/output flags
                 if (arg.Equals("-o", StringComparison.Ordinal) || arg.StartsWith("-o=", StringComparison.Ordinal) || arg.StartsWith("-o ", StringComparison.Ordinal) ||
                     arg.Equals("-w", StringComparison.Ordinal) || arg.StartsWith("-w=", StringComparison.Ordinal) || arg.StartsWith("-w ", StringComparison.Ordinal) ||
                     arg.Equals("-a", StringComparison.Ordinal) || arg.StartsWith("-a=", StringComparison.Ordinal) || arg.StartsWith("-a ", StringComparison.Ordinal) ||
@@ -157,8 +156,25 @@ internal static class DockerCommandBuilder
         rawExePath = HealEscapedPaths(rawExePath);
         var executablePath = NormalizeSeparators(rawExePath);
         var executable = Path.GetFileName(executablePath);
-        var resolvedWorkingDir = string.IsNullOrWhiteSpace(command.WorkingDirectory) ? Directory.GetCurrentDirectory() : command.WorkingDirectory;
-        var workingDirFull = Path.GetFullPath(resolvedWorkingDir);
+
+        // The caller must supply an absolute working directory (the project root). Resolving a relative
+        // or empty value against the process directory would silently mount the plugin's own bin folder
+        // (e.g. "<bin>/Debug/net10.0/C:/Users/.../Project:/workspace"), producing a broken bind. Reject it
+        // with an actionable message instead.
+        if (string.IsNullOrWhiteSpace(command.WorkingDirectory))
+        {
+            throw new InvalidOperationException(
+                "No working directory was supplied for the tool command; the container workspace cannot be mounted. " +
+                "The caller must provide the absolute project path.");
+        }
+        if (!Path.IsPathRooted(command.WorkingDirectory))
+        {
+            throw new InvalidOperationException(
+                $"The tool working directory '{command.WorkingDirectory}' is not an absolute path. It would be resolved " +
+                "against the plugin's process directory and produce an incorrect bind mount. The caller must provide an " +
+                "absolute project path.");
+        }
+        var workingDirFull = Path.GetFullPath(command.WorkingDirectory);
         workingDirFull = ResolvePhysicalPath(workingDirFull);
         if (!Path.IsPathRooted(workingDirFull))
         {
@@ -283,7 +299,15 @@ internal static class DockerCommandBuilder
             }
         }
 
-        var fullCmdString = executable;
+        // Argv/exec command model: emit the command as a token vector [executable, ...mapped args]
+        // rather than reconstructing a single `sh -c <string>` line. OneWare hands the strategy an
+        // already-tokenized, path-mapped argument vector (ToolCommand.Arguments) and its NativeStrategy
+        // runs it shell-lessly; the container entrypoint (tini) together with HostConfig.Init execs argv
+        // directly. Passing argv removes the host-to-container shell entirely, so no shell-injection
+        // surface exists by construction, and keeps the containerized invocation faithful to the native
+        // one. Per-token path mapping and the GHDL library remapping below are preserved; only the shell
+        // reconstruction and its denylist quoting are removed.
+        var cmdTokens = new List<string>(1 + (command.Arguments?.Count ?? 0)) { executable };
         if (command.Arguments != null && command.Arguments.Count > 0)
         {
             var argsList = command.Arguments.ToList();
@@ -373,17 +397,12 @@ internal static class DockerCommandBuilder
                 }
             }
 
-            var sbArgs = new StringBuilder();
             for (int i = 0; i < argsList.Count; i++)
             {
                 var a = argsList[i];
                 if (a == null) continue;
-                if (sbArgs.Length > 0)
-                {
-                    sbArgs.Append(' ');
-                }
 
-                // Check if the previous argument was --work or -work (indicating this argument is a library name)
+                // A library name following --work/-work is not a path and must not be rewritten.
                 bool isWorkValue = false;
                 if (i > 0)
                 {
@@ -421,28 +440,13 @@ internal static class DockerCommandBuilder
                     mapped = ShouldMapArgument(a) ? MapPathToContainer(a, workingDirFull, workingDirCanonical) : a;
                 }
 
-                var processed = NormalizeSeparators(mapped);
-
-                if (processed.AsSpan().ContainsAny(ShellSpecialChars))
-                {
-                    var escaped = processed
-                        .Replace("\\", "\\\\", StringComparison.Ordinal)
-                        .Replace("\"", "\\\"", StringComparison.Ordinal)
-                        .Replace("$", "\\$", StringComparison.Ordinal)
-                        .Replace("`", "\\`", StringComparison.Ordinal);
-                    sbArgs.Append('"').Append(escaped).Append('"');
-                }
-                else
-                {
-                    sbArgs.Append(processed);
-                }
-            }
-            if (sbArgs.Length > 0)
-            {
-                fullCmdString += " " + sbArgs.ToString();
+                // Each mapped token becomes one argv element. No shell escaping or quoting is applied:
+                // the token is delivered verbatim to the program through execve, exactly as OneWare's
+                // native execution would, so shell metacharacters are inert data rather than syntax.
+                cmdTokens.Add(NormalizeSeparators(mapped));
             }
         }
-        var fullCmd = new List<string> { "sh", "-c", fullCmdString };
+        var fullCmd = cmdTokens;
 
         var counter = Interlocked.Increment(ref _containerCounter);
         var containerName = $"{SanitizeContainerName(rawPrefix)}{SanitizeContainerName(executable)}-{DateTime.Now.ToString("HHmmssfff", System.Globalization.CultureInfo.InvariantCulture)}-{counter}-{Guid.NewGuid().ToString("N")[..8]}";
@@ -474,15 +478,34 @@ internal static class DockerCommandBuilder
         };
 
         var envVars = ParseEnvFile(workingDirFull);
-        var envCount = (envVars?.Count ?? 0) + (command.EnvironmentVariables?.Count ?? 0);
+        var hostVars = command.EnvironmentVariables;
+        var hostCount = hostVars?.Count ?? 0;
+        var envCount = (envVars?.Count ?? 0) + hostCount + 1;
         var envList = new List<string>(envCount);
-        if (envVars != null)
+
+        // The variable-count cap must only ever drop bulk .env entries, never the host-provided
+        // variables. Those also carry higher precedence, so they are appended LAST (Docker keeps
+        // the last occurrence of a duplicate key). Reserve room for the host vars plus a possible
+        // HOME fallback and truncate only the .env contribution to fit within the limit.
+        const int maxEnv = 500;
+        var envBudget = Math.Max(0, maxEnv - hostCount - 1);
+        if (envVars != null && envVars.Count > 0)
         {
-            envList.AddRange(envVars);
+            if (envVars.Count > envBudget)
+            {
+                envList.AddRange(envVars.Take(envBudget));
+                var dropped = envVars.Count - envBudget;
+                sdkLog(command, $"[Docker SDK] Warning: .env had {envVars.Count} entries; dropped {dropped} to stay within the {maxEnv}-variable limit (host variables are always kept).");
+                ContainerTelemetry.TrackError("DockerCommandBuilder", "Environment variable truncation", null, $"Dropped {dropped} of {envVars.Count} .env entries (limit {maxEnv})");
+            }
+            else
+            {
+                envList.AddRange(envVars);
+            }
         }
-        if (command.EnvironmentVariables != null && command.EnvironmentVariables.Count > 0)
+        if (hostVars != null && hostCount > 0)
         {
-            foreach (var kvp in command.EnvironmentVariables)
+            foreach (var kvp in hostVars)
             {
                 envList.Add($"{kvp.Key}={kvp.Value}");
             }
@@ -491,11 +514,6 @@ internal static class DockerCommandBuilder
         if (!envList.Any(e => e.StartsWith("HOME=", StringComparison.Ordinal)))
         {
             envList.Add("HOME=/tmp");
-        }
-
-        if (envList.Count > 500)
-        {
-            envList.RemoveRange(500, envList.Count - 500);
         }
 
         if (envList.Count > 0)
@@ -595,7 +613,23 @@ internal static class DockerCommandBuilder
                                 int.TryParse(guestPart[..guestDash], out var guestStart) &&
                                 int.TryParse(guestPart[(guestDash + 1)..], out var guestEnd))
                             {
+                                // Reject out-of-range or inverted endpoints and clamp the span so a
+                                // malformed mapping such as "0-2000000000" cannot spin a near-unbounded
+                                // loop and exhaust memory during container creation.
+                                const int maxPort = 65535;
+                                const int maxRange = 1024;
+                                if (hostStart < 0 || hostStart > maxPort || hostEnd < hostStart || hostEnd > maxPort ||
+                                    guestStart < 0 || guestStart > maxPort || guestEnd < guestStart || guestEnd > maxPort)
+                                {
+                                    sdkLog(command, $"[Docker SDK] Warning: ignoring invalid port-range mapping '{portMappingStr}'.");
+                                    continue;
+                                }
                                 var rangeCount = Math.Min(hostEnd - hostStart, guestEnd - guestStart);
+                                if (rangeCount > maxRange)
+                                {
+                                    sdkLog(command, $"[Docker SDK] Warning: port-range mapping '{portMappingStr}' exceeds {maxRange} ports; truncating.");
+                                    rangeCount = maxRange;
+                                }
                                 for (int r = 0; r <= rangeCount; r++)
                                 {
                                     var hp = (hostStart + r).ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -624,6 +658,20 @@ internal static class DockerCommandBuilder
                         }
                         else
                         {
+                            if (!int.TryParse(guestPart, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var guestPort) ||
+                                guestPort < 1 || guestPort > 65535)
+                            {
+                                sdkLog(command, $"[Docker SDK] Warning: ignoring invalid port mapping '{portMappingStr}'.");
+                                continue;
+                            }
+                            if (!string.IsNullOrEmpty(hostPart) &&
+                                (!int.TryParse(hostPart, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var hostPort) ||
+                                 hostPort < 0 || hostPort > 65535))
+                            {
+                                sdkLog(command, $"[Docker SDK] Warning: ignoring invalid port mapping '{portMappingStr}'.");
+                                continue;
+                            }
+
                             var key = $"{guestPart}/{proto}";
                             createParams.ExposedPorts[key] = default;
                             var binding = new PortBinding { HostPort = hostPart };
@@ -789,7 +837,7 @@ internal static class DockerCommandBuilder
                     }
                     var value = lineSpan[(eqIdx + 1)..].Trim().ToString();
 
-                    // Check if quotes are balanced on the same line
+                    // Multi-line quoted values are unsupported; reject unbalanced quotes within the line.
                     bool inDoubleQuotes = false;
                     bool inSingleQuotes = false;
                     for (int charIdx = 0; charIdx < value.Length; charIdx++)
@@ -1508,7 +1556,6 @@ internal static class DockerCommandBuilder
             return false;
         }
 
-        // Check for common flags with '='
         var eqIdx = arg.IndexOf('=');
         if (eqIdx > 0)
         {
@@ -1526,7 +1573,6 @@ internal static class DockerCommandBuilder
             }
         }
 
-        // Check for flags like -P or -o followed immediately by path
         if (arg.StartsWith("-P", StringComparison.Ordinal) && arg.Length > 2)
         {
             var s = arg[2..];
@@ -1548,7 +1594,6 @@ internal static class DockerCommandBuilder
             }
         }
 
-        // Check if the whole argument is absolute/rooted
         if (Path.IsPathRooted(arg) || arg.StartsWith("~/", StringComparison.Ordinal) || arg.StartsWith("~\\", StringComparison.Ordinal))
         {
             return true;
@@ -1626,7 +1671,7 @@ internal static class DockerCommandBuilder
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            // Ignore exceptions to remain robust
+            // Best-effort library lookup; any I/O or parse failure falls through to no mapping.
         }
         return null;
     }
@@ -1681,7 +1726,7 @@ internal static class DockerCommandBuilder
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            // Ignore exceptions to remain robust
+            // Best-effort library lookup; any I/O or parse failure falls through to no mapping.
         }
         return null;
     }

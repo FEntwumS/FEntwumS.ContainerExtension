@@ -54,8 +54,6 @@ public sealed class ContainerExtensionTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    // -- Smoke Test ------------------------------------------------------
-
     [Fact]
     public void LoadLibrary()
     {
@@ -72,8 +70,6 @@ public sealed class ContainerExtensionTests : IDisposable
 
 
 
-
-    // -- String Extensions - Edge Cases ----------------------------------
 
     [Theory]
     [InlineData(null, null)]
@@ -93,8 +89,6 @@ public sealed class ContainerExtensionTests : IDisposable
         var result = "   ".ShortId();
         Assert.Equal("   ", result); // Preserves exact string structure up to 12
     }
-
-    // -- Docker Image Format Validation ----------------------------------
 
     [Theory]
     [InlineData("hdlc/ghdl:yosys", true)]
@@ -118,8 +112,6 @@ public sealed class ContainerExtensionTests : IDisposable
         if (!expectedValid)
             Assert.NotNull(warning);
     }
-
-    // -- Daemon Socket URI Validation ------------------------------------
 
     [Theory]
     [InlineData("", true)]
@@ -145,8 +137,6 @@ public sealed class ContainerExtensionTests : IDisposable
         if (!expectedValid)
             Assert.NotNull(warning);
     }
-
-    // -- Resource Threshold Logic ----------------------------------------
 
     [Theory]
     [InlineData(0.0, true, false)]       // 0 = no limit, always valid, no warning
@@ -200,8 +190,6 @@ public sealed class ContainerExtensionTests : IDisposable
         }
     }
 
-    // -- Setting Constants -----------------------------------------------
-
     [Fact]
     public void SettingConstants_AreConsistentlyPrefixed()
     {
@@ -233,8 +221,6 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.True(result, $"FallbackImage '{fallback}' should pass the DockerImageFormatValidation.");
     }
 
-    // -- Container Name Prefix Validation --------------------------------
-
     [Theory]
     [InlineData("containerextension-", true)]
     [InlineData("my.prefix", true)]
@@ -255,8 +241,6 @@ public sealed class ContainerExtensionTests : IDisposable
             Assert.NotNull(warning);
     }
 
-    // -- Container Name Prefix Length Limit ------------------------------
-
     [Fact]
     public void ContainerNamePrefix_RejectsOver64Characters()
     {
@@ -273,8 +257,6 @@ public sealed class ContainerExtensionTests : IDisposable
         var result = _nameValidator.Validate(maxPrefix, out var warning);
         Assert.True(result, "Prefix of exactly 64 characters should be accepted.");
     }
-
-    // -- Container Telemetry ---------------------------------------------
 
     [Fact]
     public void Telemetry_LogAndRetrieveRoundtrip()
@@ -364,15 +346,11 @@ public sealed class ContainerExtensionTests : IDisposable
         {
             var entries = ContainerTelemetry.GetRecentEntries(100);
             var list = string.Join("; ", entries.Select(e => $"{e.Tool} (exit={e.ExitCode}, cancelled={e.WasCancelled})"));
-            Assert.Fail($"Mismatch! totalRuns={totalRuns}, successRate={successRate}. Entries: {list}");
+            Assert.Fail($"Mismatch. totalRuns={totalRuns}, successRate={successRate}. Entries: {list}");
         }
 
         ContainerTelemetry.ClearEntries();
     }
-
-    // =======================================================================
-    //  DrainLines Tests (DockerExecutionStrategy - stream demultiplexer)
-    // =======================================================================
 
     [Fact]
     public void DrainLines_SingleLine_InvokedWithoutNewline()
@@ -449,10 +427,6 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.Equal("no newline", buffer.ToString());
     }
 
-    // =======================================================================
-    //  BuildContainerParameters Tests (DockerCommandBuilder)
-    // =======================================================================
-
     [Theory]
     [InlineData("C:\u0008in\u0009ools", "C:/bin/tools")]
     [InlineData("gh\tdl", "gh/tdl")]
@@ -494,10 +468,7 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.Equal("test_image:latest", param.Image);
         Assert.Equal("/workspace", param.WorkingDir);
         Assert.NotNull(param.Cmd);
-        Assert.Equal(3, param.Cmd.Count);
-        Assert.Equal("sh", param.Cmd[0]);
-        Assert.Equal("-c", param.Cmd[1]);
-        Assert.Equal("ghdl -a file.vhd", param.Cmd[2]);
+        Assert.Equal(new[] { "ghdl", "-a", "file.vhd" }, param.Cmd);
 
         Assert.NotNull(param.HostConfig);
         Assert.Contains(param.HostConfig.Binds, b => b.EndsWith(":/workspace", StringComparison.Ordinal));
@@ -508,6 +479,42 @@ public sealed class ContainerExtensionTests : IDisposable
         {
             Assert.Equal("1000:1000", param.User);
         }
+    }
+
+    [Theory]
+    [InlineData("relative/project/dir")]
+    [InlineData("MertVerilog")]
+    [InlineData("./build")]
+    public void BuildContainerParameters_RelativeWorkingDirectory_Throws(string workingDir)
+    {
+        // A non-absolute working directory would otherwise be resolved against the plugin's process
+        // directory, mounting "<bin>/<relative>" into /workspace instead of the project root.
+        var command = new ToolCommand
+        {
+            Executable = "yosys",
+            ToolName = "synth",
+            WorkingDirectory = workingDir,
+            CommandArguments = new List<ICommandArgument> { new TestCommandArgument("-V") }
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            DockerCommandBuilder.BuildContainerParameters("img:latest", command, null!, null, null, (c, l) => { }));
+        Assert.Contains("absolute", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void BuildContainerParameters_EmptyWorkingDirectory_Throws()
+    {
+        var command = new ToolCommand
+        {
+            Executable = "yosys",
+            ToolName = "synth",
+            WorkingDirectory = "",
+            CommandArguments = new List<ICommandArgument> { new TestCommandArgument("-V") }
+        };
+
+        Assert.Throws<InvalidOperationException>(() =>
+            DockerCommandBuilder.BuildContainerParameters("img:latest", command, null!, null, null, (c, l) => { }));
     }
 
     [Fact]
@@ -562,7 +569,7 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public void BuildContainerParameters_BindsCorrectlyBasedOnToolWriteAccess()
     {
-        // 1. gmpack (pack tool -> write access -> bind without :ro)
+        // Pack tool: write access, so bind without :ro
         var cmdGmpack = new ToolCommand
         {
             Executable = "gmpack",
@@ -573,7 +580,7 @@ public sealed class ContainerExtensionTests : IDisposable
         var paramGmpack = DockerCommandBuilder.BuildContainerParameters("img", cmdGmpack, null!, null, null, (c, l) => { });
         Assert.Contains(paramGmpack.HostConfig.Binds, b => b.EndsWith(":/workspace", StringComparison.Ordinal));
 
-        // 2. openFPGALoader (programmer -> read only -> bind with :ro)
+        // Programmer: read-only, so bind with :ro
         var cmdLoader = new ToolCommand
         {
             Executable = "openFPGALoader",
@@ -584,7 +591,6 @@ public sealed class ContainerExtensionTests : IDisposable
         var paramLoader = DockerCommandBuilder.BuildContainerParameters("img", cmdLoader, null!, null, null, (c, l) => { });
         Assert.Contains(paramLoader.HostConfig.Binds, b => b.EndsWith(":/workspace:ro", StringComparison.Ordinal));
 
-        // 3. icepack (pack tool -> write access -> bind without :ro)
         var cmdIcepack = new ToolCommand
         {
             Executable = "icepack",
@@ -597,7 +603,7 @@ public sealed class ContainerExtensionTests : IDisposable
     }
 
     [Fact]
-    public void BuildContainerParameters_CommandWithSpecialCharacters_IsEscaped()
+    public void BuildContainerParameters_CommandWithSpecialCharacters_ArePassedAsArgvTokensUnquoted()
     {
         var command = new ToolCommand
         {
@@ -615,10 +621,8 @@ public sealed class ContainerExtensionTests : IDisposable
         var param = DockerCommandBuilder.BuildContainerParameters(
             "test_image:latest", command, null!, null, null, (c, l) => { });
 
-        var shellCmd = param.Cmd![2];
-        Assert.Contains("\"file with space.vhd\"", shellCmd, StringComparison.Ordinal);
-        Assert.Contains("\"part1;part2\"", shellCmd, StringComparison.Ordinal);
-        Assert.Contains("\"echo \\\"hello\\\"\"", shellCmd, StringComparison.Ordinal);
+        // Under the argv model each token is delivered verbatim as one argument; no shell quoting applies.
+        Assert.Equal(new[] { "my_tool", "file with space.vhd", "part1;part2", "echo \"hello\"" }, param.Cmd);
     }
 
     [Fact]
@@ -634,13 +638,8 @@ public sealed class ContainerExtensionTests : IDisposable
         var param = DockerCommandBuilder.BuildContainerParameters(
             "test_image", command, null!, null, null, (c, l) => { });
 
-        Assert.Equal("tool_only", param.Cmd![2]);
+        Assert.Equal(new[] { "tool_only" }, param.Cmd!);
     }
-
-    // =======================================================================
-    //  ParseEnvFile Tests (DockerExecutionStrategy - .env parsing)
-    // =======================================================================
-
 
     [Fact]
     public void ParseEnvFile_BasicKeyValue_Parsed()
@@ -787,10 +786,6 @@ public sealed class ContainerExtensionTests : IDisposable
         finally { Directory.Delete(dir, true); }
     }
 
-    // =======================================================================
-    //  Resource Profile Telemetry Tests (OOM Analyzer)
-    // =======================================================================
-
     [Fact]
     public void Telemetry_ResourceProfile_RoundTrip()
     {
@@ -857,10 +852,6 @@ public sealed class ContainerExtensionTests : IDisposable
         ContainerTelemetry.ClearEntries();
     }
 
-    // =======================================================================
-    //  Telemetry Export Tests
-    // =======================================================================
-
     [Fact]
     public void Telemetry_ExportTo_CreatesValidCopy()
     {
@@ -901,10 +892,6 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.False(File.Exists(destPath), "No file should be created when export fails.");
     }
 
-    // =======================================================================
-    //  Setting Constants Value Correctness
-    // =======================================================================
-
     [Fact]
     public void SettingConstants_HaveExpectedValues()
     {
@@ -915,10 +902,6 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.StartsWith("M", ContainerExtensionModule.WhaleIconPath, StringComparison.Ordinal); // SVG path starts with M(ove)
         Assert.StartsWith("ContainerImage_", ContainerExtensionModule.PerToolImagePrefix, StringComparison.Ordinal);
     }
-
-    // =======================================================================
-    //  Docker Image Format - Additional Edge Cases
-    // =======================================================================
 
     [Theory]
     [InlineData("my.registry:5000/org/repo:v1.2", true)]    // Registry with port and namespace
@@ -1054,7 +1037,6 @@ public sealed class ContainerExtensionTests : IDisposable
         ReflectAssembly("OneWare.Core.dll");
         ReflectAssembly("OneWare.Studio.dll");
 
-        File.WriteAllText("reflection_output.txt", result.ToString());
         Assert.Fail("Output: " + result.ToString());
     }
     [Fact]
@@ -1181,7 +1163,7 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public void MapPathToContainer_WorkLibraryOption_ExtractsLibraryName()
     {
-        var result1 = DockerCommandBuilder.MapPathToContainer("--work=/Users/mtorun/.oneware/ghdl-dummy/ghdl", "/workspace/myproj");
+        var result1 = DockerCommandBuilder.MapPathToContainer("--work=/work/.oneware/ghdl-dummy/ghdl", "/workspace/myproj");
         Assert.Equal("--work=ghdl", result1);
 
         var result2 = DockerCommandBuilder.MapPathToContainer("-work=C:\\windows\\path\\libname", "/workspace/myproj");
@@ -1200,7 +1182,7 @@ public sealed class ContainerExtensionTests : IDisposable
             {
                 new TestCommandArgument("-i"),
                 new TestCommandArgument("--work"),
-                new TestCommandArgument("/Users/mtorun/.oneware/ghdl-dummy/ghdl")
+                new TestCommandArgument("/work/.oneware/ghdl-dummy/ghdl")
             }
         };
 
@@ -1211,7 +1193,7 @@ public sealed class ContainerExtensionTests : IDisposable
             "1000", "1000",
             (cmd, log) => { });
 
-        Assert.Equal("ghdl -i --work ghdl", param.Cmd[2]);
+        Assert.Equal("ghdl -i --work ghdl", string.Join(" ", param.Cmd!));
     }
 
     [Fact]
@@ -1225,7 +1207,7 @@ public sealed class ContainerExtensionTests : IDisposable
             CommandArguments = new List<ICommandArgument>
             {
                 new TestCommandArgument("-i"),
-                new TestCommandArgument("--work=/Users/mtorun/.oneware/ghdl-dummy/ghdl")
+                new TestCommandArgument("--work=/work/.oneware/ghdl-dummy/ghdl")
             }
         };
 
@@ -1236,33 +1218,45 @@ public sealed class ContainerExtensionTests : IDisposable
             "1000", "1000",
             (cmd, log) => { });
 
-        Assert.Equal("ghdl -i --work=ghdl", param.Cmd[2]);
+        Assert.Equal("ghdl -i --work=ghdl", string.Join(" ", param.Cmd!));
     }
 
     [Fact]
     public void BuildContainerParameters_PathsWithSpaces_DoesNotSplitPath()
     {
-        var command = new ToolCommand
+        // The working directory deliberately contains a space (the behavior under test), but it must be a
+        // throwaway temp location: the builder pre-creates the mapped --workdir on the host, so a real
+        // user path here would materialize directories on disk (e.g. an iCloud folder) as a side effect.
+        var root = Path.Combine(Path.GetTempPath(), "OneWareTests_Spaces_" + Guid.NewGuid().ToString("N"));
+        var baseDir = Path.Combine(root, "with space", "addressierungsbeispiel");
+        try
         {
-            Executable = "ghdl",
-            ToolName = "test",
-            WorkingDirectory = "/Users/mtorun/Library/Mobile Documents/com~apple~CloudDocs/Downloads/_beispielprojekte/addressierungsbeispiel",
-            CommandArguments = new List<ICommandArgument>
+            var command = new ToolCommand
             {
-                new TestCommandArgument("--workdir=/Users/mtorun/Library/Mobile Documents/com~apple~CloudDocs/Downloads/_beispielprojekte/addressierungsbeispiel/build"),
-                new TestCommandArgument("/Users/mtorun/Library/Mobile Documents/com~apple~CloudDocs/Downloads/_beispielprojekte/addressierungsbeispiel/rtl/addressing.vhd")
-            }
-        };
+                Executable = "ghdl",
+                ToolName = "test",
+                WorkingDirectory = baseDir,
+                CommandArguments = new List<ICommandArgument>
+                {
+                    new TestCommandArgument($"--workdir={baseDir}/build"),
+                    new TestCommandArgument($"{baseDir}/rtl/addressing.vhd")
+                }
+            };
 
-        var param = DockerCommandBuilder.BuildContainerParameters(
-            "test_image:latest",
-            command,
-            null!,
-            "1000", "1000",
-            (cmd, log) => { });
+            var param = DockerCommandBuilder.BuildContainerParameters(
+                "test_image:latest",
+                command,
+                null!,
+                "1000", "1000",
+                (cmd, log) => { });
 
-        Assert.Contains("--workdir=/workspace/build", param.Cmd[2]);
-        Assert.Contains("/workspace/rtl/addressing.vhd", param.Cmd[2]);
+            Assert.Contains("--workdir=/workspace/build", string.Join(" ", param.Cmd!));
+            Assert.Contains("/workspace/rtl/addressing.vhd", string.Join(" ", param.Cmd!));
+        }
+        finally
+        {
+            try { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); } catch { /* best-effort */ }
+        }
     }
 
     [Fact]
@@ -1370,8 +1364,6 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.Equal("mygroup", res2.Namespace);
         Assert.Equal("myrepo", res2.Repository);
     }
-
-    // -- Additional Unit Tests -------------------------------------------
 
     [Fact]
     public void ShortId_StripsSha256PrefixCorrectly()
@@ -1544,9 +1536,9 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public void MapCommandScriptPaths_YosysScriptTest()
     {
-        var script = "synth_gatemate -top  Verilog_Blink -luttree -nomx8; write_json /Users/mtorun/OneWareStudio/Projects/Verilog_Blink/build/synth.json";
-        var workingDirFull = "/Users/mtorun/OneWareStudio/Projects/Verilog_Blink";
-        var workingDirCanonical = "/Users/mtorun/OneWareStudio/Projects/Verilog_Blink";
+        var script = "synth_gatemate -top  Verilog_Blink -luttree -nomx8; write_json /work/OneWareStudio/Projects/Verilog_Blink/build/synth.json";
+        var workingDirFull = "/work/OneWareStudio/Projects/Verilog_Blink";
+        var workingDirCanonical = "/work/OneWareStudio/Projects/Verilog_Blink";
 
         var result = DockerCommandBuilder.MapCommandScriptPaths(script, workingDirFull, workingDirCanonical);
         Assert.Equal("synth_gatemate -top  Verilog_Blink -luttree -nomx8; write_json /workspace/build/synth.json", result);
@@ -1555,9 +1547,9 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public void MapCommandScriptPaths_YosysScriptWithQuotesTest()
     {
-        var script = "\"synth_gatemate -top  Verilog_Blink -luttree -nomx8; write_json /Users/mtorun/OneWareStudio/Projects/Verilog_Blink/build/synth.json\"";
-        var workingDirFull = "/Users/mtorun/OneWareStudio/Projects/Verilog_Blink";
-        var workingDirCanonical = "/Users/mtorun/OneWareStudio/Projects/Verilog_Blink";
+        var script = "\"synth_gatemate -top  Verilog_Blink -luttree -nomx8; write_json /work/OneWareStudio/Projects/Verilog_Blink/build/synth.json\"";
+        var workingDirFull = "/work/OneWareStudio/Projects/Verilog_Blink";
+        var workingDirCanonical = "/work/OneWareStudio/Projects/Verilog_Blink";
 
         var result = DockerCommandBuilder.MapCommandScriptPaths(script, workingDirFull, workingDirCanonical);
         Assert.Equal("\"synth_gatemate -top  Verilog_Blink -luttree -nomx8; write_json /workspace/build/synth.json\"", result);
@@ -1566,9 +1558,9 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public void MapCommandScriptPaths_MultilineScriptTest()
     {
-        var script = "synth_gatemate -top Verilog_Blink\nwrite_json\t/Users/mtorun/OneWareStudio/Projects/Verilog_Blink/build/synth.json\r\n#comment";
-        var workingDirFull = "/Users/mtorun/OneWareStudio/Projects/Verilog_Blink";
-        var workingDirCanonical = "/Users/mtorun/OneWareStudio/Projects/Verilog_Blink";
+        var script = "synth_gatemate -top Verilog_Blink\nwrite_json\t/work/OneWareStudio/Projects/Verilog_Blink/build/synth.json\r\n#comment";
+        var workingDirFull = "/work/OneWareStudio/Projects/Verilog_Blink";
+        var workingDirCanonical = "/work/OneWareStudio/Projects/Verilog_Blink";
 
         var result = DockerCommandBuilder.MapCommandScriptPaths(script, workingDirFull, workingDirCanonical);
         Assert.Equal("synth_gatemate -top Verilog_Blink\nwrite_json\t/workspace/build/synth.json\r\n#comment", result);
@@ -1577,9 +1569,9 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public void MapCommandScriptPaths_NestedQuotesScriptTest()
     {
-        var script = "'\"synth_gatemate -top Verilog_Blink; write_json /Users/mtorun/OneWareStudio/Projects/Verilog_Blink/build/synth.json\"'";
-        var workingDirFull = "/Users/mtorun/OneWareStudio/Projects/Verilog_Blink";
-        var workingDirCanonical = "/Users/mtorun/OneWareStudio/Projects/Verilog_Blink";
+        var script = "'\"synth_gatemate -top Verilog_Blink; write_json /work/OneWareStudio/Projects/Verilog_Blink/build/synth.json\"'";
+        var workingDirFull = "/work/OneWareStudio/Projects/Verilog_Blink";
+        var workingDirCanonical = "/work/OneWareStudio/Projects/Verilog_Blink";
 
         var result = DockerCommandBuilder.MapCommandScriptPaths(script, workingDirFull, workingDirCanonical);
         Assert.Equal("'\"synth_gatemate -top Verilog_Blink; write_json /workspace/build/synth.json\"'", result);
@@ -1597,14 +1589,14 @@ public sealed class ContainerExtensionTests : IDisposable
             {
                 new TestCommandArgument("-m"),
                 new TestCommandArgument("--work=ghdl"),
-                new TestCommandArgument("/Users/mtorun/OneWareStudio/Projects/VHDL_Blink/VHDL_Blink.vhd")
+                new TestCommandArgument("/work/OneWareStudio/Projects/VHDL_Blink/VHDL_Blink.vhd")
             }
         };
 
         var param = DockerCommandBuilder.BuildContainerParameters(
             "img", command, null!, null, null, (c, l) => { });
 
-        var shellCmd = param.Cmd![2];
+        var shellCmd = string.Join(" ", param.Cmd!);
         Assert.Equal("ghdl -m --work=ghdl VHDL_Blink", shellCmd);
     }
 
@@ -1616,6 +1608,7 @@ public sealed class ContainerExtensionTests : IDisposable
         {
             Executable = "some-unknown-tool",
             ToolName = "some-unknown-tool",
+            WorkingDirectory = "/workspace/dir",
             CommandArguments = new List<ICommandArgument> { new TestCommandArgument(">"), new TestCommandArgument("out.txt") }
         };
         var paramRedir = DockerCommandBuilder.BuildContainerParameters("img", cmdRedir, null!, null, null, (c, l) => { });
@@ -1626,6 +1619,7 @@ public sealed class ContainerExtensionTests : IDisposable
         {
             Executable = "some-unknown-tool",
             ToolName = "some-unknown-tool",
+            WorkingDirectory = "/workspace/dir",
             CommandArguments = new List<ICommandArgument> { new TestCommandArgument("--write=out.json") }
         };
         var paramWrite = DockerCommandBuilder.BuildContainerParameters("img", cmdWrite, null!, null, null, (c, l) => { });
@@ -1768,7 +1762,7 @@ public sealed class ContainerExtensionTests : IDisposable
         var param = DockerCommandBuilder.BuildContainerParameters(
             "test_image", command, null!, null, null, (c, l) => { });
 
-        var shellCmd = param.Cmd![2];
+        var shellCmd = string.Join(" ", param.Cmd!);
         Assert.Equal("ghdl /workspace/file/name.vhd", shellCmd);
     }
 
@@ -1851,13 +1845,11 @@ public sealed class ContainerExtensionTests : IDisposable
         var scrubSensitiveInfoMethod = typeof(ContainerTelemetry).GetMethod("ScrubSensitiveInfo", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(scrubSensitiveInfoMethod);
 
-        // Test 1: ScrubSecrets (passwords, tokens)
         var secretCmd = "docker run --env PASS=mypassword --env DB_KEY=\"secretKey\" --env OTHER_SECRET='someSecret' --env REGULAR_VAR=hello";
         var expectedSecretCmd = "docker run --env PASS=*** --env DB_KEY=\"***\" --env OTHER_SECRET='***' --env REGULAR_VAR=hello";
         var resultSecret = (string)scrubSecretsMethod.Invoke(null, new object[] { secretCmd })!;
         Assert.Equal(expectedSecretCmd, resultSecret);
 
-        // Test 2: ScrubSensitiveInfo - home paths & username
         var homePath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var testPath = Path.Combine(homePath, "some", "sensitive", "file.txt");
         var resultSensitive = (string)scrubSensitiveInfoMethod.Invoke(null, new object[] { testPath })!;
@@ -1873,18 +1865,15 @@ public sealed class ContainerExtensionTests : IDisposable
             Assert.Contains("***", resultUser, StringComparison.Ordinal);
         }
 
-        // Test 3: ScrubSensitiveInfo - UNC share path
         var uncPath = @"\\host-name\share-name\folder\file.txt";
         var resultUnc = (string)scrubSensitiveInfoMethod.Invoke(null, new object[] { uncPath })!;
         Assert.Equal("[REDACTED_UNC_SHARE]", resultUnc);
 
-        // Test 4: ScrubSensitiveInfo - Cloud Key (e.g. AWS access key ID)
         var awsKeyMsg = "Error: AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE failed";
         var resultCloudKey = (string)scrubSensitiveInfoMethod.Invoke(null, new object[] { awsKeyMsg })!;
         Assert.Contains("[REDACTED_KEY]", resultCloudKey, StringComparison.Ordinal);
         Assert.DoesNotContain("AKIAIOSFODNN7EXAMPLE", resultCloudKey, StringComparison.Ordinal);
 
-        // Test 5: ScrubSensitiveInfo - IP Addresses & local domain names
         var logMessage = "Connected to 192.168.1.100 and 2001:0db8:85a3:0000:0000:8a2e:0370:7334 (node.local)";
         var resultLog = (string)scrubSensitiveInfoMethod.Invoke(null, new object[] { logMessage })!;
         Assert.DoesNotContain("192.168.1.100", resultLog, StringComparison.Ordinal);
@@ -1961,7 +1950,7 @@ public sealed class ContainerExtensionTests : IDisposable
             var param = DockerCommandBuilder.BuildContainerParameters(
                 "img", command, null!, null, null, (c, l) => { });
 
-            var shellCmd = param.Cmd![2];
+            var shellCmd = string.Join(" ", param.Cmd!);
             Assert.Equal("ghdl -m --work=iceduino --workdir=/workspace/build neorv32_iceduino_top", shellCmd);
         }
         finally
@@ -2001,7 +1990,7 @@ public sealed class ContainerExtensionTests : IDisposable
             var param1 = DockerCommandBuilder.BuildContainerParameters(
                 "img", command1, null!, null, null, (c, l) => { });
 
-            Assert.Equal("ghdl -m --work=iceduino neorv32_iceduino_top", param1.Cmd![2]);
+            Assert.Equal("ghdl -m --work=iceduino neorv32_iceduino_top", string.Join(" ", param1.Cmd!));
 
             // Command passing incorrect library option: --work neorv32 (separate arguments)
             var command2 = new ToolCommand
@@ -2021,7 +2010,7 @@ public sealed class ContainerExtensionTests : IDisposable
             var param2 = DockerCommandBuilder.BuildContainerParameters(
                 "img", command2, null!, null, null, (c, l) => { });
 
-            Assert.Equal("ghdl -m --work iceduino neorv32_iceduino_top", param2.Cmd![2]);
+            Assert.Equal("ghdl -m --work iceduino neorv32_iceduino_top", string.Join(" ", param2.Cmd!));
         }
         finally
         {
@@ -2060,7 +2049,7 @@ public sealed class ContainerExtensionTests : IDisposable
             var param = DockerCommandBuilder.BuildContainerParameters(
                 "img", command, null!, null, null, (c, l) => { });
 
-            var shellCmd = param.Cmd![2];
+            var shellCmd = string.Join(" ", param.Cmd!);
             Assert.Equal("ghdl --synth --work=iceduino --std=08 --workdir=/workspace/build neorv32_iceduino_top", shellCmd);
         }
         finally
@@ -2127,7 +2116,7 @@ public sealed class ContainerExtensionTests : IDisposable
             var param = DockerCommandBuilder.BuildContainerParameters(
                 "img", command, null!, null, null, (c, l) => { });
 
-            var shellCmd = param.Cmd![2];
+            var shellCmd = string.Join(" ", param.Cmd!);
             Assert.Equal("ghdl --synth --work=iceduino neorv32_iceduino_top -o output.v", shellCmd);
         }
         finally
@@ -2163,7 +2152,7 @@ public sealed class ContainerExtensionTests : IDisposable
                 }
             };
             var param1 = DockerCommandBuilder.BuildContainerParameters("img", command1, null!, null, null, (c, l) => { });
-            Assert.Equal("ghdl -e --work=neorv32 neorv32_top", param1.Cmd![2]);
+            Assert.Equal("ghdl -e --work=neorv32 neorv32_top", string.Join(" ", param1.Cmd!));
 
             // Test case 2: New style where pure entity name is passed to ghdl -e
             var command2 = new ToolCommand
@@ -2178,7 +2167,7 @@ public sealed class ContainerExtensionTests : IDisposable
                 }
             };
             var param2 = DockerCommandBuilder.BuildContainerParameters("img", command2, null!, null, null, (c, l) => { });
-            Assert.Equal("ghdl -e --work=neorv32 neorv32_top", param2.Cmd![2]);
+            Assert.Equal("ghdl -e --work=neorv32 neorv32_top", string.Join(" ", param2.Cmd!));
         }
         finally
         {
@@ -2319,8 +2308,8 @@ public sealed class ContainerExtensionTests : IDisposable
         var method = typeof(DockerCommandBuilder).GetMethod("MapPathToContainerInternal", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
 
-        var workingDir = "/Users/mtorun/Projects/MyProject";
-        var path1 = "/Users/mtorun/Projects/MyProject/build/out.json";
+        var workingDir = "/work/Projects/MyProject";
+        var path1 = "/work/Projects/MyProject/build/out.json";
         var result1 = method.Invoke(null, new object[] { path1, workingDir }) as string;
         Assert.Equal("/workspace/build/out.json", result1);
 
@@ -2659,8 +2648,6 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.NotEmpty(outputLines);
         Assert.Contains(outputLines, line => line.Contains("git version", StringComparison.OrdinalIgnoreCase));
     }
-
-    // -- TOCTOU Symlink Traversal Fix Tests -----------------------------
 
     [Fact]
     public void GetCanonicalPath_CircularSymlink_ThrowsDockerExecutionException()
