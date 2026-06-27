@@ -180,8 +180,8 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         }
 
         var settingsService = serviceProvider.Resolve<ISettingsService>();
-        ContainerTelemetry.TelemetryOptedOutChecker = () => { return string.Equals(settingsService.SafeGetSetting<string>(ContainerExtensionModule.TelemetryRetentionSetting, "100"), "None", StringComparison.Ordinal); };
-        ContainerTelemetry.LogLevelChecker = () => settingsService.SafeGetSetting<string>(ContainerExtensionModule.LogLevelSetting, "Verbose");
+        ContainerTelemetry.TelemetryOptedOutChecker = () => { return string.Equals(settingsService.SafeGetSetting<string>(ContainerExtensionModule.TelemetryRetentionSetting, "25"), "None", StringComparison.Ordinal); };
+        ContainerTelemetry.LogLevelChecker = () => settingsService.SafeGetSetting<string>(ContainerExtensionModule.LogLevelSetting, "Errors Only");
 
         settingsService.RegisterSettingSubCategory(SettingsCategoryBinary, SettingsSubCategoryEngine);
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DefaultImageSetting, new TextBoxSetting("Default Toolchain Image", FallbackImage, "The default container image to pull and use for all tools.") { Validator = ImageFormatValidatorNoEmpty });
@@ -202,12 +202,12 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, NetworkModeSetting, new ComboBoxSetting("Network Mode", "bridge", ["bridge", "host", "none"]));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, AutoRemoveSetting, new CheckBoxSetting("Auto-Remove Containers", true));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, AllowPrivilegedSetting, new CheckBoxSetting("Allow Privileged Containers", false));
-        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, LogLevelSetting, new ComboBoxSetting("Log Level", "Verbose", ["Off", "Errors Only", "Info", "Verbose"]));
+        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, LogLevelSetting, new ComboBoxSetting("Log Level", "Errors Only", ["Off", "Errors Only", "Info", "Verbose"]));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, ShowTimestampsSetting, new CheckBoxSetting("Show Timestamps in Logs", true));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, ContainerNamePrefixSetting, new TextBoxSetting("Container Name Prefix", "containerextension-", "Prefix for container names.") { Validator = ContainerNameValidatorInstance });
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, ExtraFlagsSetting, new TextBoxSetting("Extra Container Labels", "", "Additional key=value labels attached to the container."));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DashboardRefreshSetting, new ComboBoxSetting("Dashboard Refresh", "Manual", ["Manual", "2s", "5s", "10s", "15s", "30s", "60s", "120s"]));
-        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, TelemetryRetentionSetting, new ComboBoxSetting("Telemetry Retention", "100", ["None", "25", "50", "100", "250", "500", "1000", "Unlimited"]));
+        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, TelemetryRetentionSetting, new ComboBoxSetting("Telemetry Retention", "25", ["None", "25", "50", "100", "250", "500", "1000", "Unlimited"]));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DockerRuntimePathSetting, new FilePathSetting("Container Runtime Path", "", "Absolute path to the container runtime executable.", null, ValidateRuntimePath));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DaemonSocketSetting, new TextBoxSetting("Custom Daemon Socket", "", "Optional: Override DOCKER_HOST.") { Validator = DaemonSocketValidatorInstance });
         // Default to bypass: the named-pipe host-process check is Windows-only and yields false positives on

@@ -180,7 +180,7 @@ public partial class DockerDiagnosticsView
 
         formPanel.Children.Add(CreateFormSectionHeader("LOGGING & DASHBOARD"));
 
-        var logLevel = _settingsService.SafeGetSetting(ContainerExtensionModule.LogLevelSetting, "Verbose");
+        var logLevel = _settingsService.SafeGetSetting(ContainerExtensionModule.LogLevelSetting, "Errors Only");
         var logLevelComboBox = new ComboBox
         {
             ItemsSource = new[] { "Off", "Errors Only", "Info", "Verbose" },
@@ -204,7 +204,7 @@ public partial class DockerDiagnosticsView
         };
         formPanel.Children.Add(CreateFormItem("Dashboard Refresh", "Auto-refresh frequency for container list, images, and metrics.", refreshComboBox));
 
-        var telemetryRetention = _settingsService.SafeGetSetting(ContainerExtensionModule.TelemetryRetentionSetting, "100");
+        var telemetryRetention = _settingsService.SafeGetSetting(ContainerExtensionModule.TelemetryRetentionSetting, "25");
         var retentionComboBox = new ComboBox
         {
             ItemsSource = new[] { "None", "25", "50", "100", "250", "500", "1000", "Unlimited" },

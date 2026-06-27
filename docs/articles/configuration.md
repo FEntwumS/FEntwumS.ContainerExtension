@@ -54,9 +54,9 @@ All settings are registered under **Binary Management -> Container Engine** in O
 
 | Setting | Type | Default | Description |
 | ------- | ---- | ------- | ----------- |
-| Log Level | ComboBox | `Verbose` | `Off`, `Errors Only`, `Info`, `Verbose` |
+| Log Level | ComboBox | `Errors Only` | `Off`, `Errors Only`, `Info`, `Verbose`. Defaults to `Errors Only` (privacy-by-default); `Verbose` adds SDK messages and stack traces |
 | Show Timestamps | CheckBox | On | Prepend `HH:mm:ss.fff` to SDK log messages |
-| Telemetry Retention | ComboBox | `100` | Max entries: `None`, `25`, `50`, `100`, `250`, `500`, `1000`, `Unlimited` |
+| Telemetry Retention | ComboBox | `25` | Max entries: `None`, `25`, `50`, `100`, `250`, `500`, `1000`, `Unlimited`. Defaults to `25` (privacy-by-default); `None` opts out and **purges** existing history |
 | Dashboard Refresh | ComboBox | `Manual` | Auto-refresh: `Manual`, `2s`, `5s`, `10s`, `15s`, `30s`, `60s`, `120s` |
 
 ## Per-Tool Image Overrides

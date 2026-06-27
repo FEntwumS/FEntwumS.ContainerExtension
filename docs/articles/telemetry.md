@@ -160,9 +160,13 @@ scrubbers, applied in composition by `ScrubSecrets` and `ScrubSensitiveInfo`, re
   daemon URLs never reach the log;
 - home paths and the OS username — the user-profile path is rewritten to `~`
   (`ScrubHomePath`, covering both separator forms on Windows) and the account name is
-  replaced with `***`;
+  replaced with `***` at identifier boundaries (a 3-character floor, so a short or common
+  account name cannot corrupt unrelated text);
 - recognised cloud-provider access keys (`CloudKeyRegex`) and UNC shares
   (`UncShareRegex`);
+- bare provider tokens and bearer credentials that a `KEY=value` match would miss — GitHub
+  PAT/OAuth/installation tokens and Slack tokens (`ProviderTokenRegex`), JSON Web Tokens
+  (`JwtRegex`), and PEM private-key blocks (`PemPrivateKeyRegex`);
 - internal network identifiers — IPv4 and IPv6 literals and `.local`/`.lan` hostnames are
   replaced with `[REDACTED_NET_ADDR]` (`IpRedactRegex`).
 
@@ -175,8 +179,11 @@ Telemetry is local-only. It is written to `~/.oneware/` and is never transmitted
 machine; the extension contains no network sink for these records. The user controls
 retention through the `Telemetry Retention` setting: selecting `None` sets
 `TelemetryOptedOutChecker`, after which `LogExecution` and `TrackError` return before
-writing, disabling collection entirely. The numeric values bound the retained history,
-and `Clear Recents` truncates both logs on demand.
+writing, and the read and export paths surface nothing and **purge** any prior on-disk
+history on first observation of the opt-out — opting out erases, not merely pauses,
+collection. `Export Telemetry` additionally requires an absolute destination. The numeric
+values bound the retained history, and `Clear Recents` truncates both logs on demand. The
+default level is privacy-conscious (`Errors Only`, retention `25`).
 
 ### At-rest protection
 

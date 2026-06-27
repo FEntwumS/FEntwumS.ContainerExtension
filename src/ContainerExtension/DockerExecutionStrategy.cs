@@ -600,12 +600,12 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 [ContainerExtensionModule.SettingsKeyTimeout] = _settingsService.SafeGetSetting(ContainerExtensionModule.TimeoutSetting, 0.0) is var t && t > 0 ? $"{t:N0} min" : "None",
                 [ContainerExtensionModule.SettingsKeyNetwork] = _settingsService.SafeGetSetting(ContainerExtensionModule.NetworkModeSetting, "bridge"),
                 [ContainerExtensionModule.SettingsKeyAutoRemove] = _settingsService.SafeGetSetting(ContainerExtensionModule.AutoRemoveSetting, true) ? "On" : "Off",
-                [ContainerExtensionModule.SettingsKeyLogLevel] = _settingsService.SafeGetSetting(ContainerExtensionModule.LogLevelSetting, "Verbose"),
+                [ContainerExtensionModule.SettingsKeyLogLevel] = _settingsService.SafeGetSetting(ContainerExtensionModule.LogLevelSetting, "Errors Only"),
                 [ContainerExtensionModule.SettingsKeyTimestamps] = _settingsService.SafeGetSetting(ContainerExtensionModule.ShowTimestampsSetting, true) ? "On" : "Off",
                 [ContainerExtensionModule.SettingsKeyNamePrefix] = _settingsService.SafeGetSetting(ContainerExtensionModule.ContainerNamePrefixSetting, "containerextension-") is var n && string.IsNullOrWhiteSpace(n) ? "(none)" : n,
                 [ContainerExtensionModule.SettingsKeyExtraLabels] = _settingsService.SafeGetSetting(ContainerExtensionModule.ExtraFlagsSetting, "") is var e && string.IsNullOrWhiteSpace(e) ? "None" : e,
                 [ContainerExtensionModule.SettingsKeyDashboardRefresh] = _settingsService.SafeGetSetting(ContainerExtensionModule.DashboardRefreshSetting, "Manual"),
-                [ContainerExtensionModule.SettingsKeyRetention] = _settingsService.SafeGetSetting(ContainerExtensionModule.TelemetryRetentionSetting, "100"),
+                [ContainerExtensionModule.SettingsKeyRetention] = _settingsService.SafeGetSetting(ContainerExtensionModule.TelemetryRetentionSetting, "25"),
                 [ContainerExtensionModule.SettingsKeyRuntimePath] = _settingsService.SafeGetSetting(ContainerExtensionModule.DockerRuntimePathSetting, "") is var r && string.IsNullOrWhiteSpace(r) ? "docker (PATH)" : r,
                 [ContainerExtensionModule.SettingsKeyBypassNamedPipeCheck] = _settingsService.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false) ? "Bypassed" : "Active",
                 [ContainerExtensionModule.SettingsKeyAllowNativeFallback] = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowNativeFallbackSetting, false) ? "Enabled" : "Disabled"
@@ -2331,7 +2331,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         }
         var ct = cts.Token;
 
-        _currentLogLevelRank.Value = LogLevelRank(_settingsService.SafeGetSetting<string>(ContainerExtensionModule.LogLevelSetting, "Verbose"));
+        _currentLogLevelRank.Value = LogLevelRank(_settingsService.SafeGetSetting<string>(ContainerExtensionModule.LogLevelSetting, "Errors Only"));
         _currentShowTimestamps.Value = _settingsService.SafeGetSetting<bool>(ContainerExtensionModule.ShowTimestampsSetting, true);
 
         SdkLog(command, $"[Docker SDK] ExecuteAsync started for '{executable}'.", RankInfo);
@@ -2525,7 +2525,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             cts.Dispose();
             timeoutCts?.Dispose();
             stopwatch.Stop();
-            var retentionStr = _settingsService.SafeGetSetting<string>(ContainerExtensionModule.TelemetryRetentionSetting, "100");
+            var retentionStr = _settingsService.SafeGetSetting<string>(ContainerExtensionModule.TelemetryRetentionSetting, "25");
             if (string.Equals(retentionStr, "None", StringComparison.Ordinal))
             {
                 _ = Task.Run(() =>
@@ -3071,7 +3071,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             // Mirror the container path's retention semantics: "Unlimited" (and the opted-out
             // "None") map to 0, which disables trimming (maxEntries > 0 gates the trim). A
             // numeric value is the entry cap; anything unparseable falls back to 100.
-            var retentionStr = _settingsService.SafeGetSetting<string>(ContainerExtensionModule.TelemetryRetentionSetting, "100");
+            var retentionStr = _settingsService.SafeGetSetting<string>(ContainerExtensionModule.TelemetryRetentionSetting, "25");
             var maxEntries = string.Equals(retentionStr, "Unlimited", StringComparison.Ordinal) ? 0
                 : string.Equals(retentionStr, "None", StringComparison.Ordinal) ? 0
                 : int.TryParse(retentionStr, out var parsedRetention) ? parsedRetention : 100;

@@ -20,6 +20,36 @@ public static partial class ContainerTelemetry
 {
     public static Func<bool> TelemetryOptedOutChecker { get; set; } = () => false;
 
+    // 1 once the on-disk history has been purged for the current opt-out; reset when collection resumes,
+    // so the purge fires once per opt-out transition rather than on every read.
+    private static int _purgedForOptOut;
+
+    private static bool IsOptedOut()
+    {
+        try { return TelemetryOptedOutChecker?.Invoke() == true; }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Enforces opt-out on the read/export paths. Opting out must also erase prior history, not merely
+    /// stop new writes, so the first observation of an opt-out best-effort purges the logs. Returns true
+    /// when telemetry is opted out, in which case callers must surface nothing.
+    /// </summary>
+    private static bool PurgeIfOptedOut()
+    {
+        if (!IsOptedOut())
+        {
+            Volatile.Write(ref _purgedForOptOut, 0);
+            return false;
+        }
+        if (Interlocked.CompareExchange(ref _purgedForOptOut, 1, 0) == 0)
+        {
+            try { ClearEntries(); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { /* best-effort purge */ }
+        }
+        return true;
+    }
+
     private static readonly string CachedUserName = Environment.UserName;
     private static readonly string CachedUserProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     private static readonly string CachedResolvedBaseDir = Path.GetFullPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".oneware"));
@@ -1254,6 +1284,10 @@ public static partial class ContainerTelemetry
         {
             return [];
         }
+        if (PurgeIfOptedOut())
+        {
+            return [];
+        }
         Interlocked.Increment(ref _activeOperations);
         try
         {
@@ -1354,6 +1388,17 @@ public static partial class ContainerTelemetry
     public static bool ExportTo(string destinationPath)
     {
         if (Volatile.Read(ref _isShutdown) == 1)
+        {
+            return false;
+        }
+        // Nothing to export once opted out; the gate also purges any prior history.
+        if (PurgeIfOptedOut())
+        {
+            return false;
+        }
+        // Containment: require a deliberate absolute destination. A relative path would resolve against
+        // the process working directory and could write the execution history to an unintended location.
+        if (string.IsNullOrWhiteSpace(destinationPath) || !Path.IsPathRooted(destinationPath))
         {
             return false;
         }
@@ -1731,6 +1776,10 @@ public static partial class ContainerTelemetry
     public static (List<TelemetryEntry> entries, int totalRuns, double successRate, double avgDuration) GetRecentEntriesWithStats(int count = 20)
     {
         if (Volatile.Read(ref _isShutdown) == 1)
+        {
+            return ([], 0, 0, 0);
+        }
+        if (PurgeIfOptedOut())
         {
             return ([], 0, 0, 0);
         }

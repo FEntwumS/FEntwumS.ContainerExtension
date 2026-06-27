@@ -51,7 +51,7 @@ public partial class DockerDiagnosticsView
             }
 
             // Check if telemetry is disabled via the Retention = None setting
-            var retentionStr = _settingsService.SafeGetSetting(ContainerExtensionModule.TelemetryRetentionSetting, "100");
+            var retentionStr = _settingsService.SafeGetSetting(ContainerExtensionModule.TelemetryRetentionSetting, "25");
 
             // Run I/O intensive operation on a background thread to prevent UI freezing.
             // The telemetry-log File.Exists probe is hoisted here too so the UI lambda does zero I/O.
