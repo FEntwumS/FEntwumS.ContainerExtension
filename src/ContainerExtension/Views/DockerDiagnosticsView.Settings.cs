@@ -392,36 +392,53 @@ public partial class DockerDiagnosticsView
                 return;
             }
 
+            // Apply the settings transactionally: snapshot each current value, apply the new ones in
+            // order, and on any failure roll the applied writes back, so a mid-save error never leaves
+            // the configuration half-applied.
+            var updates = new List<(string key, object value)>
+            {
+                (ContainerExtensionModule.DefaultImageSetting, defaultImageTextBox.Text?.Trim() ?? ""),
+                (ContainerExtensionModule.PullPolicySetting, pullPolicyComboBox.SelectedItem as string ?? ""),
+                (ContainerExtensionModule.PlatformSetting, platformComboBox.SelectedItem as string ?? ""),
+                (ContainerExtensionModule.NetworkModeSetting, networkModeComboBox.SelectedItem as string ?? ""),
+                (ContainerExtensionModule.MemoryLimitSetting, Math.Round(memSlider.Value)),
+                (ContainerExtensionModule.CpuLimitSetting, Math.Round(cpuSlider.Value * 2.0) / 2.0),
+                (ContainerExtensionModule.TimeoutSetting, Math.Round(timeoutSlider.Value)),
+                (ContainerExtensionModule.AutoRemoveSetting, autoRemoveCheckBox.IsChecked == true),
+                (ContainerExtensionModule.AllowPrivilegedSetting, allowPrivilegedCheckBox.IsChecked == true),
+                (ContainerExtensionModule.ContainerNamePrefixSetting, prefixTextBox.Text?.Trim() ?? ""),
+                (ContainerExtensionModule.ExtraFlagsSetting, extraFlagsTextBox.Text?.Trim() ?? ""),
+                (ContainerExtensionModule.LogLevelSetting, logLevelComboBox.SelectedItem as string ?? ""),
+                (ContainerExtensionModule.ShowTimestampsSetting, showTimestampsCheckBox.IsChecked == true),
+                (ContainerExtensionModule.DashboardRefreshSetting, refreshComboBox.SelectedItem as string ?? ""),
+                (ContainerExtensionModule.TelemetryRetentionSetting, retentionComboBox.SelectedItem as string ?? ""),
+                (ContainerExtensionModule.DockerRuntimePathSetting, runtimePathTextBox.Text?.Trim() ?? ""),
+                (ContainerExtensionModule.DaemonSocketSetting, socketTextBox.Text?.Trim() ?? ""),
+            };
+            var applied = new List<(string key, object? old)>(updates.Count);
             try
             {
-                _settingsService.SetSettingValue(ContainerExtensionModule.DefaultImageSetting, defaultImageTextBox.Text?.Trim() ?? "");
-                _settingsService.SetSettingValue(ContainerExtensionModule.PullPolicySetting, pullPolicyComboBox.SelectedItem as string ?? "");
-                _settingsService.SetSettingValue(ContainerExtensionModule.PlatformSetting, platformComboBox.SelectedItem as string ?? "");
-                _settingsService.SetSettingValue(ContainerExtensionModule.NetworkModeSetting, networkModeComboBox.SelectedItem as string ?? "");
-
-                _settingsService.SetSettingValue(ContainerExtensionModule.MemoryLimitSetting, Math.Round(memSlider.Value));
-                _settingsService.SetSettingValue(ContainerExtensionModule.CpuLimitSetting, Math.Round(cpuSlider.Value * 2.0) / 2.0);
-                _settingsService.SetSettingValue(ContainerExtensionModule.TimeoutSetting, Math.Round(timeoutSlider.Value));
-
-                _settingsService.SetSettingValue(ContainerExtensionModule.AutoRemoveSetting, autoRemoveCheckBox.IsChecked == true);
-                _settingsService.SetSettingValue(ContainerExtensionModule.AllowPrivilegedSetting, allowPrivilegedCheckBox.IsChecked == true);
-                _settingsService.SetSettingValue(ContainerExtensionModule.ContainerNamePrefixSetting, prefixTextBox.Text?.Trim() ?? "");
-                _settingsService.SetSettingValue(ContainerExtensionModule.ExtraFlagsSetting, extraFlagsTextBox.Text?.Trim() ?? "");
-
-                _settingsService.SetSettingValue(ContainerExtensionModule.LogLevelSetting, logLevelComboBox.SelectedItem as string ?? "");
-                _settingsService.SetSettingValue(ContainerExtensionModule.ShowTimestampsSetting, showTimestampsCheckBox.IsChecked == true);
-                _settingsService.SetSettingValue(ContainerExtensionModule.DashboardRefreshSetting, refreshComboBox.SelectedItem as string ?? "");
-                _settingsService.SetSettingValue(ContainerExtensionModule.TelemetryRetentionSetting, retentionComboBox.SelectedItem as string ?? "");
-
-                _settingsService.SetSettingValue(ContainerExtensionModule.DockerRuntimePathSetting, runtimePathTextBox.Text?.Trim() ?? "");
-                _settingsService.SetSettingValue(ContainerExtensionModule.DaemonSocketSetting, socketTextBox.Text?.Trim() ?? "");
+                foreach (var (key, value) in updates)
+                {
+                    object? old = null;
+                    try { old = _settingsService.GetSettingValue<object>(key); }
+                    catch (Exception) { /* no prior value to snapshot; treat as non-restorable */ }
+                    _settingsService.SetSettingValue(key, value);
+                    applied.Add((key, old));
+                }
 
                 _ = RefreshAllSafeAsync();
                 dialog.Close();
             }
             catch (Exception ex)
             {
-                errorText.Text = $"Save Error: {ex.Message}";
+                for (int i = applied.Count - 1; i >= 0; i--)
+                {
+                    if (applied[i].old is null) continue;
+                    try { _settingsService.SetSettingValue(applied[i].key, applied[i].old!); }
+                    catch (Exception) { /* best-effort restore */ }
+                }
+                errorText.Text = $"Save Error (changes rolled back): {ex.Message}";
                 errorText.IsVisible = true;
                 ContainerTelemetry.TrackError("DockerDiagnosticsView", "SaveSettings", ex);
             }
