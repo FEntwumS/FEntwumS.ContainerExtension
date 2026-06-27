@@ -58,13 +58,7 @@ public class DockerDiagnosticsViewModel : ExtendedTool
     [Newtonsoft.Json.JsonConstructor]
     public DockerDiagnosticsViewModel() : base(DashboardIcon)
     {
-        Id = "Container_Dashboard";
-        Title = ContainerExtensionModule.DashboardTitle;
-        CanFloat = true;
-        CanPin = true;
-        CanClose = true;
-        ShowInSelector = true;
-        KeepPinnedDockableVisible = true;
+        InitializeDockIdentity();
     }
 
     public DockerDiagnosticsViewModel(IServiceProvider serviceProvider, DockerExecutionStrategy strategy)
@@ -73,16 +67,9 @@ public class DockerDiagnosticsViewModel : ExtendedTool
         ArgumentNullException.ThrowIfNull(serviceProvider);
         ArgumentNullException.ThrowIfNull(strategy);
 
-        Id = "Container_Dashboard";
         ServiceProvider = serviceProvider;
         Strategy = strategy;
-        Title = ContainerExtensionModule.DashboardTitle;
-
-        CanFloat = true;
-        CanPin = true;
-        CanClose = true;
-        ShowInSelector = true;
-        KeepPinnedDockableVisible = true;
+        InitializeDockIdentity();
     }
 
     // Migrate a deserialized layout cache to the current dock identity.
@@ -91,6 +78,13 @@ public class DockerDiagnosticsViewModel : ExtendedTool
     {
         // Restored layouts carry the legacy Id="Docker"; rewrite to the current identity so the
         // tool binds to the programmatic registration instead of falling back to a placeholder.
+        InitializeDockIdentity();
+    }
+
+    // The dock identity (id, title, docking affordances) shared by both constructors and the
+    // post-deserialization migration, kept in one place so the three paths cannot drift.
+    private void InitializeDockIdentity()
+    {
         Id = "Container_Dashboard";
         Title = ContainerExtensionModule.DashboardTitle;
         CanFloat = true;
