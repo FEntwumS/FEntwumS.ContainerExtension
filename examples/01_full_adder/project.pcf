@@ -1,0 +1,7 @@
+## full_adder - auto-generated pin constraints (GateMate eval board)
+
+set_io a IO_WA_B2
+set_io b IO_WA_A2
+set_io cin IO_WA_A0
+set_io sum IO_WA_B0
+set_io cout IO_WA_A1

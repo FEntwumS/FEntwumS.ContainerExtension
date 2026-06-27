@@ -131,3 +131,70 @@ docker ps -a --filter name=containerextension-
 # Remove them
 docker rm -f $(docker ps -aq --filter name=containerextension-)
 ```
+
+## Data protection
+
+### Recorded fields
+
+An execution entry (`container_telemetry.jsonl`) carries the fields enumerated in
+[Entry Format](#entry-format): timestamp, image reference, image digest, tool name,
+duration, exit code, the cancellation flag, the reconstructed `docker run` command,
+peak memory, maximum CPU, and the OOM flag; a redacted `error_msg` is appended when the
+execution failed. Error entries (`container_errors.jsonl`) carry the originating
+component, the action, the exception message, an optional stack trace (recorded only at
+the `Verbose` log level), and an optional context string. None of these fields is
+designed to hold credentials or identifiers; the free-text fields nonetheless pass
+through the redaction pipeline below before they reach disk.
+
+### Redaction before persistence
+
+The `image`, `docker_run`, `error_msg`, and the error-log `act`, `ex_msg`, `stack`, and
+`ctx` fields are scrubbed in `ContainerTelemetry.cs` prior to serialization. The
+scrubbers, applied in composition by `ScrubSecrets` and `ScrubSensitiveInfo`, remove:
+
+- `KEY=value` secret assignments — any token whose key matches `PASSWORD`, `PWD`,
+  `CREDENTIALS`, `AUTH`, `PASS`, `TOKEN`, `SECRET`, or `KEY` has its value replaced with
+  `***` (`SecretScrubRegex`);
+- inline URI basic-auth credentials — `scheme://user:pass@host` collapses to
+  `scheme://***:***@host` (`UriCredentialsRegex`), so tokens embedded in registry or
+  daemon URLs never reach the log;
+- home paths and the OS username — the user-profile path is rewritten to `~`
+  (`ScrubHomePath`, covering both separator forms on Windows) and the account name is
+  replaced with `***`;
+- recognised cloud-provider access keys (`CloudKeyRegex`) and UNC shares
+  (`UncShareRegex`);
+- internal network identifiers — IPv4 and IPv6 literals and `.local`/`.lan` hostnames are
+  replaced with `[REDACTED_NET_ADDR]` (`IpRedactRegex`).
+
+The `Export Telemetry` action applies the same home-path rewrite to the exported copy, so
+an exported file does not reintroduce the absolute profile path.
+
+### Locality and retention control
+
+Telemetry is local-only. It is written to `~/.oneware/` and is never transmitted off the
+machine; the extension contains no network sink for these records. The user controls
+retention through the `Telemetry Retention` setting: selecting `None` sets
+`TelemetryOptedOutChecker`, after which `LogExecution` and `TrackError` return before
+writing, disabling collection entirely. The numeric values bound the retained history,
+and `Clear Recents` truncates both logs on demand.
+
+### At-rest protection
+
+On POSIX systems the backing files are created atomically with mode `0600`
+(`CreateAppendStreamOptions` sets `UnixCreateMode` to user read/write), closing the window
+between creation under the default umask and a subsequent permission narrowing; the
+directory is restricted to `0700` and exports are written `0600`. On Windows
+confidentiality is enforced through the Encrypting File System (`File.Encrypt`) applied to
+each log on first materialization. Cross-process writes are serialized by a named mutex
+whose identifier embeds a SHA-256 hash of the username rather than the cleartext name, so
+the kernel-object name does not disclose the account to other sessions on a shared host.
+
+### GDPR-relevant note
+
+No personal data leaves the machine: collection is confined to the user's profile
+directory, the redaction pipeline removes credentials, home paths, usernames, and internal
+network addresses before persistence, and the records are never transmitted. The data
+subject is the local user, who retains full control over collection (opt-out via
+`Telemetry Retention = None`) and erasure (`Clear Recents`). Measured redaction coverage
+and false-negative rates are reported with the evaluation results (see
+`results/summary.csv`).

@@ -1,0 +1,17 @@
+{
+  "include": [
+    "*.v",
+    "*.sv",
+    "*.pcf"
+  ],
+  "exclude": [
+    "build",
+    "work"
+  ],
+  "topEntity": "mux4",
+  "testBenches": [
+    "mux4_tb.v"
+  ],
+  "toolchain": "yosys",
+  "board": "GateMate FPGA Evaluation Board"
+}

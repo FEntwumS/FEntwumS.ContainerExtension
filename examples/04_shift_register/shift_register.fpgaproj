@@ -1,0 +1,17 @@
+{
+  "include": [
+    "*.vhd",
+    "*.v",
+    "*.sv"
+  ],
+  "exclude": [
+    "build",
+    "work"
+  ],
+  "topEntity": "shift_register",
+  "testBenches": [
+    "shift_register_tb.v"
+  ],
+  "toolchain": "yosys",
+  "board": "GateMate FPGA Evaluation Board"
+}

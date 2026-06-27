@@ -26,8 +26,8 @@ All settings are registered under **Binary Management -> Container Engine** in O
 
 | Setting | Type | Default | Description |
 | ------- | ---- | ------- | ----------- |
-| Memory Limit | Slider (256 MB step) | 0 (no limit) | Container memory cap. Auto-detects host max. If non-zero, automatically clamped to a minimum of 6MB |
-| CPU Cores Limit | Slider | 0 (no limit) | Container CPU cap. Auto-detects host max |
+| Memory Limit | Slider (512 MB step) | 0 (no limit) | Container memory cap. Auto-detects host max. When set, must be at least 512 MB |
+| CPU Cores Limit | Slider (0.5 core step) | 0 (no limit) | Container CPU cap. Auto-detects host max. When set, must be at least 0.1 cores |
 | Execution Timeout | Slider | 0 (no timeout) | Kill container after N minutes |
 
 > [!WARNING]
@@ -41,6 +41,14 @@ All settings are registered under **Binary Management -> Container Engine** in O
 | Network Mode | ComboBox | `bridge` | Docker network mode: `bridge`, `host`, `none` |
 | Container Name Prefix | Text | `containerextension-` | Prefix for generated container names |
 | Extra Container Labels | Text | *(empty)* | Space-separated `key=value` container labels for filtering |
+
+### Security & Fallback
+
+| Setting | Type | Default | Description |
+| ------- | ---- | ------- | ----------- |
+| Allow Privileged Containers | CheckBox | Off | Run containers with elevated (`--privileged`) capabilities. Keep off unless a tool requires direct hardware access |
+| Bypass Named Pipe Security Check | CheckBox | On | Windows only. Skips the named-pipe server-process trust verification. On by default because the check produces false positives on common non-default daemon setups (WSL2 relays, rootless/remote engines); uncheck it on a hardened Windows host to re-enable the impersonation guard |
+| Allow Native Fallback | CheckBox | Off | If the Docker daemon is unreachable, execute the tool natively from the host `PATH` instead of failing. **Note:** native execution bypasses container isolation |
 
 ### Logging & Telemetry
 

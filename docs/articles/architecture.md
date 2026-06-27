@@ -7,10 +7,9 @@ The OneWare Container Extension implements the **Hybrid Strategy Pattern** for t
 ```mermaid
 graph TD
     subgraph IDE [OneWare Studio IDE]
-        CE[ContainerExtension Module<br/>- Settings 16<br/>- Strategy Injection<br/>- UI Extensions]
+        CE[ContainerExtension Module<br/>- 19 settings + per-tool images<br/>- Strategy Injection<br/>- UI Extensions]
         ITES[IToolExecutionStrategy<br/>Plugin Interface]
         DES[DockerExecutionStrategy<br/>- Socket Probing<br/>- Image Resolution<br/>- Container Lifecycle<br/>- Stream Demultiplexing<br/>- Telemetry Logging]
-        DBV[DockerButtonView<br/>Toolbar Whale Icon]
         SDK[Docker.DotNet SDK<br/>- DockerClient<br/>- Unix Socket / TCP]
         DDVM[DockerDiagnosticsViewModel<br/>ExtendedTool<br/>- DockerDiagnosticsView<br/>- Connection Status<br/>- Images & Disk Usage<br/>- Live Containers<br/>- Active Configuration<br/>- Quick Actions<br/>- Recent Executions]
         CT[ContainerTelemetry<br/>- JSON Lines Logger<br/>- Stats Aggregation<br/>- Export / Clear]
@@ -19,7 +18,7 @@ graph TD
         CE --> ITES
         ITES --> DES
         DES --> SDK
-        DBV --> DDVM
+        CE --> DDVM
     end
 ```
 
@@ -27,12 +26,11 @@ graph TD
 
 | File | Purpose |
 | ------ | --------- |
-| `ContainerExtensionModule` | Registers 16 settings, injects Docker strategy, dockable DataTemplate, health check |
+| `ContainerExtensionModule` | Registers 19 settings (plus per-tool image overrides), injects Docker strategy, dockable DataTemplate, health check |
 | `DockerExecutionStrategy` | Full container lifecycle: socket probing, auto-pull, stream demux, telemetry |
 | `DockerDiagnosticsView` | Docker Desktop-style live dashboard UserControl |
-| `DockerDiagnosticsViewModel` | ExtendedTool docking adapter |
-| `DockerDiagnosticsWindow` | Standalone Window wrapper (popup fallback) |
-| `DockerButtonView` | Toolbar whale icon - opens dockable dashboard |
+| `DockerDiagnosticsViewModel` | `ExtendedTool` docking adapter for the dashboard |
+| `DockerCommandBuilder` | Host-to-container path mapping, parameter assembly, `.env` parsing, shell escaping |
 | `ContainerTelemetry` | JSON Lines logger with stats and export |
 
 ## Image Resolution Hierarchy
@@ -59,5 +57,5 @@ The dashboard integrates with OneWare Studio's dock infrastructure via the `Exte
 
 1. **`DockerDiagnosticsViewModel`** extends `ExtendedTool` with `CanFloat = true` and `CanPin = true`
 2. **`FuncDataTemplate`** inserted at index 0 in `Application.DataTemplates` to bypass OneWare's `ViewLocator` (which requires parameterless constructors)
-3. **`DockerButtonView`** uses `IMainDockService.Show(vm, DockShowLocation.Bottom)` with a singleton ViewModel to prevent duplicate tabs
-4. **`DockerDiagnosticsWindow`** serves as a fallback standalone popup if the dock service is unavailable
+3. **`IMainDockService.RegisterLayoutExtension<DockerDiagnosticsViewModel>(DockShowLocation.RightPinned)`** registers the default layout slot
+4. An **`IApplicationCommandService`** command and a **`View > Tool Windows > Container Dashboard`** menu item (registered via `IWindowService`) both open the singleton ViewModel via `IMainDockService.Show(vm, DockShowLocation.RightPinned)`, preventing duplicate tabs

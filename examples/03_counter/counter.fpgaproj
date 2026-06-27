@@ -1,0 +1,18 @@
+{
+  "include": [
+    "*.vhd",
+    "*.v",
+    "*.sv"
+  ],
+  "exclude": [
+    "build",
+    "work"
+  ],
+  "topEntity": "counter",
+  "testBenches": [
+    "counter_tb.vhd"
+  ],
+  "toolchain": "yosys",
+  "board": "GateMate FPGA Evaluation Board",
+  "vhdlStandard": "08"
+}

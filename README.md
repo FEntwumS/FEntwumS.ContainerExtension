@@ -1,72 +1,98 @@
 # OneWare Container Extension
 
-A **OneWare Studio** plugin that enables transparent, containerized execution of FPGA toolchains. Built on a modernized infrastructure paradigm.
-Developed as part of the Master's Thesis: *"Design and Implementation of a Modular Architecture for the Transparent Integration of Containerized Execution Environments for Heterogeneous Open-Source Binaries in OneWare Studio"* by **[Mert Torun](https://mtorun0x7cd.com)** at TH Köln.
+[![Build](https://github.com/FEntwumS/FEntwumS.ContainerExtension/actions/workflows/dotnet.yml/badge.svg)](https://github.com/FEntwumS/FEntwumS.ContainerExtension/actions/workflows/dotnet.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](License.md)
+![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)
+
+A [OneWare Studio](https://github.com/one-ware/OneWare) plugin that runs FPGA toolchains (GHDL, Yosys,
+nextpnr, gmpack, Icarus, Verilator, SymbiYosys) inside containers without changing the user's workflow.
+It intercepts tool execution, maps the project into a container, runs the unmodified tool, and streams
+output back to the IDE, so a build behaves identically across machines with no host toolchain install.
+
+Developed as part of the Master's thesis *"Design and Implementation of a Modular Architecture for the
+Transparent Integration of Containerized Execution Environments for Heterogeneous Open-Source Binaries in
+OneWare Studio"* by [Mert Torun](https://mtorun0x7cd.com) at TH Köln.
 
 ![Icon](Icon.svg)
 
-## Hardening & Security
+## Installation
 
-This extension adheres to hardened security practices to eliminate "Environment Drift" and lateral escape risks:
-- **Zero-Privilege Containers**: Automatically injects Host UID/GID and enforces `USER oneware` execution to drop root privileges entirely.
-- **PID 1 Signal Management**: Wraps toolchains with `tini` to ensure faultless zombie process reaping and propagation of kill signals.
-- **Deterministic Dependencies**: Pipeline guarded by `<NuGetAudit>`, SLSA SBOM generation, and GitHub CodeQL SAST scanning.
-- **Immutable Provenance**: GitHub Releases embed cryptographic OIDC build-attestations.
+- **From OneWare Studio:** open Extensions, search for "Container Extension", and install. The plugin
+  ships as a managed `net10.0` assembly; OneWare provides the runtime.
+- **Side-load a local build:** publish the plugin and copy it into the OneWare plugins directory
+  (`~/OneWareStudio/Packages/Plugins/` on Linux/macOS). See [docs/articles/getting-started.md](docs/articles/getting-started.md).
 
-## Architecture Layers & Native-AOT Compatibility
+A running container engine (Docker, Podman, OrbStack, or Colima) is required for containerized execution.
 
-This repository is structured into isolated domains adhering to strict Native-AOT compile-time guarantees:
-- **ContainerExtension (Module Core)**: Built on C# 13, targeting .NET 10. Completely reflection-free. Utilizes static, source-generated serialization via `JsonSerializerContext` and regex source generators to eliminate dynamic code generation.
-- **ContainerBenchmarkHarness (Execution Harness)**: Provides developer-side benchmark execution profiles and telemetry stress testing capabilities.
-- **ContainerExtension.UnitTests (Testing boundary)**: Tests and verifies settings validator logic, regexes, and pipeline streaming parsing.
-- **Local Headless EDA Tests (`local_tests/`)**: A 15-phase Bash integration test suite verifying end-to-end containerized EDA workflows (GHDL, Icarus, Verilator, Yosys, NextPNR) directly against the `oss-cad-suite` Docker image.
+## Architecture
 
-## Hybrid Strategy & Execution Modes
+| Project | Role |
+|---|---|
+| `src/ContainerExtension` | Plugin core. Implements `IToolExecutionStrategy`/`DockerExecutionStrategy`, the registry client, settings, telemetry, and the Avalonia Docker dashboard. Targets `net10.0`, `IsAotCompatible`, source-generated JSON and regex. |
+| `src/ContainerBenchmarkHarness` | Headless harness that drives a tool through the real strategy, plus a telemetry stress mode. Used by the benchmarking suite and the smoke runner. |
+| `tests/ContainerExtension.UnitTests` | xUnit unit tests (validators, command building, path mapping, telemetry, registry parsing, SSRF guards) and gated container E2E tests. |
+| `tests/integration` | HDL fixtures and shell smoke runners (`run_all.sh` against the image, `run_harness_smoke.sh` through the strategy). |
+| `tests/benchmarking_suite` | Cross-platform evaluation pipeline (`benchmark.py`, `run_evaluation.py`, `aggregate.py`). |
+| `docker/oss-cad-suite` | Hardened image build for the open-source toolchain. |
 
-This extension implements the **Hybrid Strategy Pattern** to coordinate tool execution dynamically based on environment state and user preferences:
-- **Containerized Mode (Default)**: Automatically pulls, executes, and monitors the required toolchains inside isolated, rootless container instances (supporting Docker Desktop, Podman, Colima, and OrbStack).
-- **Dynamic Native Fallback**: If the Docker daemon is offline or unreachable, the execution engine can dynamically fallback to locate and execute native binaries installed on the host's `PATH` (controlled by the `Allow Native Fallback` setting) to prevent workspace disruption.
-- **Observability Log Filtering**: Granular telemetry control settings (`Off`, `Errors Only`, `Verbose`) allow users to filter execution records, dropping successful telemetry in `Errors Only` mode, or removing performance stack traces on lower log levels to optimize local disk writes.
+## Execution model
 
-## Performance & Security Optimizations
+The plugin coordinates execution through a hybrid strategy:
 
-- **Compile-Time Engineering**: Static dependencies, source-generated JSON serialize/deserialize, and static regular expressions.
-- **Hardware Intrinsics**: SIMD-based white-space detection and search values checking for container name validation.
-- **Unmanaged Memory**: Modern `[LibraryImport]` structures, safe OS process token extractions, and SafeHandle structures.
-- **Pipeline Architectures**: System.IO.Pipelines-driven stream logging to prevent large object heap (LOH) fragmentation.
-- **Defensive Cryptography**: Fixed-time credentials comparison and zero-memory wipes for decrypted credentials.
-- **Zero-Allocation Observability**: Structured logs, pre-compiled JSON contexts, and OpenTelemetry Activity tracing.
-- **Avalonia Rendering**: Double-buffered sparkline drawing using WriteableBitmap memory copies.
+- **Containerized (default):** pulls and runs the toolchain image, injecting the host UID/GID and running
+  as a non-root `oneware` user so output files are not root-owned. `tini` runs as PID 1 to reap
+  children and forward signals.
+- **Native fallback:** if the daemon is unreachable and `Allow Native Fallback` is enabled, the tool is
+  located on the host `PATH` and run natively so work is not blocked.
+- **Telemetry:** execution records are written as JSON Lines with a configurable level (`Off`,
+  `Errors Only`, `Verbose`) and retention. See [docs/articles/telemetry.md](docs/articles/telemetry.md).
 
-## Quick Start
+## Security
+
+- Non-root container execution with host UID/GID injection; `tini` as PID 1.
+- Mount allow-listing rejects binds of critical host paths (`/etc`, `/proc`, `/sys`, the Docker socket, …).
+- The registry client is HTTPS-only, scopes forwarded credentials to the matching host, and rejects
+  references that resolve to loopback or internal addresses (SSRF defense).
+- Supply chain: `NuGetAudit`, an SBOM and OIDC build attestations on releases, and CodeQL plus Trivy scans in CI.
+
+## Supported container runtimes
+
+| Runtime | Endpoint | Notes |
+|---|---|---|
+| Docker | `/var/run/docker.sock`, `~/.docker/run/docker.sock` | Probed first |
+| Podman | `/run/user/{uid}/podman/podman.sock`, podman-machine | Rootless |
+| OrbStack / Colima | per-runtime sockets | Probed via a priority list |
+| Custom | `Custom Daemon Socket` setting | Overrides probing |
+
+On Windows the daemon is reached over the named pipe; the connection path is validated before use.
+
+## Building and testing
 
 ```bash
-# Clone (with submodules)
 git clone --recurse-submodules https://github.com/FEntwumS/FEntwumS.ContainerExtension.git
+cd FEntwumS.ContainerExtension
 
-# Verify Formatting & Determinism
-dotnet format --verify-no-changes
-dotnet build -warnaserror
+dotnet format OneWare.ContainerExtension.slnx --verify-no-changes
+dotnet build  OneWare.ContainerExtension.slnx -warnaserror -c Release
+dotnet test   OneWare.ContainerExtension.slnx -c Release
 
-# Execute C# Unit Tests
-dotnet test --verbosity normal
-
-# Execute Headless EDA Integration Tests
-cd local_tests && ./run_all.sh
+# Optional: headless integration smoke (requires a container engine)
+cd tests/integration && ./run_all.sh
 ```
 
-## Supported Container Runtimes
+The container E2E tests are skipped in CI (Docker Hub rate limits and image-pull flakiness); they run
+locally when a daemon and the toolchain image are present.
 
-| Runtime | Protocol | Notes |
-| --- | --- | --- |
-| Docker Desktop | `/var/run/docker.sock` | Recommended, probed first |
-| Podman | `/run/user/{uid}/podman/podman.sock` | Rootless enforcement |
-| OrbStack / Colima | Custom Sockets | Probed via priority list |
+## Documentation
 
-## API Documentation
+Guides live under [docs/articles](docs/articles) (getting started, configuration, architecture,
+telemetry, evaluation, limitations). The API reference is generated with
+[DocFX](https://dotnet.github.io/docfx/).
 
-Auto-generated API documentation is available via [DocFX](https://dotnet.github.io/docfx/).
+## Citation
+
+If you use this software, cite it via [CITATION.cff](CITATION.cff).
 
 ## License
 
-[MIT](License.md) (C) 2025 - 2026 [Mert Torun](https://mtorun0x7cd.com)
+[MIT](License.md) © 2025–2026 [Mert Torun](https://mtorun0x7cd.com)

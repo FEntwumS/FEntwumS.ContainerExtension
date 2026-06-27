@@ -1,0 +1,18 @@
+{
+  "include": [
+    "*.vhd",
+    "*.v",
+    "*.sv"
+  ],
+  "exclude": [
+    "build",
+    "work"
+  ],
+  "topEntity": "seven_seg_decoder",
+  "testBenches": [
+    "seven_seg_decoder_tb.vhd"
+  ],
+  "toolchain": "yosys",
+  "board": "GateMate FPGA Evaluation Board",
+  "vhdlStandard": "08"
+}

@@ -6,3 +6,7 @@
   href: telemetry.md
 - name: Architecture Overview
   href: architecture.md
+- name: Evaluation Methodology
+  href: evaluation.md
+- name: Limitations and Threats to Validity
+  href: limitations.md

@@ -1,69 +1,75 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="FEntwumS Container Extension">
+  <title>FEntwumS Container Extension</title>
+  <desc>A quay crane loading Docker-coloured containers and an FEntwumS module tile onto a vessel.</desc>
   <defs>
-    <linearGradient id="hull-grad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#374151" />
-      <stop offset="100%" stop-color="#111827" />
+    <linearGradient id="hull-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#374151" />
+      <stop offset="1" stop-color="#111827" />
     </linearGradient>
-    <linearGradient id="ow-grad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#2A2A4A" />
-      <stop offset="100%" stop-color="#1A1A2E" />
+    <linearGradient id="ow-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2A2A4A" />
+      <stop offset="1" stop-color="#1A1A2E" />
+    </linearGradient>
+    <linearGradient id="water-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2496ED" />
+      <stop offset="1" stop-color="#1D87CE" />
     </linearGradient>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000" flood-opacity="0.3" />
     </filter>
-    <g id="cont-blue">
-      <rect x="0" y="0" width="40" height="20" rx="2" fill="#2496ED" stroke="rgba(0,0,0,0.3)" stroke-width="1"/>
-      <path d="M 8,2 L 8,18 M 16,2 L 16,18 M 24,2 L 24,18 M 32,2 L 32,18" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" stroke-linecap="round"/>
+
+    <!-- Container module: corrugated side, a top sheen for depth, and a recessed door seam. -->
+    <g id="container">
+      <rect x="0" y="0" width="40" height="20" rx="2" stroke="rgba(0,0,0,0.3)" stroke-width="1" />
+      <rect x="1" y="1" width="38" height="3" rx="1.5" fill="rgba(255,255,255,0.18)" />
+      <path d="M8 2.5V17.5M16 2.5V17.5M24 2.5V17.5M32 2.5V17.5" stroke="rgba(0,0,0,0.18)" stroke-width="1.5" stroke-linecap="round" />
     </g>
-    <g id="cont-orange">
-      <rect x="0" y="0" width="40" height="20" rx="2" fill="#F59E0B" stroke="rgba(0,0,0,0.3)" stroke-width="1"/>
-      <path d="M 8,2 L 8,18 M 16,2 L 16,18 M 24,2 L 24,18 M 32,2 L 32,18" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" stroke-linecap="round"/>
-    </g>
-    <g id="cont-green">
-      <rect x="0" y="0" width="40" height="20" rx="2" fill="#10B981" stroke="rgba(0,0,0,0.3)" stroke-width="1"/>
-      <path d="M 8,2 L 8,18 M 16,2 L 16,18 M 24,2 L 24,18 M 32,2 L 32,18" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" stroke-linecap="round"/>
-    </g>
-    <g id="cont-wide">
-      <rect x="0" y="0" width="48" height="20" rx="2" fill="#3B82F6" stroke="rgba(0,0,0,0.3)" stroke-width="1"/>
-      <path d="M 8,2 L 8,18 M 16,2 L 16,18 M 24,2 L 24,18 M 32,2 L 32,18 M 40,2 L 40,18" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" stroke-linecap="round"/>
+    <g id="container-wide">
+      <rect x="0" y="0" width="48" height="20" rx="2" stroke="rgba(0,0,0,0.3)" stroke-width="1" />
+      <rect x="1" y="1" width="46" height="3" rx="1.5" fill="rgba(255,255,255,0.18)" />
+      <path d="M8 2.5V17.5M16 2.5V17.5M24 2.5V17.5M32 2.5V17.5M40 2.5V17.5" stroke="rgba(0,0,0,0.18)" stroke-width="1.5" stroke-linecap="round" />
     </g>
   </defs>
 
+  <!-- Quay crane: leg, gantry rail, cab, and hoist cable. -->
   <g filter="url(#shadow)">
-    <rect x="24" y="90" width="44" height="70" rx="4" fill="#4B5563" stroke="#1F2937" stroke-width="1"/>
-    <rect x="20" y="86" width="52" height="6" rx="2" fill="#1F2937"/>
-    <rect x="30" y="100" width="32" height="12" rx="2" fill="#93C5FD"/>
-    <rect x="30" y="120" width="32" height="8" rx="1" fill="#60A5FA"/>
-    <line x1="46" y1="86" x2="46" y2="60" stroke="#9CA3AF" stroke-width="3"/>
-    <line x1="36" y1="60" x2="56" y2="60" stroke="#F3F4F6" stroke-width="2"/>
+    <rect x="24" y="90" width="44" height="70" rx="4" fill="#4B5563" stroke="#1F2937" stroke-width="1" />
+    <rect x="20" y="86" width="52" height="6" rx="2" fill="#1F2937" />
+    <rect x="30" y="100" width="32" height="12" rx="2" fill="#93C5FD" />
+    <rect x="30" y="120" width="32" height="8" rx="1" fill="#60A5FA" />
+    <line x1="46" y1="86" x2="46" y2="60" stroke="#9CA3AF" stroke-width="3" />
+    <line x1="36" y1="60" x2="56" y2="60" stroke="#F3F4F6" stroke-width="2" />
   </g>
 
-  <use href="#cont-blue" x="75" y="140" filter="url(#shadow)"/>
-  <use href="#cont-orange" x="75" y="120" filter="url(#shadow)"/>
-  <use href="#cont-green" x="75" y="100" filter="url(#shadow)"/>
-  <use href="#cont-blue" x="75" y="80" filter="url(#shadow)"/>
+  <!-- Stacked containers, Docker palette. -->
+  <use href="#container" x="75" y="140" fill="#2496ED" filter="url(#shadow)" />
+  <use href="#container" x="75" y="120" fill="#F59E0B" filter="url(#shadow)" />
+  <use href="#container" x="75" y="100" fill="#10B981" filter="url(#shadow)" />
+  <use href="#container" x="75" y="80" fill="#2496ED" filter="url(#shadow)" />
 
-  <use href="#cont-orange" x="173" y="140" filter="url(#shadow)"/>
-  <use href="#cont-blue" x="173" y="120" filter="url(#shadow)"/>
-  <use href="#cont-green" x="173" y="100" filter="url(#shadow)"/>
+  <use href="#container" x="173" y="140" fill="#F59E0B" filter="url(#shadow)" />
+  <use href="#container" x="173" y="120" fill="#2496ED" filter="url(#shadow)" />
+  <use href="#container" x="173" y="100" fill="#10B981" filter="url(#shadow)" />
 
-  <use href="#cont-wide" x="120" y="140" filter="url(#shadow)"/>
-  
-  <g transform="translate(120, 92)" filter="url(#shadow)">
-    <rect x="0" y="0" width="48" height="48" rx="8" fill="url(#ow-grad)" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"/>
-    <g fill="white" transform="translate(24, 24)">
-      <rect x="-12" y="-12" width="5" height="26" rx="1"/>
-      <rect x="-12" y="-12" width="20" height="5" rx="1"/>
-      <rect x="-12" y="-2" width="14" height="5" rx="1"/>
-      <rect x="-12" y="9" width="20" height="5" rx="1"/>
+  <use href="#container-wide" x="120" y="140" fill="#3B82F6" filter="url(#shadow)" />
+
+  <!-- FEntwumS module tile (the payload being containerised). -->
+  <g transform="translate(120 92)" filter="url(#shadow)">
+    <rect x="0" y="0" width="48" height="48" rx="8" fill="url(#ow-grad)" stroke="rgba(255,255,255,0.15)" stroke-width="1.5" />
+    <g fill="#FFFFFF" transform="translate(24 24)">
+      <rect x="-12" y="-12" width="5" height="26" rx="1" />
+      <rect x="-12" y="-12" width="20" height="5" rx="1" />
+      <rect x="-12" y="-2" width="14" height="5" rx="1" />
+      <rect x="-12" y="9" width="20" height="5" rx="1" />
     </g>
   </g>
 
-  <path d="M 16,160 L 36,200 L 200,200 L 240,160 Z" fill="url(#hull-grad)" filter="url(#shadow)"/>
-  
-  <path d="M 31,190 L 205,190" stroke="#DC2626" stroke-width="4"/>
-  <path d="M 220,165 L 230,165" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round"/>
+  <!-- Vessel hull and deck line. -->
+  <path d="M16 160 L36 200 L200 200 L240 160 Z" fill="url(#hull-grad)" filter="url(#shadow)" />
+  <path d="M31 190 L205 190" stroke="#DC2626" stroke-width="4" />
+  <path d="M220 165 L230 165" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" />
 
-  <path d="M -10,195 Q 20,185 50,200 T 110,200 T 170,200 T 230,200 T 270,195 L 270,260 L -10,260 Z" fill="#2496ED" opacity="0.8"/>
-  <path d="M -10,205 Q 30,215 70,200 T 150,200 T 230,200 T 270,205 L 270,260 L -10,260 Z" fill="#1D87CE"/>
+  <!-- Water. -->
+  <path d="M-10 195 Q20 185 50 200 T110 200 T170 200 T230 200 T270 195 L270 260 L-10 260 Z" fill="#2496ED" opacity="0.8" />
+  <path d="M-10 205 Q30 215 70 200 T150 200 T230 200 T270 205 L270 260 L-10 260 Z" fill="url(#water-grad)" />
 </svg>

@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide walks you through installing, configuring, and using the Container Extension for OneWare Studio.
+Installation, configuration, and a first containerized build with the Container Extension for OneWare Studio.
 
 ## Prerequisites
 
@@ -35,8 +35,8 @@ cp -r src/ContainerExtension/bin/Release/net10.0/* \
 ## First Run
 
 1. **Launch OneWare Studio** - The plugin loads automatically
-2. **Health Check** - On startup, the extension verifies Docker daemon connectivity. Look for the whale icon in the right toolbar
-3. **Click the Whale** - Opens the **Container Dashboard** as a dockable panel at the bottom of the IDE
+2. **Health Check** - On startup, the extension verifies Docker daemon connectivity in the background
+3. **Open the Dashboard** - Choose **View > Tool Windows > Container Dashboard** (or run the *Container Dashboard* command). It opens as a right-pinned dockable panel with a whale icon
 4. **Verify Connection** - The dashboard shows daemon health, Docker version, and OS info
 
 ## Your First Containerized Build
@@ -47,7 +47,7 @@ cp -r src/ContainerExtension/bin/Release/net10.0/* \
    - Pull the required image if not cached locally
    - Mount your project directory into the container
    - Execute the tool inside the container
-   - Stream output back to the IDE in real-time
+   - Stream output back to the IDE
 4. View execution details in the Container Dashboard's **Recent Executions** section
 
 ## Dashboard Features
@@ -65,6 +65,6 @@ The Container Dashboard provides:
 
 ## Next Steps
 
-- [Configuration Guide](configuration.md) - Fine-tune all 16 settings
+- [Configuration Guide](configuration.md) - Fine-tune all 19 settings
 - [Telemetry & Troubleshooting](telemetry.md) - Debug execution issues
 - [Architecture Overview](architecture.md) - Understand the internal design
