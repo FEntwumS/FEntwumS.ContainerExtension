@@ -46,7 +46,8 @@ def load_results(results_dir):
 
 def write_csv(data, out_csv):
     cols = ["platform", "cpu_model", "workload", "backend", "n", "mean_s", "ci95_low_s",
-            "ci95_high_s", "cv_percent", "overhead_x_vs_native", "overhead_p_value"]
+            "ci95_high_s", "cv_percent", "overhead_x_vs_native", "overhead_p_value",
+            "overhead_x_vs_cli", "overhead_p_vs_cli"]
     rows = []
     for plat, workloads in sorted(data.items()):
         for wl, d in sorted(workloads.items()):
@@ -63,9 +64,18 @@ def write_csv(data, out_csv):
                     overhead_x = centry.get("relative_overhead_x", "")
                     w = centry.get("welch") or {}
                     overhead_p = w.get("p_value", "")
+                # The extension's overhead beyond raw containerization (strategy vs docker CLI) belongs
+                # on the strategy row; it is blank for the native and cli rows.
+                ext_x = ext_p = ""
+                if jkey == "docker_dotnet":
+                    eentry = comp.get("cli_vs_dotnet")
+                    if eentry:
+                        ext_x = eentry.get("relative_overhead_x", "")
+                        ew = eentry.get("welch") or {}
+                        ext_p = ew.get("p_value", "")
                 rows.append([plat, cpu, wl, label, s["n"], round(s["mean"], 6),
                              round(s["ci95_low"], 6), round(s["ci95_high"], 6),
-                             s["cv_percent"], overhead_x, overhead_p])
+                             s["cv_percent"], overhead_x, overhead_p, ext_x, ext_p])
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(cols)
@@ -110,16 +120,17 @@ def write_determinism(data, out_md):
 
 def write_summary_md(data, out_md):
     lines = ["# Evaluation summary", "",
-             "Mean execution time (95% CI) per workload and backend, by platform. Overhead is the",
-             "container-vs-native ratio where a native baseline was measured.", ""]
+             "Mean execution time (95% CI) per workload and backend, by platform. Overhead x is the",
+             "container-vs-native ratio (where a native baseline was measured); Ext. overhead x is the",
+             "strategy-vs-CLI ratio — the cost the extension adds beyond raw containerization.", ""]
     for plat in sorted(data):
         sysinfo = next(iter(data[plat].values()), {}).get("system", {})
         lines.append(f"## {plat} — {sysinfo.get('cpu_model', '?')} "
                      f"({sysinfo.get('total_ram_gb', '?')} GB, {sysinfo.get('logical_cores', '?')} cores, "
                      f"Docker {sysinfo.get('docker', {}).get('server_version', '?')})")
         lines.append("")
-        lines.append("| Workload | Backend | n | Mean (s) | 95% CI (s) | CV% | Overhead x |")
-        lines.append("|---|---|---|---|---|---|---|")
+        lines.append("| Workload | Backend | n | Mean (s) | 95% CI (s) | CV% | Overhead x | Ext. overhead x |")
+        lines.append("|---|---|---|---|---|---|---|---|")
         for wl in sorted(data[plat]):
             d = data[plat][wl]
             comp = d.get("results", {}).get("comparison", {})
@@ -132,8 +143,13 @@ def write_summary_md(data, out_md):
                 c = comp.get(f"native_vs_{jkey}")
                 if c and c.get("relative_overhead_x"):
                     ox = f"{c['relative_overhead_x']:.2f}x"
+                ext = ""
+                if jkey == "docker_dotnet":
+                    e = comp.get("cli_vs_dotnet")
+                    if e and e.get("relative_overhead_x"):
+                        ext = f"{e['relative_overhead_x']:.2f}x"
                 lines.append(f"| {wl} | {label} | {s['n']} | {s['mean']:.4f} | "
-                             f"[{s['ci95_low']:.4f}, {s['ci95_high']:.4f}] | {s['cv_percent']:.1f} | {ox} |")
+                             f"[{s['ci95_low']:.4f}, {s['ci95_high']:.4f}] | {s['cv_percent']:.1f} | {ox} | {ext} |")
         lines.append("")
     with open(out_md, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")

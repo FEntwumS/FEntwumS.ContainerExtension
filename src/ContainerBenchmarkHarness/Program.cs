@@ -358,13 +358,16 @@ sealed class MockSettingsService : ISettingsService
         [ContainerExtensionModule.PlatformSetting] = "auto",
         [ContainerExtensionModule.TimeoutSetting] = 0.0,
         [ContainerExtensionModule.NetworkModeSetting] = "bridge",
-        [ContainerExtensionModule.LogLevelSetting] = "Verbose",
+        // Telemetry and SDK logging are disabled in the harness: their JSON-Lines writes and console
+        // formatting run on the measured execution thread and would confound the overhead figure. The
+        // benchmark isolates container/strategy cost, not instrumentation cost.
+        [ContainerExtensionModule.LogLevelSetting] = "Off",
         [ContainerExtensionModule.ShowTimestampsSetting] = true,
         [ContainerExtensionModule.PullPolicySetting] = "if-not-present",
         [ContainerExtensionModule.ExtraFlagsSetting] = "",
         [ContainerExtensionModule.DashboardRefreshSetting] = "Manual",
         [ContainerExtensionModule.ContainerNamePrefixSetting] = "containerextension-",
-        [ContainerExtensionModule.TelemetryRetentionSetting] = "100",
+        [ContainerExtensionModule.TelemetryRetentionSetting] = "None",
         [ContainerExtensionModule.BypassNamedPipeCheckSetting] = false,
         [ContainerExtensionModule.AllowNativeFallbackSetting] = false
     };

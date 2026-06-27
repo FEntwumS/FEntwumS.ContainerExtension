@@ -90,20 +90,21 @@ and spans the toolchain categories:
 | Workload | Category | Directory | Artifact hashed |
 | --- | --- | --- | --- |
 | `synth_ice40_yosys` | synthesis | `iCE40_Flow` | `ice40_blink.json` |
+| `pnr_ice40_nextpnr` | place-and-route | `iCE40_Flow` | `ice40_blink.asc` |
+| `pack_ice40_icepack` | bitstream | `iCE40_Flow` | `ice40_blink.bin` |
 | `synth_ecp5_yosys` | synthesis | `ECP5_Flow` | `ecp5_blink.json` |
-| `flow_ice40_full` | full flow | `iCE40_Flow` | `ice40_blink.bin` |
-| `flow_ecp5_full` | full flow | `ECP5_Flow` | `ecp5_blink.bit` |
+| `pnr_ecp5_nextpnr` | place-and-route | `ECP5_Flow` | `ecp5_blink.config` |
+| `pack_ecp5_ecppack` | bitstream | `ECP5_Flow` | `ecp5_blink.bit` |
 | `sim_iverilog` | simulation | `Verilog_Blink` | `Blink.vvp` |
-| `formal_symbiyosys` | formal | `Formal_Verification` | — |
 
-The full-flow workloads chain synthesis, place-and-route and bitstream packing
-inside a single container via `sh -c`, so the entire pipeline executes in one
-container invocation and the final bitstream is one deterministic artifact. The
-formal workload produces a proof result rather than a single stable file and is
-therefore measured for time and exit status only, with no artifact hash. Each
-workload is self-contained in its directory under `tests/integration/`; the input files
-benchmarked are SHA-256 hashed and recorded so the exact inputs are pinned (see
-*Reproducibility*).
+Each workload invokes a single FPGA tool, mirroring how OneWare drives the toolchain
+— one tool per interception — so the `DockerExecutionStrategy` dispatches an argv
+vector, never a `sh -c` pipeline. The per-board workloads are ordered by dependency
+(synthesis → place-and-route → bitstream packing) so each phase's artifact persists as
+the next phase's input. Each workload is self-contained in its directory under
+`tests/integration/`; the benchmarked input files are SHA-256 hashed and recorded so the
+exact inputs are pinned (see *Reproducibility*). End-to-end full-flow and formal
+coverage is exercised separately by the `tests/integration/run_all.sh` smoke runner.
 
 ### Native, container CLI, and the real strategy path
 
@@ -120,13 +121,18 @@ Three execution backends are compared, selected by `benchmark.py --backend`:
    (`src/ContainerBenchmarkHarness/Program.cs`), which constructs a real
    `DockerExecutionStrategy` over a `MockSettingsService` carrying the plugin's
    default settings and invokes `ExecuteAsync` — the identical code path OneWare
-   Studio uses in production, including image resolution, container lifecycle,
-   stream demultiplexing and telemetry. This is the load-bearing backend: it
-   measures the architecture as shipped, not a CLI approximation of it.
+   Studio uses in production, including image resolution, container lifecycle and
+   stream demultiplexing. Telemetry and SDK logging are disabled in the harness so
+   their writes do not run on the measured thread and confound the figure. This is
+   the load-bearing backend: it measures the architecture as shipped, not a CLI
+   approximation of it.
 
 `run_evaluation.py` defaults to `--backend all`, exercising both the CLI and the
-real strategy path so that any overhead attributable to the extension (over and
-above raw containerisation) is observable as the difference between the two.
+real strategy path. The overhead attributable to the extension over and above raw
+containerisation is computed directly as the cli-vs-strategy delta — a Welch t-test
+with Cohen's *d* and a 95 % confidence interval, exported as `cli_vs_dotnet` in the
+comparison block — and, needing no native baseline, it is available on every host,
+including those where no native toolchain is installed.
 
 ## Statistical Method
 

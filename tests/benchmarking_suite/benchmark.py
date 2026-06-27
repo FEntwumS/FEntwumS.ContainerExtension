@@ -574,14 +574,20 @@ def print_results(native: Optional[List[float]], cli: Optional[List[float]],
                        ("CV (rel. std.dev)", "cv_percent"), ("Min", "min"), ("Max", "max")]:
         print(f"{label:<25} | {_fmt(ns, key)} | {_fmt(cs, key)} | {_fmt(ds, key)}")
     print("-" * 92)
-    for label, sample in [("Native vs CLI", cli), ("Native vs DotNet", dotnet)]:
-        if native and sample:
-            w = welch_t_test(native, sample)
-            d = cohens_d(native, sample)
+    # The CLI-vs-DotNet row is the load-bearing result: the overhead the extension adds *beyond* raw
+    # containerization, independent of whether a native baseline is available on this host.
+    for label, base, sample in [("Native vs CLI", native, cli), ("Native vs DotNet", native, dotnet),
+                                ("CLI vs DotNet (extension overhead)", cli, dotnet)]:
+        if base and sample:
+            w = welch_t_test(base, sample)
             if w:
-                print(f"  {label}: overhead {w['mean_diff']:+.4f}s "
-                      f"(95% CI [{w['mean_diff_ci95_low']:+.4f}, {w['mean_diff_ci95_high']:+.4f}]), "
-                      f"Welch p={w['p_value']:.4g}, Cohen's d={d:.2f}" if d is not None else "")
+                d = cohens_d(base, sample)
+                line = (f"  {label}: overhead {w['mean_diff']:+.4f}s "
+                        f"(95% CI [{w['mean_diff_ci95_low']:+.4f}, {w['mean_diff_ci95_high']:+.4f}]), "
+                        f"Welch p={w['p_value']:.4g}")
+                if d is not None:
+                    line += f", Cohen's d={d:.2f}"
+                print(line)
     print(f"  Total wall-clock time: {elapsed:.1f}s")
     print("======================================================================\n")
 
@@ -678,9 +684,11 @@ def export_json(args, native_times, native_rcs, docker_results: Dict[str, Dict],
         key = "docker" if backend == "cli" else f"docker_{backend}"
         data["results"][key] = block(res.get("times"), res.get("rcs"), res.get("peak_rss"))
 
-    # Comparison block: native vs each container backend (Welch + paired if interleaved).
+    # Comparison block. Native-vs-backend rows require a native baseline; the cli-vs-dotnet row (the
+    # extension's overhead beyond raw containerization) does not, so it is computed whenever both
+    # container backends ran — including the cross-OS hosts where no native toolchain is installed.
+    comp = {}
     if native_times:
-        comp = {}
         for backend, res in docker_results.items():
             ct = res.get("times") or []
             if not ct:
@@ -695,8 +703,22 @@ def export_json(args, native_times, native_rcs, docker_results: Dict[str, Dict],
                 entry["relative_overhead_x"] = round(cs["mean"] / ns["mean"], 4)
                 entry["absolute_overhead_sec"] = round(cs["mean"] - ns["mean"], 6)
             comp[f"native_vs_{key}"] = entry
-        if comp:
-            data["results"]["comparison"] = comp
+
+    cli_t = (docker_results.get("cli") or {}).get("times") or []
+    dotnet_t = (docker_results.get("dotnet") or {}).get("times") or []
+    if cli_t and dotnet_t:
+        entry = {"welch": welch_t_test(cli_t, dotnet_t), "cohens_d": cohens_d(cli_t, dotnet_t)}
+        if args.interleave and len(cli_t) == len(dotnet_t):
+            entry["paired"] = paired_t_test(cli_t, dotnet_t)
+        cs = calculate_stats(cli_t)
+        dn = calculate_stats(dotnet_t)
+        if cs and dn and cs["mean"] > 0:
+            entry["relative_overhead_x"] = round(dn["mean"] / cs["mean"], 4)
+            entry["absolute_overhead_sec"] = round(dn["mean"] - cs["mean"], 6)
+        comp["cli_vs_dotnet"] = entry
+
+    if comp:
+        data["results"]["comparison"] = comp
 
     if extra.get("pull_cost"):
         data["pull_cost"] = extra["pull_cost"]
