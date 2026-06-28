@@ -54,6 +54,7 @@ jobs:
           RELEASE_TAG=2026-06-26
           RELEASE_DATE=20260626
           ARCH=linux-x64
+          OSS_CAD_SUITE_SHA256=091122431af82e0229ee693e1a126096cb88ba8979896a586518af957ae68cf0
         load: true
         cache-from: type=gha
         cache-to: type=gha,mode=max
@@ -65,9 +66,16 @@ jobs:
         format: 'sarif'
         output: 'trivy-results.sarif'
         severity: 'HIGH,CRITICAL'
+        # Gate the build on FIXABLE HIGH/CRITICAL only: ignore-unfixed avoids red CI on unfixable
+        # upstream base-image CVEs in a large toolchain image, while still failing on vulnerabilities
+        # the maintainer can actually remediate.
+        exit-code: '1'
+        ignore-unfixed: true
 
     - name: Upload Trivy scan results to GitHub Security tab
       uses: github/codeql-action/upload-sarif@v4
+      # always() so the SARIF still reaches the Security tab even when the scan gate above trips.
+      if: always()
       continue-on-error: true
       with:
         sarif_file: 'trivy-results.sarif'
