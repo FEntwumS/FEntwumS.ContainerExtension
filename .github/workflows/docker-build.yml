@@ -42,6 +42,13 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
+    # The 7 GB toolchain image, its build cache, and Trivy's image export together exceed the runner's
+    # default free disk. Reclaim space from preinstalled toolchains this job does not use.
+    - name: Free up runner disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        df -h /
+
     - name: Build and Load
       uses: docker/build-push-action@v6
       with:
@@ -59,36 +66,32 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    # Report every fixable HIGH/CRITICAL non-blocking. The bulk of the HIGH surface is inherited from
-    # the vendored upstream toolchain (base OS, bundled Python, the `pebble` Go binary), which this
-    # extension does not own (tool distribution is a documented non-goal); it is surfaced, not gated.
-    # exit-code 0 guarantees the SARIF is written and uploaded before the gate below can fail the job.
-    - name: Trivy report (HIGH and CRITICAL, non-blocking)
+    # Scan once to JSON. A single image export keeps the 7 GB toolchain image within the runner's disk
+    # budget (two exports previously exhausted /tmp). exit-code 0 so findings never fail this step;
+    # the next step both reports them and applies the gate.
+    - name: Trivy scan (fixable HIGH/CRITICAL)
       uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
       with:
         image-ref: 'fentwums/oss-cad-suite:latest'
-        format: 'sarif'
-        output: 'trivy-results.sarif'
+        format: 'json'
+        output: 'trivy.json'
         severity: 'HIGH,CRITICAL'
         ignore-unfixed: true
         exit-code: '0'
 
-    - name: Upload Trivy report to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v4
-      if: always()
-      continue-on-error: true # Code scanning upload needs Advanced Security, unavailable on a private repo.
-      with:
-        sarif_file: 'trivy-results.sarif'
-        category: 'trivy'
-
-    # Fail closed on any FIXABLE CRITICAL: rare, genuinely actionable, and robust to the continuously
-    # drifting fixable-HIGH surface of a freshly built upstream toolchain image (a static allowlist
-    # would re-break this workflow on unrelated pushes as apt and the vuln DB advance).
-    - name: Trivy security gate (fail on fixable CRITICAL)
-      uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
-      with:
-        image-ref: 'fentwums/oss-cad-suite:latest'
-        format: 'table'
-        severity: 'CRITICAL'
-        ignore-unfixed: true
-        exit-code: '1'
+    # Surface every finding in the job log (visible without Advanced Security, which this private repo
+    # lacks), then fail closed only on a fixable CRITICAL. The fixable-HIGH surface is inherited from
+    # the vendored upstream toolchain (base OS, bundled Python, the `pebble` Go binary), which this
+    # extension does not own (tool distribution is a documented non-goal); it is surfaced, not gated.
+    - name: Report findings and gate on fixable CRITICAL
+      run: |
+        echo "### Fixable HIGH/CRITICAL by severity"
+        jq -r '[.Results[]?.Vulnerabilities[]?] | group_by(.Severity)[] | "\(.[0].Severity): \(length)"' trivy.json || true
+        echo "### Findings"
+        jq -r '.Results[]?.Vulnerabilities[]? | "\(.Severity)\t\(.VulnerabilityID)\t\(.PkgName) \(.InstalledVersion) -> \(.FixedVersion)"' trivy.json | sort -u || true
+        crit=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' trivy.json)
+        echo "Fixable CRITICAL count: ${crit}"
+        if [ "${crit}" -gt 0 ]; then
+          echo "::error::Build failed: ${crit} fixable CRITICAL vulnerability(ies) present in the image."
+          exit 1
+        fi
