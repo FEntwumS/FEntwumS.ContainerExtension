@@ -24,16 +24,20 @@ OneWare Studio"* by [Mert Torun](https://mtorun0x7cd.com) at TH Köln.
 
 A running container engine (Docker, Podman, OrbStack, or Colima) is required for containerized execution.
 
-## Architecture
+## Repository layout
 
-| Project | Role |
+Each top-level directory carries its own README with the detail; this is the map.
+
+| Path | Contents |
 |---|---|
-| `src/ContainerExtension` | Plugin core. Implements `IToolExecutionStrategy`/`DockerExecutionStrategy`, the registry client, settings, telemetry, and the Avalonia Docker dashboard. Targets `net10.0`, `IsAotCompatible`, source-generated JSON and regex. |
-| `src/ContainerBenchmarkHarness` | Headless harness that drives a tool through the real strategy, plus a telemetry stress mode. Used by the benchmarking suite and the smoke runner. |
-| `tests/ContainerExtension.UnitTests` | xUnit unit tests (validators, command building, path mapping, telemetry, registry parsing, SSRF guards) and gated container E2E tests. |
-| `tests/integration` | HDL fixtures and shell smoke runners (`run_all.sh` against the image, `run_harness_smoke.sh` through the strategy). |
-| `tests/benchmarking_suite` | Cross-platform evaluation pipeline (`benchmark.py`, `run_evaluation.py`, `aggregate.py`). |
-| `docker/oss-cad-suite` | Hardened image build for the open-source toolchain. |
+| [`src/`](src/README.md) | The plugin assemblies. `ContainerExtension` is the core: `IToolExecutionStrategy`/`DockerExecutionStrategy`, the registry client, settings, telemetry, and the Avalonia Docker dashboard (`net10.0`, `IsAotCompatible`, source-generated JSON and regex). `ContainerBenchmarkHarness` is a headless driver used by the benchmarking suite and smoke runner. |
+| [`tests/`](tests/README.md) | `ContainerExtension.UnitTests` (xUnit: validators, command building, path mapping, telemetry, registry parsing, SSRF guards, plus gated container E2E), `integration` (HDL fixtures and shell smoke runners), and `benchmarking_suite` (the cross-platform evaluation pipeline). |
+| [`examples/`](examples/README.md) | Eight self-contained GateMate FPGA designs in VHDL and Verilog that drive the full synthesis → place-and-route → bitstream and simulation flow through the container; also the integration-test corpus. |
+| [`docker/`](docker/README.md) | Build inputs for the hardened `fentwums/oss-cad-suite` toolchain image: the digest-pinned `Dockerfile`, `build_oss_cad_suite.sh`, and `pull_all_images.sh`. |
+| [`docs/`](docs/articles) | DocFX site sources — prose guides under `articles/` and the generated API reference. See [Documentation](#documentation) to build and view the HTML. |
+
+The runtime design (interception, the container lifecycle, the hybrid strategy) is summarized under
+[Execution model](#execution-model) and detailed in [docs/articles/architecture.md](docs/articles/architecture.md).
 
 ## Execution model
 
@@ -45,7 +49,7 @@ The plugin coordinates execution through a hybrid strategy:
 - **Native fallback:** if the daemon is unreachable and `Allow Native Fallback` is enabled, the tool is
   located on the host `PATH` and run natively so work is not blocked.
 - **Telemetry:** execution records are written as JSON Lines with a configurable level (`Off`,
-  `Errors Only`, `Verbose`) and retention. See [docs/articles/telemetry.md](docs/articles/telemetry.md).
+  `Errors Only`, `Info`, `Verbose`) and retention. See [docs/articles/telemetry.md](docs/articles/telemetry.md).
 
 ## Security
 
@@ -93,9 +97,16 @@ locally when a daemon and the toolchain image are present.
 
 ## Documentation
 
-Guides live under [docs/articles](docs/articles) (getting started, configuration, architecture,
-telemetry, evaluation, limitations). The API reference is generated with
-[DocFX](https://dotnet.github.io/docfx/).
+Prose guides live under [docs/articles](docs/articles): getting started, configuration, architecture,
+telemetry, evaluation, and limitations. The full site bundles those guides with an API reference
+generated from the source by [DocFX](https://dotnet.github.io/docfx/):
+
+```bash
+dotnet tool install -g docfx     # once
+docfx docs/docfx.json --serve    # build and serve at http://localhost:8080
+```
+
+`docfx build docs/docfx.json` produces the static HTML under `docs/_site/` without serving.
 
 ## Citation
 
