@@ -1,6 +1,6 @@
 # counter
 
-> Target: TangNano9K (Gowin) - synthesis tier: synth_gowin via Compile; simulate on GHDL. Fit/Assemble out of scope (see suite README).
+> Target: Cologne Chip GateMate evaluation board - full flow `synth_gatemate` → `nextpnr-himbaechel` → `gmpack` via Compile (end to end to a bitstream); simulate on GHDL.
 
 Parametric binary up-counter (Tier 2, sequential). The count is held in an
 `unsigned` register from `numeric_std`, so wrap-around at `2**WIDTH` follows

@@ -15,7 +15,7 @@ All settings are registered under **Binary Management -> Container Engine** in O
 
 | Setting | Type | Default | Description |
 | ------- | ---- | ------- | ----------- |
-| Default Toolchain Image | Text (validated) | `hdlc/ghdl:yosys` | Fallback image for all tools |
+| Default Toolchain Image | Text (validated) | `fentwums/oss-cad-suite:latest` | Default image for all tools — the project's full-flow image (build-only; produce it via Build Local Image) |
 | Image Platform | ComboBox | *(auto)* | Force platform (e.g., `linux/amd64` on Apple Silicon) |
 | Image Pull Policy | ComboBox | `if-not-present` | When to pull: `always`, `if-not-present`, `never` |
 
@@ -64,9 +64,9 @@ All settings are registered under **Binary Management -> Container Engine** in O
 Each tool registered in OneWare Studio gets its own image override setting, dynamically created as `ContainerImage_{toolName}`. This allows using different images for different tools:
 
 ```text
-ContainerImage_ghdl      -> hdlc/ghdl:yosys
-ContainerImage_yosys     -> hdlc/ghdl:yosys
-ContainerImage_nextpnr   -> hdlc/nextpnr:ecp5
+ContainerImage_ghdl          -> fentwums/oss-cad-suite:latest
+ContainerImage_yosys         -> fentwums/oss-cad-suite:latest
+ContainerImage_nextpnr-ecp5  -> hdlc/impl/prjtrellis   (key is ContainerImage_ + tool name, lowercased)
 ```
 
 ## Image Resolution Hierarchy
@@ -76,8 +76,9 @@ When the extension needs to determine which image to use, it checks (in order):
 ```text
 1. ONEWARE_DOCKER_IMAGE env var        (highest - CI/CD override)
 2. ContainerImage_{tool} per-tool      (settings UI)
-3. ContainerExtension_DefaultImage     (global setting)
-4. hdlc/ghdl:yosys                     (hardcoded fallback)
+3. ContainerExtension_DefaultImage     (global setting; defaults to fentwums/oss-cad-suite:latest)
+4. DefaultToolImages[tool]             (built-in per-tool map)
+5. hdlc/ghdl:yosys                     (hardcoded fallback)
 ```
 
 ## Environment Variables

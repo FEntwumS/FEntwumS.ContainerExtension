@@ -1,6 +1,6 @@
 # shift_register
 
-> Target: TangNano9K (Gowin) - synthesis tier: synth_gowin via Compile; simulate on Icarus Verilog. Fit/Assemble out of scope (see suite README).
+> Target: Cologne Chip GateMate evaluation board - full flow `synth_gatemate` → `nextpnr-himbaechel` → `gmpack` via Compile (end to end to a bitstream); simulate on Icarus Verilog.
 
 Parameterized parallel-load / left-shifting serial shift register (tier 2:
 sequential, parameterized). Demonstrates the Verilog synthesis path of the

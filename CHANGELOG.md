@@ -14,11 +14,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The host bind allow-list now enforces both the raw and canonical form of each blocked path, so a failed canonicalization cannot weaken the gate.
 - An empty or non-absolute tool working directory is now rejected with an actionable error instead of being resolved against the plugin's process directory, which previously produced a broken bind mount.
 - A unit test hardcoded an iCloud Downloads path; because the builder pre-creates the mapped working directory on the host, every test run materialized that folder. The test now uses a temporary directory.
+- The diagnostics dashboard falsely reported "Daemon offline" when the runtime's `/info` endpoint failed (observed on OrbStack) even though containerized execution and the liveness ping succeeded; a `null` `/info` is now distinguished from an unreachable daemon and rendered as a degraded-online state. A follow-on case where the Containers section stayed stuck on the offline placeholder after the daemon returned with zero containers (an empty-list fingerprint colliding with the offline reset value) is also fixed.
+- Workspace path containment now collapses `.`/`..` in container-space paths and re-checks containment, closing a `/workspace/../etc/passwd` traversal that previously passed through to the container argv unmodified.
+- Rootless Podman/Docker: every tool-output write failed with `EACCES` because `--user` pinned the host uid into the container; `--user` is now omitted when `/info` reports a rootless runtime (rootful runtimes are unchanged).
+- The SSRF allow-list now normalizes IPv4-mapped IPv6 and rejects the unspecified/wildcard address; telemetry scrubbing now redacts compressed and link-local IPv6 addresses.
+- The fallback socket-selection loops no longer return a socket whose owner the live-probe deliberately skipped; the attach stream is disposed only after the read task drains; and a dispose race in the execution prologue no longer escapes unhandled.
+- "Open Desktop" opened (or failed to find) Docker Desktop under OrbStack/Colima/Podman because the runtime was labeled by the socket path rather than its resolved symlink target; it now identifies the real runtime. "Open Log" opened the `.jsonl` telemetry log in the default text editor instead of silently failing.
+- Commands injected into the integrated terminal (prune, hello-world, engine info, image pulls, local build) are prefixed with a line-reset so leftover input on the prompt can no longer corrupt them (e.g. `vdocker image prune`).
+- Status-banner messages no longer vanish almost immediately after rapid actions: dismissal is keyed to a monotonic token rather than the message text, errors linger longer, and a manual close cancels pending timers. Running containers' uptime/CPU/RAM cells now refresh in place between structural changes.
+- "Reset to Defaults" in the dashboard settings restored Verbose logging and 100-entry retention; it now restores the privacy-by-default values (Errors Only / 25).
 
 ### Changed
 - Re-enabled the `CA1001` and `CA1849` analyzers (and fixed the code they flagged: the two Docker managers now implement `IDisposable`; a cancellation registration is disposed asynchronously). Every remaining `NoWarn` entry now carries a written justification.
 - Restructured CI into separate `format`, `build-test`, and `codeql` jobs; added a Linux/Windows/macOS build-and-test matrix; CodeQL is now gating; reconciled the toolchain image tag across the build script, Dockerfile, and workflow.
 - Moved the integration fixtures and smoke runners from the repository root into `tests/integration`; the cross-platform evaluation, smoke runner, and E2E fixture lookup follow the new path.
+- All tools now default to the project's full-flow `fentwums/oss-cad-suite` image — a single image covering synthesis, place-and-route, packing, and simulation across the supported device families — replacing the per-tool `hdlc/*` defaults, several of which referenced a non-existent `hdlc/impl` image. The image is build-only (not published to a registry); Pull, Check-for-Updates, and the registry-tag display now state this and direct the user to Build Local Image.
+- The dashboard copy actions place the exact, runnable `docker run` command on the clipboard for the current session (real paths and environment values), while the on-disk telemetry log remains scrubbed.
+- Build Local Image now surfaces the pinned release version (read live from the Dockerfile), widened the release picker from ~20 to ~100 entries, and added a "Build & Set Default" action that promotes the freshly-built image to the default image only after the build exits successfully.
+- Re-enabled the AOT/single-file analyzers (removed the blanket suppressions, with a justified per-site suppression where the plugin is loaded as a loose assembly file); the Trivy image scan now fails the docker-build workflow on fixable HIGH/CRITICAL findings while still uploading SARIF, and the workflow passes the integrity checksum build-arg explicitly.
+- "Update All Images" now reports which images failed, not just the count; the dashboard search-box shortcut hint is platform-correct (`Cmd+F` on macOS).
 
 ### Removed
 - The unused `neorv32` and `picorv32` submodules, the tracked `.vscode` directory, and stale broken benchmark result files.
@@ -26,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, and per-directory `README` files under `src`, `tests`, and `docker`.
 - Unit tests for the registry SSRF guards, release-tag validation, image disk-usage aggregation, container-name validation, settings fallback, and the resource-threshold advisory branch.
+- Unit tests for container-space path-traversal containment and compressed/link-local IPv6 telemetry scrubbing.
+- `docs/articles/amd64-native-baseline-protocol.md`: the toolchain-parity provisioning protocol for collecting a valid native-vs-container overhead baseline on `linux/amd64` and `windows/amd64`, complementing the evaluation methodology.
 
 ## [1.0.6] - 2026-06-27
 

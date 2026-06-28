@@ -36,23 +36,6 @@ not of the architecture's interception or container-lifecycle code. Emulated arm
 be compared directly against native amd64 results, and must not be attributed to the integration
 layer. They are reported separately and read as an upper bound under emulation.
 
-## Gowin place-and-route is synthesis-tier only
-
-The two TangNano9K projects in the example suite (`examples/03_counter`, `examples/04_shift_register`)
-are deliberately held at the synthesis tier. `synth_gowin` runs in the container, but the public
-TangNano board package targets the deprecated `nextpnr-gowin`, whereas the image ships
-`nextpnr-himbaechel` with the Gowin micro-architecture instead. The OssCadSuite Fit path additionally
-emits only `.pcf`/`.ccf` pin constraints and does not yet produce the Gowin `.cst` format that the
-Gowin flow requires, so the Fit and Assemble stages are out of scope for those two designs (see
-`examples/README.md`). This is a gap in the upstream board package and constraint translation, not in
-the dispatch mechanism: `synth_gowin` is intercepted and containerized identically to the other
-synthesis back ends.
-
-Impact on the evaluation: the place-and-route and bitstream-assembly tiers are exercised on the
-GateMate (`nextpnr-himbaechel` + `gmpack`) and iCEBreaker (`nextpnr-ice40` + `icepack`) families.
-Conclusions about the full synth-route-pack pipeline rest on those families; the Gowin designs
-contribute only to the synthesis tier and to the VHDL/Verilog front-end coverage.
-
 ## Registry credential forwarding is scoped to the registry host
 
 When the dashboard's image browser queries a private registry over the Distribution v2 API, it may
@@ -131,9 +114,10 @@ a concrete measured value belongs, it is drawn from `results/summary.csv` rather
 
 **Workload selection (external validity).** The example suite is a coverage matrix, not a
 representative sample of production designs. It is constructed to drive every back-end tool the
-extension containerizes — three synthesis back ends (`synth_gatemate`, `synth_ice40`, `synth_gowin`),
-two routers (`nextpnr-himbaechel`, `nextpnr-ice40`), two packers (`gmpack`, `icepack`), and both
-simulation front ends (`ghdl`, `iverilog`) — across three device families and both source languages.
+extension containerizes — three synthesis back ends (`synth_gatemate`, `synth_ice40`, `synth_ecp5`),
+three routers (`nextpnr-himbaechel`, `nextpnr-ice40`, `nextpnr-ecp5`), three packers (`gmpack`,
+`icepack`, `ecppack`), and both simulation front ends (`ghdl`, `iverilog`) — across the GateMate, iCE40,
+and ECP5 families and both source languages.
 The designs are small interface examples with synthetic pin assignments, not pin-locked reference
 designs, so absolute runtimes are short and the relative weight of fixed per-invocation container
 overhead is correspondingly larger than it would be for long-running industrial syntheses. The

@@ -8,5 +8,7 @@
   href: architecture.md
 - name: Evaluation Methodology
   href: evaluation.md
+- name: amd64 Native Baseline Protocol
+  href: amd64-native-baseline-protocol.md
 - name: Limitations and Threats to Validity
   href: limitations.md
