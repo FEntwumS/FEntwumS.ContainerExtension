@@ -1854,11 +1854,14 @@ internal sealed class E2ETestServiceProvider : IServiceProvider, IDisposable
 #pragma warning disable CA1515, xUnit3003
 public sealed class FactIfNoCI : FactAttribute
 {
-    public FactIfNoCI()
+    public string? Reason { get; }
+
+    public FactIfNoCI(string? reason = null)
     {
+        Reason = reason;
         if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true")
         {
-            Skip = "Skipped in GitHub Actions to prevent Docker Hub rate limits and image pulling flakiness.";
+            Skip = reason ?? "Skipped in GitHub Actions to prevent Docker Hub rate limits and image pulling flakiness.";
         }
     }
 }
