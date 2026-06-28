@@ -68,9 +68,12 @@ jobs:
         severity: 'HIGH,CRITICAL'
         # Gate the build on FIXABLE HIGH/CRITICAL only: ignore-unfixed avoids red CI on unfixable
         # upstream base-image CVEs in a large toolchain image, while still failing on vulnerabilities
-        # the maintainer can actually remediate.
+        # the maintainer can actually remediate. The allowlist in .trivyignore suppresses fixable
+        # HIGH advisories inherited from the vendored upstream toolchain (base OS, bundled Python and
+        # the `pebble` Go binary); the gate stays fail-closed on any CRITICAL or any new HIGH.
         exit-code: '1'
         ignore-unfixed: true
+        trivyignores: '.trivyignore'
 
     - name: Upload Trivy scan results to GitHub Security tab
       uses: github/codeql-action/upload-sarif@v4
