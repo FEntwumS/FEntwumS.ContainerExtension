@@ -87,5 +87,10 @@ jobs:
           GITHUB_ACTIONS: true
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v4
+        # SARIF upload requires GitHub Advanced Security, which is unavailable on
+        # this private repository; tolerate the rejected upload so the scan stays
+        # informational rather than failing the workflow. Enabling code scanning
+        # (or making the repository public) restores the upload.
+        continue-on-error: true
         with:
           category: "/language:csharp"
