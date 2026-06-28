@@ -341,10 +341,12 @@ public partial class DockerDiagnosticsView
             prefixTextBox.Text = "containerextension-";
             extraFlagsTextBox.Text = "";
 
-            logLevelComboBox.SelectedItem = "Verbose";
+            // Match the registered privacy-by-default defaults (ContainerExtensionModule: "Errors Only" /
+            // "25"); resetting to Verbose/100 would silently worsen the telemetry posture this action implies.
+            logLevelComboBox.SelectedItem = "Errors Only";
             showTimestampsCheckBox.IsChecked = true;
             refreshComboBox.SelectedItem = "Manual";
-            retentionComboBox.SelectedItem = "100";
+            retentionComboBox.SelectedItem = "25";
 
             runtimePathTextBox.Text = "";
             socketTextBox.Text = "";

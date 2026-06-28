@@ -43,6 +43,17 @@ public partial class DockerDiagnosticsView : UserControl
     // -- Instance State --------------------------------------------------
     private readonly DockerExecutionStrategy _strategy;
     private readonly ITerminalManagerService _terminalService;
+
+    // Prepended to every command injected into the interactive terminal so a non-empty input line (e.g. a
+    // half-typed "v") cannot corrupt it into "vdocker ...". Ctrl-E moves the cursor to the end of the line
+    // and Ctrl-U discards the whole line, leaving a clean prompt before the command is typed.
+    private const string TerminalLineReset = "\u0005\u0015";
+
+    // The project's toolchain image is produced locally (Build Local Image / build_oss_cad_suite.sh) and is
+    // NOT published to a registry, so Pull / Check-for-Updates cannot fetch it. Used to redirect those
+    // actions to Build Local Image instead of attempting a doomed registry pull (which 404s).
+    private static bool IsBuildOnlyImage(string image) =>
+        !string.IsNullOrEmpty(image) && image.StartsWith("fentwums/oss-cad-suite", StringComparison.OrdinalIgnoreCase);
     private readonly StackPanel _statusContent;
     private readonly StackPanel _configContent;
     private readonly StackPanel _containersContent;
@@ -55,9 +66,11 @@ public partial class DockerDiagnosticsView : UserControl
     private readonly ISettingsService _settingsService;
     private readonly TextBox _searchBox;
     private readonly IServiceProvider _serviceProvider;
-    private string? _temporaryStatus;
     private readonly Border _statusBanner;
     private readonly TextBlock _statusBannerText;
+    // Monotonic token identifying the current banner message; the auto-hide timer dismisses by token, not by
+    // message text, so a newer banner is never cleared early by a previous message's still-pending timer.
+    private long _bannerToken;
 
     // -- KPI Metrics Controls (assigned via CreateMetricCard in the constructor) ----------
     private readonly TextBlock _metricDaemonStatusText;
@@ -178,16 +191,17 @@ public partial class DockerDiagnosticsView : UserControl
         headerTitlePanel.Children.Add(_headerTitle);
 
         // -- Global Search / Filter --------------------------------------
+        var searchShortcut = OperatingSystem.IsMacOS() ? "Cmd+F" : "Ctrl+F";
         _searchBox = new TextBox
         {
-            Watermark = "Filter containers, images, history...  (Ctrl+F)",
+            Watermark = $"Filter containers, images, history...  ({searchShortcut})",
             FontSize = 12,
             Margin = new Thickness(0, 2, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             TabIndex = 1
         };
         AutomationProperties.SetName(_searchBox, "Filter containers, images, history text search box");
-        AutomationProperties.SetHelpText(_searchBox, "Type to filter all sections. Press Ctrl+F to focus, Escape to clear.");
+        AutomationProperties.SetHelpText(_searchBox, $"Type to filter all sections. Press {searchShortcut} to focus, Escape to clear.");
 
         var clearBtn = new Button
         {
@@ -395,7 +409,9 @@ public partial class DockerDiagnosticsView : UserControl
             Margin = new Thickness(0, 4, 0, 4)
         };
 
-        closeBannerBtn.Command = new RelayCommand(() => _statusBanner.IsVisible = false);
+        // Bump the token so any in-flight auto-hide/restore timer for the current message is invalidated and
+        // cannot re-show the banner after the user has explicitly dismissed it.
+        closeBannerBtn.Command = new RelayCommand(() => { System.Threading.Interlocked.Increment(ref _bannerToken); _statusBanner.IsVisible = false; });
 
         // -- Sections Panel (1-Grid Layout) ------------------------------
         var sectionsPanel = new StackPanel
@@ -1019,7 +1035,18 @@ public partial class DockerDiagnosticsView : UserControl
 
                 if (info == null)
                 {
-                    throw new DockerExecutionException("Docker/OrbStack daemon is unreachable.");
+                    // A null /info response does NOT by itself mean the daemon is down: some runtimes
+                    // (notably OrbStack) can fail or stall the /info endpoint while /containers, /images
+                    // and /_ping all succeed and containerized execution works. Probe liveness directly
+                    // before blanking the dashboard, so a transient /info fault is not misreported as
+                    // "Daemon offline" (which contradicts a working execution path).
+                    var alive = await _strategy.PingAsync(ct).ConfigureAwait(false);
+                    if (!alive)
+                    {
+                        throw new DockerExecutionException("Docker/OrbStack daemon is unreachable.");
+                    }
+                    // Daemon reachable; render online with the data we have, in a degraded state where
+                    // only the system-info card reports "unavailable" (info stays null below).
                 }
 
                 // Compute disk usage from the already-fetched image list (avoids duplicate API call)
@@ -1041,7 +1068,7 @@ public partial class DockerDiagnosticsView : UserControl
 
     /// <summary>Applies the daemon-online snapshot to the header, KPI cards, and data sections.</summary>
     private void ApplyDaemonOnlineUi(
-        Docker.DotNet.Models.SystemInfoResponse info,
+        Docker.DotNet.Models.SystemInfoResponse? info,
         IList<Docker.DotNet.Models.ContainerListResponse> containers,
         IList<Docker.DotNet.Models.ImagesListResponse> images,
         (int imageCount, long totalSizeBytes, long reclaimableBytes) diskUsage,
@@ -1055,9 +1082,12 @@ public partial class DockerDiagnosticsView : UserControl
         ToolTip.SetTip(_headerTitle, null);
         PopulateStatus(true, info);
 
-        // KPI metrics (online state)
+        // KPI metrics (online state). The daemon is reachable here even when info is null (degraded:
+        // /info failed but the liveness ping in RefreshAllAsync succeeded), so the card stays green.
         _metricDaemonStatusText.Text = "Online";
-        _metricDaemonDetailText.Text = $"{info.Name ?? "Connected"} ({_strategy.DetectedRuntime})";
+        _metricDaemonDetailText.Text = info != null
+            ? $"{info.Name ?? "Connected"} ({_strategy.DetectedRuntime})"
+            : $"System info unavailable ({_strategy.DetectedRuntime})";
         _metricDaemonBorder.Background = GreenColor;
 
         var running = containers.Count(c => string.Equals(c.State, "running", StringComparison.OrdinalIgnoreCase));
@@ -1078,6 +1108,17 @@ public partial class DockerDiagnosticsView : UserControl
         {
             _statusBanner.IsVisible = false;
         }
+
+        // Transitioning into the online state (from offline, or the first render): the data sections may
+        // still hold the offline placeholder that PopulateOfflineSections wrote. Invalidate the fingerprints
+        // so the skip-if-unchanged guard below cannot suppress the repaint — critically for an empty list,
+        // whose fingerprint is 0, the same value PopulateOfflineSections resets to. Without this, coming
+        // online with zero containers leaves "Daemon offline" stuck in the Containers section.
+        if (_wasDockerOnline != true)
+        {
+            _lastContainerFingerprint = -1;
+            _lastImageFingerprint = -1;
+        }
         _wasDockerOnline = true;
 
         // Skip-if-unchanged: compare a lightweight fingerprint of container/image data to avoid a
@@ -1089,6 +1130,13 @@ public partial class DockerDiagnosticsView : UserControl
         {
             _lastContainerFingerprint = containerFp;
             PopulateContainers(containers);
+        }
+        else
+        {
+            // Structure unchanged (same count/ids/states): skip the full row rebuild, but keep the live
+            // status/uptime and CPU/RAM cells current via in-place updates so they do not freeze between
+            // structural changes (e.g. a long-running container whose uptime keeps advancing).
+            RefreshLiveContainerCells(containers);
         }
         if (imageFp != _lastImageFingerprint)
         {
@@ -1266,10 +1314,13 @@ public partial class DockerDiagnosticsView : UserControl
 
                 row.Children.Add(new TextBlock
                 {
-                    Text = "(Tags unavailable)",
+                    Text = IsBuildOnlyImage(currentImage)
+                        ? "(local-only image — build via Build Local Image; not on a registry)"
+                        : "(No registry tags — local-only image or registry unavailable)",
                     Foreground = MutedColor,
                     FontSize = 11,
                     VerticalAlignment = VerticalAlignment.Center,
+                    TextWrapping = TextWrapping.Wrap,
                     Margin = new Thickness(0, 4, 8, 4)
                 });
             }
@@ -1285,6 +1336,11 @@ public partial class DockerDiagnosticsView : UserControl
             btn.Command = new AsyncRelayCommand(async () =>
         {
             var activeImg = tags.Count > 0 && row.Children[1] is ComboBox cb && cb.SelectedItem is string sel ? sel : currentImage;
+            if (IsBuildOnlyImage(activeImg))
+            {
+                ShowTemporaryStatus($"'{activeImg}' is built locally, not pulled — use Build Local Image to produce or update it.", isError: false, isTemporary: false);
+                return;
+            }
             var prevTip = ToolTip.GetTip(btn);
             try
             {
@@ -1300,7 +1356,7 @@ public partial class DockerDiagnosticsView : UserControl
                 });
 
                 var runtimePath = _strategy.GetRuntimePath();
-                var pull = await _terminalService.ExecuteInTerminalAsync($"{runtimePath} pull \"{activeImg}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5)).ConfigureAwait(false);
+                var pull = await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} pull \"{activeImg}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5)).ConfigureAwait(false);
 
                 if (pull.TimedOut || pull.ExitCode != 0)
                 {
@@ -1469,6 +1525,20 @@ public partial class DockerDiagnosticsView : UserControl
             _statusContent.Children.Add(new TextBlock
             {
                 Text = hint,
+                Foreground = MutedColor,
+                FontSize = 11,
+                FontStyle = FontStyle.Italic,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(18, 4, 0, 0)
+            });
+        }
+        else
+        {
+            // Reachable, but /info was unavailable this cycle (degraded online). State it plainly so
+            // the green "Online" indicator is not mistaken for a complete, healthy system-info read.
+            _statusContent.Children.Add(new TextBlock
+            {
+                Text = $"{_strategy.DetectedRuntime} daemon is reachable; system information is temporarily unavailable.",
                 Foreground = MutedColor,
                 FontSize = 11,
                 FontStyle = FontStyle.Italic,
@@ -1653,12 +1723,12 @@ public partial class DockerDiagnosticsView : UserControl
 
     private void ShowTemporaryStatus(string message, bool isError = false, bool isTemporary = true)
     {
+        var token = System.Threading.Interlocked.Increment(ref _bannerToken);
         Dispatcher.UIThread.Post(() =>
         {
             _statusBannerText.Text = message;
             ApplyBannerStyle(isError);
             _statusBanner.IsVisible = true;
-            _temporaryStatus = isTemporary ? message : null;
             if (!isTemporary)
             {
                 _lastPermanentMessage = message;
@@ -1668,16 +1738,20 @@ public partial class DockerDiagnosticsView : UserControl
 
         if (isTemporary)
         {
+            // Errors linger longer than info so they can actually be read before the next refresh tick
+            // overwrites them. Dismissal is gated on TOKEN identity, not message text: a stale timer for a
+            // superseded (or identical) message can no longer clear the banner early — the bug behind status
+            // messages "disappearing almost instantly" after a few rapid clicks.
+            var holdMs = isError ? 12000 : 6000;
             var weakSelf = new WeakReference<DockerDiagnosticsView>(this);
-            _ = System.Threading.Tasks.Task.Delay(6000).ContinueWith(_ =>
+            _ = System.Threading.Tasks.Task.Delay(holdMs).ContinueWith(_ =>
             {
                 if (weakSelf.TryGetTarget(out var self))
                 {
                     Dispatcher.UIThread.Post(() =>
                     {
-                        if (self._temporaryStatus == message)
+                        if (System.Threading.Interlocked.Read(ref self._bannerToken) == token)
                         {
-                            self._temporaryStatus = null;
                             if (self._wasDockerOnline == false && self._lastPermanentMessage != null)
                             {
                                 self._statusBannerText.Text = self._lastPermanentMessage;
@@ -1784,7 +1858,9 @@ public partial class DockerDiagnosticsView : UserControl
         {
             try
             {
-                var cmd = _strategy.GenerateDockerRunCommand();
+                // Prefer the exact command from the most recent real execution this session (verbatim and
+                // runnable, with real env/paths); fall back to the generic template before anything has run.
+                var cmd = _strategy.LastRawDockerRunCommand ?? _strategy.GenerateDockerRunCommand();
                 var topLevel = TopLevel.GetTopLevel(this);
                 if (topLevel?.Clipboard != null)
                 {
@@ -1815,8 +1891,13 @@ public partial class DockerDiagnosticsView : UserControl
                 var runtimePath = _strategy.GetRuntimePath();
                 var settings = _strategy.GetActiveSettingsSummary();
                 var img = settings.GetValueOrDefault("Image", ContainerExtensionModule.FallbackImage);
+                if (IsBuildOnlyImage(img))
+                {
+                    ShowTemporaryStatus($"'{img}' is built locally, not pulled — use Build Local Image to produce or update it.", isError: false, isTemporary: false);
+                    return;
+                }
                 ShowTemporaryStatus($"Pulling default image '{img}' in terminal...");
-                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} pull \"{img}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5)).ConfigureAwait(false);
+                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} pull \"{img}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5)).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -1829,7 +1910,7 @@ public partial class DockerDiagnosticsView : UserControl
         {
             try
             {
-                var selection = await ShowBuildDialogAsync().ConfigureAwait(true);
+                var (selection, setAsDefault) = await ShowBuildDialogAsync().ConfigureAwait(true);
                 if (selection == null)
                 {
                     return;
@@ -1897,7 +1978,24 @@ public partial class DockerDiagnosticsView : UserControl
                 }
 
                 var commandLine = $"{runtimePath} build {extraArgs}-t {tag} -f \"{dockerfilePath}\" \"{buildContextDir}\"";
-                await _terminalService.ExecuteInTerminalAsync(commandLine, ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(20)).ConfigureAwait(false);
+                var build = await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + commandLine, ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(20)).ConfigureAwait(false);
+
+                if (setAsDefault)
+                {
+                    // Only promote the freshly-built image to the default once the build actually succeeded —
+                    // the terminal reports a real exit code, so a failed/timed-out build leaves the default intact.
+                    if (!build.TimedOut && build.ExitCode == 0)
+                    {
+                        _settingsService.SetSettingValue(ContainerExtensionModule.DefaultImageSetting, tag);
+                        ShowTemporaryStatus($"Built and set '{tag}' as the default toolchain image.", isError: false, isTemporary: false);
+                        _ = RefreshAllSafeAsync();
+                    }
+                    else
+                    {
+                        var why = build.TimedOut ? "timed out" : $"exit code {build.ExitCode}";
+                        ShowTemporaryStatus($"Build {why}; default image left unchanged.", isError: true);
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -1926,7 +2024,8 @@ public partial class DockerDiagnosticsView : UserControl
 
                 if (result.failed > 0)
                 {
-                    ShowTemporaryStatus($"Updated {result.pulled} image(s), {result.failed} failed", isError: true);
+                    var names = result.failedImages.Count > 0 ? ": " + string.Join(", ", result.failedImages) : "";
+                    ShowTemporaryStatus($"Updated {result.pulled} image(s), {result.failed} failed{names}", isError: true);
                 }
                 else
                 {
@@ -1952,7 +2051,7 @@ public partial class DockerDiagnosticsView : UserControl
                 }
                 var runtimePath = _strategy.GetRuntimePath();
                 ShowTemporaryStatus("Pruning unused images in terminal...");
-                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} image prune -a -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} image prune -a -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -1976,7 +2075,7 @@ public partial class DockerDiagnosticsView : UserControl
             {
                 var runtimePath = _strategy.GetRuntimePath();
                 ShowTemporaryStatus("Running Hello-World test in terminal...");
-                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} run --rm hello-world", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} run --rm hello-world", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -1991,7 +2090,7 @@ public partial class DockerDiagnosticsView : UserControl
             {
                 var runtimePath = _strategy.GetRuntimePath();
                 ShowTemporaryStatus("Querying Engine Info in terminal...");
-                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} info", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(1)).ConfigureAwait(false);
+                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} info", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(1)).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -2011,7 +2110,7 @@ public partial class DockerDiagnosticsView : UserControl
                 }
                 var runtimePath = _strategy.GetRuntimePath();
                 ShowTemporaryStatus("Pruning system in terminal...");
-                await _terminalService.ExecuteInTerminalAsync($"{runtimePath} system prune -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} system prune -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -2222,13 +2321,48 @@ public partial class DockerDiagnosticsView : UserControl
     private const string PinnedBuildSelection = "pinned";
     private const string PinnedBuildLabel = "Pinned (recommended)";
 
+    // Reads the repository-pinned oss-cad-suite release tag (ARG RELEASE_TAG=) from the bundled Dockerfile so
+    // the Build dialog can show the concrete version (e.g. "Pinned 2026-06-26") instead of a bare "Pinned".
+    // Returns false if the Dockerfile cannot be located or parsed; the dialog then uses the generic label.
+    // The version is NOT duplicated into C# — the Dockerfile remains the single source of truth.
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("SingleFile", "IL3000",
+        Justification = "The plugin is loaded by OneWare as a loose assembly file from the Packages directory, not embedded in a single-file bundle, so Assembly.Location returns a valid path.")]
+    private static bool TryReadPinnedReleaseTag(out string? tag)
+    {
+        tag = null;
+        try
+        {
+            var current = Path.GetDirectoryName(typeof(DockerDiagnosticsView).Assembly.Location);
+            for (int i = 0; i < 6 && !string.IsNullOrEmpty(current); i++)
+            {
+                var candidate = Path.Combine(current, "docker", "oss-cad-suite", "Dockerfile");
+                if (File.Exists(candidate))
+                {
+                    foreach (var line in File.ReadLines(candidate))
+                    {
+                        var trimmed = line.TrimStart();
+                        if (trimmed.StartsWith("ARG RELEASE_TAG=", StringComparison.Ordinal))
+                        {
+                            tag = trimmed["ARG RELEASE_TAG=".Length..].Trim();
+                            return !string.IsNullOrEmpty(tag);
+                        }
+                    }
+                    return false;
+                }
+                current = Path.GetDirectoryName(current);
+            }
+        }
+        catch { /* fall back to the generic label */ }
+        return false;
+    }
+
     /// <summary>
     /// Prompts for the oss-cad-suite version to build locally. Returns <see cref="PinnedBuildSelection"/>
     /// for the repository-pinned build, a YYYY-MM-DD release tag for a specific GitHub release, or null
     /// if cancelled. The version list is fetched from GitHub up front; if that fails, only the pinned
     /// build is offered.
     /// </summary>
-    private async Task<string?> ShowBuildDialogAsync()
+    private async Task<(string? selection, bool setAsDefault)> ShowBuildDialogAsync()
     {
         IReadOnlyList<string> versions = Array.Empty<string>();
         string? fetchNote = null;
@@ -2236,7 +2370,9 @@ public partial class DockerDiagnosticsView : UserControl
         {
             ShowTemporaryStatus("Querying available oss-cad-suite versions from GitHub...");
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            versions = await ContainerExtension.Services.GitHubReleaseClient.GetRecentReleaseTagsAsync(20, cts.Token).ConfigureAwait(true);
+            // Show the 100 most recent valid releases (GitHub single-page max; oss-cad-suite publishes
+            // ~daily, so this spans ~3 months rather than the ~19 days a count of 20 covered). Not a date policy.
+            versions = await ContainerExtension.Services.GitHubReleaseClient.GetRecentReleaseTagsAsync(100, cts.Token).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -2244,7 +2380,7 @@ public partial class DockerDiagnosticsView : UserControl
             ContainerTelemetry.TrackError("DockerDiagnosticsView", "ShowBuildDialog_FetchVersions", ex);
         }
 
-        var tcs = new TaskCompletionSource<string?>();
+        var tcs = new TaskCompletionSource<(string? selection, bool setAsDefault)>();
         var dialog = new Window
         {
             Title = "Build Local Image",
@@ -2264,8 +2400,11 @@ public partial class DockerDiagnosticsView : UserControl
             FontWeight = FontWeight.SemiBold
         });
 
+        var pinnedLabel = TryReadPinnedReleaseTag(out var pinnedTag) && pinnedTag != null
+            ? $"Pinned {pinnedTag} (recommended)"
+            : PinnedBuildLabel;
         var versionCombo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
-        versionCombo.Items.Add(PinnedBuildLabel);
+        versionCombo.Items.Add(pinnedLabel);
         foreach (var v in versions)
         {
             versionCombo.Items.Add(v);
@@ -2322,20 +2461,41 @@ public partial class DockerDiagnosticsView : UserControl
             // Enter confirms the primary build action; safe here (non-destructive).
             IsDefault = true
         };
-        cancelBtn.Command = new RelayCommand(() => { tcs.TrySetResult(null); dialog.Close(); });
-        buildBtn.Command = new RelayCommand(() =>
+        string ResolveSelection()
         {
             var selected = versionCombo.SelectedItem as string;
-            tcs.TrySetResult(string.IsNullOrEmpty(selected) || selected == PinnedBuildLabel ? PinnedBuildSelection : selected);
+            return string.IsNullOrEmpty(selected) || selected == PinnedBuildLabel || selected.StartsWith("Pinned ", StringComparison.Ordinal) ? PinnedBuildSelection : selected;
+        }
+        cancelBtn.Command = new RelayCommand(() => { tcs.TrySetResult((null, false)); dialog.Close(); });
+        buildBtn.Command = new RelayCommand(() =>
+        {
+            tcs.TrySetResult((ResolveSelection(), false));
+            dialog.Close();
+        });
+
+        var buildSetDefaultBtn = new Button
+        {
+            Content = "Build & Set Default",
+            FontWeight = FontWeight.SemiBold,
+            Background = AccentColor,
+            Foreground = OnAccentColor,
+            Padding = new Thickness(16, 8),
+            CornerRadius = InnerCornerRadius
+        };
+        ToolTip.SetTip(buildSetDefaultBtn, "Build the image, then set it as the default toolchain image once the build succeeds.");
+        buildSetDefaultBtn.Command = new RelayCommand(() =>
+        {
+            tcs.TrySetResult((ResolveSelection(), true));
             dialog.Close();
         });
 
         buttonPanel.Children.Add(cancelBtn);
         buttonPanel.Children.Add(buildBtn);
+        buttonPanel.Children.Add(buildSetDefaultBtn);
         mainPanel.Children.Add(buttonPanel);
 
         dialog.Content = new Border { Padding = new Thickness(24), Child = mainPanel };
-        dialog.Closed += (s, e) => { tcs.TrySetResult(null); };
+        dialog.Closed += (s, e) => { tcs.TrySetResult((null, false)); };
 
         await ShowDialogWithOwnerAsync(dialog);
         return await tcs.Task;

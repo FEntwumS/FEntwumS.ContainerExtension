@@ -135,6 +135,17 @@ public static partial class RegistryClient
     // SSRF gate: reject any address that targets the local host or a non-routable / internal range.
     private static bool IsDisallowedAddress(System.Net.IPAddress address)
     {
+        // Collapse IPv4-mapped IPv6 (::ffff:a.b.c.d) to IPv4 so the private/CGNAT/link-local byte tests
+        // below also catch mapped forms, and reject the unspecified/wildcard addresses outright. Without
+        // this, ::ffff:10.0.0.1 or 0.0.0.0 would slip past the allowlist to an internal target.
+        if (address.IsIPv4MappedToIPv6)
+        {
+            address = address.MapToIPv4();
+        }
+        if (address.Equals(System.Net.IPAddress.Any) || address.Equals(System.Net.IPAddress.IPv6Any))
+        {
+            return true;
+        }
         if (System.Net.IPAddress.IsLoopback(address) || address.IsIPv6LinkLocal || address.IsIPv6UniqueLocal)
         {
             return true;
@@ -320,12 +331,11 @@ public static partial class RegistryClient
 
                         bool isLoopback = IsLoopbackRegistry(parts.Registry);
 
-                        if (!isLoopback && (parts.Registry.Contains("http:", StringComparison.OrdinalIgnoreCase) ||
-                                            parts.Registry.Contains("http", StringComparison.OrdinalIgnoreCase)))
-                        {
-                            throw new RegistryConnectionException("Non-SSL / HTTP registries are strictly prohibited.");
-                        }
-
+                        // A registry segment is a bare host identifier: IsValidRegistryIdentifier below
+                        // rejects any ':' (so a scheme-bearing "http://host" is dropped to an empty result),
+                        // and HTTPS is enforced by construction when the request URL is built. No separate
+                        // substring "http" check is needed — and an unanchored one false-rejected legitimate
+                        // hosts like "http.example.com".
                         if (!IsValidRegistryIdentifier(parts.Namespace) || !IsValidRegistryIdentifier(parts.Repository) || !IsValidRegistryIdentifier(parts.Registry))
                         {
                             AddToCache(key, []);

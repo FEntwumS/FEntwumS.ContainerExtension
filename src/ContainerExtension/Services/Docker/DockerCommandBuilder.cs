@@ -138,7 +138,8 @@ internal static class DockerCommandBuilder
       string? uid,
       string? gid,
       Action<ToolCommand, string> sdkLog,
-      double? remoteCpuCores = null)
+      double? remoteCpuCores = null,
+      bool isRootless = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(image);
         ArgumentNullException.ThrowIfNull(command);
@@ -451,7 +452,12 @@ internal static class DockerCommandBuilder
         var counter = Interlocked.Increment(ref _containerCounter);
         var containerName = $"{SanitizeContainerName(rawPrefix)}{SanitizeContainerName(executable)}-{DateTime.Now.ToString("HHmmssfff", System.Globalization.CultureInfo.InvariantCulture)}-{counter}-{Guid.NewGuid().ToString("N")[..8]}";
 
-        var user = string.IsNullOrEmpty(uid) || string.IsNullOrEmpty(gid) || OperatingSystem.IsWindows()
+        // On a rootless runtime (rootless Podman or rootless Docker), pinning --user to the host euid:egid
+        // breaks every workspace write: the host uid is not the in-namespace owner of the bind mount, so the
+        // tool's output hits EACCES. Omitting --user runs as the image default (root), which the rootless
+        // user namespace maps back to the invoking host user that owns the workspace. Every other runtime —
+        // including ROOTFUL Podman and Docker — still needs the explicit uid:gid for correct file ownership.
+        var user = isRootless || string.IsNullOrEmpty(uid) || string.IsNullOrEmpty(gid) || OperatingSystem.IsWindows()
           ? null
           : $"{uid}:{gid}";
 
@@ -1306,6 +1312,36 @@ internal static class DockerCommandBuilder
         return ResolveCanonicalInternal(path, 0);
     }
 
+    // Collapses '.' and '..' segments in an absolute container-space path and enforces that the result
+    // stays within the workspace root. Any path that escapes /workspace resolves to the in-workspace
+    // sentinel, preserving the containment guarantee the bind mount provides. Operates purely on the
+    // Linux container path; it must not touch the host filesystem or host path semantics.
+    private static string CollapseContainerPath(string containerPath)
+    {
+        var segments = containerPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var stack = new List<string>(segments.Length);
+        foreach (var seg in segments)
+        {
+            if (string.Equals(seg, ".", StringComparison.Ordinal))
+            {
+                continue;
+            }
+            if (string.Equals(seg, "..", StringComparison.Ordinal))
+            {
+                if (stack.Count > 0)
+                {
+                    stack.RemoveAt(stack.Count - 1);
+                }
+                continue;
+            }
+            stack.Add(seg);
+        }
+        var collapsed = "/" + string.Join('/', stack);
+        return collapsed.Equals(ContainerWorkDir, StringComparison.Ordinal) || collapsed.StartsWith(ContainerWorkDir + "/", StringComparison.Ordinal)
+            ? collapsed
+            : ContainerWorkDir + "/invalid_escaped_path";
+    }
+
     private static string MapPathToContainerInternal(string path, string workingDirCanonical)
     {
         var resolvedWorkingDir = workingDirCanonical;
@@ -1325,7 +1361,11 @@ internal static class DockerCommandBuilder
             && !normalizedPath.StartsWith(workingDirNormalizedUnix, osComparison)
             && !normalizedPath.Equals(resolvedWorkingDirUnix, osComparison))
         {
-            return path;
+            // Already a container-space path (/workspace/...). Collapse '.'/'..' and enforce containment so a
+            // crafted "/workspace/../etc/passwd" cannot escape the bind mount; anything out-of-tree maps to
+            // the in-workspace sentinel. Do NOT use Path.GetFullPath here — it would re-anchor this Linux
+            // container path against the host OS root.
+            return CollapseContainerPath(normalizedPath);
         }
 
         var fullPath = GetCanonicalPath(Path.IsPathRooted(path) ? path : Path.Combine(resolvedWorkingDir, path));

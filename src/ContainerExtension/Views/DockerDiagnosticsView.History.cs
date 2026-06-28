@@ -432,18 +432,25 @@ public partial class DockerDiagnosticsView
 
         if (!string.IsNullOrWhiteSpace(entry.DockerRunCommand))
         {
-            var cmdText = entry.DockerRunCommand;
-            try
+            // Prefer the exact, unmasked command kept in memory for THIS session's executions (verbatim and
+            // runnable); entries from a prior session (loaded from disk) have no in-memory raw form and fall
+            // back to the scrubbed text. The raw form is intentionally NOT re-scrubbed.
+            var raw = ContainerTelemetry.TryGetRawCommand(entry.DockerRunCommand);
+            var cmdText = raw ?? entry.DockerRunCommand;
+            if (raw == null)
             {
-                var home = CachedUserProfile;
-                if (!string.IsNullOrEmpty(home))
+                try
                 {
-                    cmdText = cmdText.Replace(home, "~", StringComparison.Ordinal);
+                    var home = CachedUserProfile;
+                    if (!string.IsNullOrEmpty(home))
+                    {
+                        cmdText = cmdText.Replace(home, "~", StringComparison.Ordinal);
+                    }
                 }
-            }
-            catch (Exception)
-            {
-                // clipboard-path scrub failure is non-fatal
+                catch (Exception)
+                {
+                    // clipboard-path scrub failure is non-fatal
+                }
             }
 
             Button? copyBtn = null;

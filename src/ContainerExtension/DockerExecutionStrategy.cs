@@ -378,6 +378,16 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                             uriText = "https" + uriText[4..];
                         }
                     }
+
+                    // A Windows device-path pipe (\\.\pipe\<name>) is a valid daemon socket but not a valid
+                    // URI, so new Uri() would throw and the value would silently fall through to the default
+                    // docker_engine pipe below. Convert it to the equivalent npipe URI form so a custom pipe
+                    // is honored. (DaemonSocketValidation accepts the device-path form.)
+                    if (uriText.StartsWith(@"\\.\pipe\", StringComparison.OrdinalIgnoreCase))
+                    {
+                        uriText = "npipe://./pipe/" + uriText[@"\\.\pipe\".Length..].Replace('\\', '/');
+                    }
+
                     uri = new Uri(uriText);
                     if (uri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase))
                     {
@@ -709,7 +719,12 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         return sb.ToString();
     }
 
-    private string ReconstructDockerRunCommand(CreateContainerParameters p)
+    // The exact docker run command from the most recent execution this session, with REAL env values and
+    // paths (unmasked). Kept in memory only — never logged or persisted — so the dashboard can copy a
+    // verbatim, runnable command to the clipboard while the on-disk telemetry log stays scrubbed.
+    internal string? LastRawDockerRunCommand { get; private set; }
+
+    private string ReconstructDockerRunCommand(CreateContainerParameters p, bool maskEnvValues = true)
     {
         var sb = new StringBuilder();
         sb.Append(CultureInfo.InvariantCulture, $"{GetRuntimePath()} run");
@@ -780,7 +795,11 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                     // (license keys, tokens) under arbitrary, non-obvious names that a keyword
                     // denylist cannot catch reliably — so no value is ever written.
                     var key = env[..eqIdx];
-                    var escapedEnv = $"{key}=********".Replace("\"", "\\\"", StringComparison.Ordinal);
+                    // Logged/persisted commands always mask the value (it can carry secrets). The in-session
+                    // exact-copy path (maskEnvValues:false) renders the real value for a verbatim, runnable
+                    // command placed only on the clipboard — never written to the telemetry log.
+                    var rendered = maskEnvValues ? $"{key}=********" : env;
+                    var escapedEnv = rendered.Replace("\"", "\\\"", StringComparison.Ordinal);
                     sb.Append(CultureInfo.InvariantCulture, $" -e \"{escapedEnv}\"");
                 }
                 else
@@ -1228,7 +1247,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             var (live, error) = await IsUnixSocketLiveAndWritableAsync(path, ct).ConfigureAwait(false);
             if (live)
             {
-                return (new Uri($"unix://{path}"), name);
+                return (new Uri($"unix://{path}"), RefineRuntimeLabel(path, name));
             }
             else if (error != null && error.StartsWith("Access Denied", StringComparison.OrdinalIgnoreCase))
             {
@@ -1243,7 +1262,16 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             var (path, name) = candidates[i];
             if (File.Exists(path))
             {
-                return (new Uri($"unix://{path}"), name);
+                // Re-apply the live-probe ownership gate here too: a socket the probe loop skipped as
+                // insecurely owned must not be silently re-selected by the file-exists fallback. Null-tolerant
+                // (stat unavailable / unresolved owner is accepted) to match the probe loop and avoid
+                // regressing hosts where ownership cannot be determined.
+                var owner = await GetUnixFileOwnerAsync(path, ct).ConfigureAwait(false);
+                if (owner != null && !string.Equals(owner, uid, StringComparison.Ordinal) && !string.Equals(owner, "0", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                return (new Uri($"unix://{path}"), RefineRuntimeLabel(path, name));
             }
         }
 
@@ -1261,7 +1289,36 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             }
         }
 
-        return (new Uri("unix:///var/run/docker.sock"), "docker (default)");
+        return (new Uri("unix:///var/run/docker.sock"), RefineRuntimeLabel("/var/run/docker.sock", "docker (default)"));
+    }
+
+    // The probe candidates carry a static label, but /var/run/docker.sock is commonly a symlink into a
+    // specific runtime's directory (OrbStack, Colima, Podman). Resolve the link chain so DetectedRuntime —
+    // and thus the dashboard's "Open Desktop" button, title, and offline guidance — names the real runtime
+    // instead of the generic "docker" the path was merely reached through.
+    private static string RefineRuntimeLabel(string socketPath, string defaultName)
+    {
+        try
+        {
+            var resolved = socketPath;
+            for (int hop = 0; hop < 16; hop++)
+            {
+                var target = new FileInfo(resolved).LinkTarget;
+                if (string.IsNullOrEmpty(target)) break;
+                resolved = Path.IsPathRooted(target)
+                    ? target
+                    : Path.GetFullPath(Path.Combine(Path.GetDirectoryName(resolved) ?? "/", target));
+            }
+            var r = resolved.Replace('\\', '/');
+            if (r.Contains("/.orbstack/", StringComparison.OrdinalIgnoreCase)) return "orbstack";
+            if (r.Contains("/.colima/", StringComparison.OrdinalIgnoreCase)) return "colima";
+            if (r.Contains("podman", StringComparison.OrdinalIgnoreCase)) return "podman";
+        }
+        catch
+        {
+            // Resolution failed (missing file, permission, symlink loop) — fall back to the static label.
+        }
+        return defaultName;
     }
 
     private static async Task<string?> GetUnixFileOwnerAsync(string path, CancellationToken ct = default)
@@ -1516,7 +1573,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         await ImageManager.RemoveImageAsync(imageId, ct).ConfigureAwait(false);
     }
 
-    public async Task<(int pulled, int failed)> UpdateAllImagesAsync(Action<string>? progress = null, CancellationToken ct = default)
+    public async Task<(int pulled, int failed, IReadOnlyList<string> failedImages)> UpdateAllImagesAsync(Action<string>? progress = null, CancellationToken ct = default)
     {
         ThrowIfDisposed();
         await EnsureInitializedAsync(ct).ConfigureAwait(false);
@@ -1725,7 +1782,13 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
 
     private CreateContainerParameters BuildContainerParameters(string image, ToolCommand command)
     {
-        double? remoteCpuCores = ConnectionProvider.CachedSystemInfo?.NCPU;
+        var sysInfo = ConnectionProvider.CachedSystemInfo;
+        double? remoteCpuCores = sysInfo?.NCPU;
+        // Rootless runtimes advertise "name=rootless" in /info SecurityOptions. When system info is
+        // unavailable (e.g. a runtime whose /info we could not read), default to false so the standard
+        // uid:gid path is used — correct for Docker, OrbStack, and rootful Podman.
+        var isRootless = sysInfo?.SecurityOptions?.Any(
+            o => o != null && o.Contains("name=rootless", StringComparison.OrdinalIgnoreCase)) ?? false;
         return Services.Docker.DockerCommandBuilder.BuildContainerParameters(
           image,
           command,
@@ -1733,7 +1796,8 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
           _cachedUid,
           _cachedGid,
           (cmd, msg) => SdkLog(cmd, msg),
-          remoteCpuCores);
+          remoteCpuCores,
+          isRootless);
     }
 
     private async Task<string?> EnsureImageAsync(string image, ToolCommand command, CancellationToken ct)
@@ -2006,6 +2070,9 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         Task<ResourceProfile?>? statsTask = null;
         CancellationTokenSource? statsCts = null;
         CancellationTokenSource? readCts = null;
+        // Hoisted out of a using-declaration so it is disposed in the finally AFTER readTask drains; a using
+        // here would dispose the stream while the read loop could still touch it on an early-throw path.
+        MultiplexedStream? stream = null;
         bool ranToCompletion = false;
 
         try
@@ -2016,7 +2083,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var readToken = readCts.Token;
 
-            using var stream = await Client.Containers.AttachContainerAsync(
+            stream = await Client.Containers.AttachContainerAsync(
               containerId, false,
               new ContainerAttachParameters { Stream = true, Stdout = true, Stderr = true }, ct).ConfigureAwait(false);
 
@@ -2200,6 +2267,11 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             if (readTask != null)
                 try { await readTask.ConfigureAwait(false); } catch { /* Ignore */ }
 
+            // Dispose the attach stream only after readTask has fully drained, so the read loop never
+            // touches a disposed stream on the early-throw path (the using-declaration this replaced would
+            // have disposed it as the try-scope unwound, before this finally awaited readTask).
+            try { stream?.Dispose(); } catch { /* Ignore */ }
+
             if (statsTask != null)
                 try { profile = await statsTask.WaitAsync(TimeSpan.FromSeconds(1), CancellationToken.None).ConfigureAwait(false); } catch { /* Ignore */ }
 
@@ -2259,8 +2331,18 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             activity?.SetTag("tool.name", command.ToolName);
             activity?.SetTag("tool.executable", System.IO.Path.GetFileNameWithoutExtension(command.Executable ?? string.Empty));
         }
-        ThrowIfDisposed();
-        await EnsureInitializedAsync(_strategyCts.Token).ConfigureAwait(false);
+        try
+        {
+            ThrowIfDisposed();
+            await EnsureInitializedAsync(_strategyCts.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or OperationCanceledException)
+        {
+            // Dispose raced this call during shutdown: the strategy CTS was disposed/cancelled as we
+            // entered the prologue (which reads it outside any try). Return a cancelled result rather than
+            // letting an ObjectDisposedException/OperationCanceledException escape ExecuteAsync unhandled.
+            return (false, string.Empty);
+        }
 
         if (IsTargetingEmptyGhdlLibrary(command))
         {
@@ -2360,6 +2442,29 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 {
                     isDockerOffline = true;
                     dockerConnectionEx = new DockerExecutionException(socketErr ?? $"Docker socket at '{socketPath}' is not active or readable.");
+                }
+                else if (_settingsService.SafeGetSetting(ContainerExtensionModule.AllowNativeFallbackSetting, false))
+                {
+                    // The socket accepts a connection but the daemon API may not answer (a stale or
+                    // listening-but-dead socket). Only probe this when native fallback is enabled — the sole
+                    // case where reclassifying as offline changes behavior (it lets the host-native fallback
+                    // engage instead of failing at container creation) — which keeps the ping and its
+                    // API-version-negotiation cost off the hot path in the default configuration. The
+                    // try/catch mirrors the generic branch so a non-cancellation ping fault also routes to
+                    // the fallback; genuine cancellation (OperationCanceledException) still propagates.
+                    try
+                    {
+                        if (!await PingAsync(ct).ConfigureAwait(false))
+                        {
+                            isDockerOffline = true;
+                            dockerConnectionEx = new DockerExecutionException($"Docker socket at '{socketPath}' is listening, but the daemon API is not responding.");
+                        }
+                    }
+                    catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
+                    {
+                        isDockerOffline = true;
+                        dockerConnectionEx = new DockerExecutionException($"Docker socket at '{socketPath}' connection failed.", ex);
+                    }
                 }
             }
             else if (_daemonUri!.Scheme.Equals("npipe", StringComparison.OrdinalIgnoreCase))
@@ -2466,6 +2571,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             SdkLog(command, $"[Docker SDK] Image ready. Digest = {imageDigest ?? "(none)"}", RankInfo);
 
             reconstructedDockerRun = ReconstructDockerRunCommand(createParams);
+            LastRawDockerRunCommand = ReconstructDockerRunCommand(createParams, maskEnvValues: false);
             SdkLog(command, $"[Docker SDK] Equivalent CLI: {reconstructedDockerRun}", RankInfo);
 
             SdkLog(command, $"[Docker SDK] Creating and starting container...", RankInfo);
@@ -2565,6 +2671,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                           imageDigest: imageDigest,
                           wasCancelled: wasCancelled,
                           dockerRunCommand: reconstructedDockerRun,
+                          rawDockerRunCommand: LastRawDockerRunCommand,
                           peakMemoryBytes: resourceProfile?.PeakMemoryBytes,
                           maxCpuPercent: resourceProfile?.MaxCpuPercent,
                           oomKilled: resourceProfile?.OomKilled ?? false,
@@ -2587,6 +2694,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                         ImageDigest = imageDigest,
                         WasCancelled = wasCancelled,
                         RunCommand = reconstructedDockerRun,
+                        RawRunCommand = LastRawDockerRunCommand,
                         PeakMemory = resourceProfile?.PeakMemoryBytes,
                         MaxCpu = resourceProfile?.MaxCpuPercent,
                         OomKilled = resourceProfile?.OomKilled ?? false,
@@ -2605,6 +2713,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                               imageDigest: s.ImageDigest,
                               wasCancelled: s.WasCancelled,
                               dockerRunCommand: s.RunCommand,
+                              rawDockerRunCommand: s.RawRunCommand,
                               peakMemoryBytes: s.PeakMemory,
                               maxCpuPercent: s.MaxCpu,
                               oomKilled: s.OomKilled,
@@ -2823,6 +2932,8 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         public string? ImageDigest;
         public bool WasCancelled;
         public string? RunCommand;
+        // In-memory only, never persisted: the exact unmasked command for the dashboard's verbatim copy.
+        public string? RawRunCommand;
         public long? PeakMemory;
         public double? MaxCpu;
         public bool OomKilled;

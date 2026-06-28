@@ -85,6 +85,13 @@ public partial class DockerDiagnosticsView
             if (OperatingSystem.IsMacOS())
             {
                 var psi = new ProcessStartInfo("open");
+                // A local file with no default app association (e.g. the .jsonl telemetry log) makes a bare
+                // `open <file>` exit non-zero and nothing opens. `-t` opens it in the default TEXT editor.
+                // URLs (which do not exist as files) keep the plain `open` so the browser handles them.
+                if (File.Exists(path))
+                {
+                    psi.ArgumentList.Add("-t");
+                }
                 psi.ArgumentList.Add(path);
                 using var _ = Process.Start(psi);
             }

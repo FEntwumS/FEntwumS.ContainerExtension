@@ -573,7 +573,7 @@ public static partial class ContainerTelemetry
     [GeneratedRegex(@"\\\\[^\s\\/]+(?:\\[^\s\\/]+)+", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]
     private static partial Regex UncShareRegex();
 
-    [GeneratedRegex(@"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b|\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b|\b[a-zA-Z0-9\-]+(?:\.local|\.lan)\b", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(@"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b|\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b|\b(?:[0-9a-fA-F]{1,4}:){1,7}:(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4})*)?\b|\b::(?:[0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4}\b|\b[a-zA-Z0-9\-]+(?:\.local|\.lan)\b", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]
     private static partial Regex IpRedactRegex();
 
     // Redacts inline URI basic-auth credentials (scheme://user:pass@host) so tokens embedded in
@@ -841,11 +841,38 @@ public static partial class ContainerTelemetry
     /// Writes a structured telemetry entry to the unified execution log.
     /// Handles PII redaction and thread-safe file appends automatically.
     /// </summary>
+    // In-memory (never persisted) map from a scrubbed docker-run command to its exact, unmasked form, so the
+    // dashboard can copy a verbatim, runnable command for THIS session's executions while the on-disk log
+    // stays scrubbed. Bounded; the oldest entries are evicted.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _rawCommandByScrubbed = new(StringComparer.Ordinal);
+    private static readonly System.Collections.Concurrent.ConcurrentQueue<string> _rawCommandOrder = new();
+    private const int MaxRawCommands = 256;
+
+    private static void RememberRawCommand(string scrubbed, string raw)
+    {
+        if (_rawCommandByScrubbed.TryAdd(scrubbed, raw))
+        {
+            _rawCommandOrder.Enqueue(scrubbed);
+            while (_rawCommandOrder.Count > MaxRawCommands && _rawCommandOrder.TryDequeue(out var oldest))
+            {
+                _rawCommandByScrubbed.TryRemove(oldest, out _);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns the exact, unmasked docker run command for a scrubbed command logged THIS session, or null.
+    /// The dashboard copy actions use it so the user gets a verbatim, runnable command; entries from a prior
+    /// session (loaded from disk) have no in-memory raw form and fall back to the scrubbed text.
+    /// </summary>
+    public static string? TryGetRawCommand(string? scrubbed) =>
+        scrubbed != null && _rawCommandByScrubbed.TryGetValue(scrubbed, out var raw) ? raw : null;
+
     public static void LogExecution(
       string image, string tool, double durationSeconds, long exitCode, string? imageDigest = null,
       bool wasCancelled = false, string? dockerRunCommand = null, long? peakMemoryBytes = null,
       double? maxCpuPercent = null, bool oomKilled = false, int maxEntries = 0, string? errorMessage = null,
-      bool isDebug = false)
+      string? rawDockerRunCommand = null, bool isDebug = false)
     {
         if (Volatile.Read(ref _isShutdown) == 1)
         {
@@ -894,6 +921,13 @@ public static partial class ContainerTelemetry
                 OomKilled = oomKilled,
                 ErrorMessage = ScrubSensitiveInfo(ScrubSecrets(errorMessage))
             };
+
+            // Keep the exact (unmasked) command in memory ONLY, keyed by its scrubbed form, so the dashboard
+            // can copy a verbatim runnable command for this session. This is never written to disk.
+            if (rawDockerRunCommand != null && entry.DockerRunCommand != null)
+            {
+                RememberRawCommand(entry.DockerRunCommand, rawDockerRunCommand);
+            }
 
             var mutex = ProcessMutex;
             bool acquired = false;

@@ -71,6 +71,37 @@ public sealed class PathContainmentTests
     }
 
     [Theory]
+    [InlineData("/workspace/../etc/passwd")]
+    [InlineData("/workspace/../../root/.ssh/id_rsa")]
+    [InlineData("/workspace/sub/../../etc/shadow")]
+    [InlineData("/workspace/./../../var/run/docker.sock")]
+    public void ContainerSpaceTraversalEscape_IsContainedToSentinel(string escape)
+    {
+        var wd = NewWorkspace();
+        try
+        {
+            // A path already expressed in container space (/workspace/...) must still be collapsed and
+            // contained: "/workspace/../etc/passwd" must not escape the bind mount via the early-return path.
+            Assert.Equal(Sentinel, DockerCommandBuilder.MapPathToContainer(escape, wd));
+        }
+        finally { Directory.Delete(wd, true); }
+    }
+
+    [Theory]
+    [InlineData("/workspace/rtl/top.vhd", "/workspace/rtl/top.vhd")]
+    [InlineData("/workspace/sub/../top.vhd", "/workspace/top.vhd")]
+    [InlineData("/workspace/./build/out.json", "/workspace/build/out.json")]
+    public void ContainerSpacePathWithinWorkspace_CollapsesButStaysContained(string input, string expected)
+    {
+        var wd = NewWorkspace();
+        try
+        {
+            Assert.Equal(expected, DockerCommandBuilder.MapPathToContainer(input, wd));
+        }
+        finally { Directory.Delete(wd, true); }
+    }
+
+    [Theory]
     [InlineData("/dev/null")]
     [InlineData("/usr/bin/yosys")]
     [InlineData("/bin/sh")]

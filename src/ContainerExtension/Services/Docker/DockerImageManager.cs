@@ -175,7 +175,7 @@ public sealed class DockerImageManager : IDisposable
         }
     }
 
-    public async Task<(int pulled, int failed)> UpdateAllImagesAsync(Action<string>? progress = null, CancellationToken ct = default)
+    public async Task<(int pulled, int failed, IReadOnlyList<string> failedImages)> UpdateAllImagesAsync(Action<string>? progress = null, CancellationToken ct = default)
     {
         using var activity = ImageActivitySource.StartActivity("DockerImageManager.UpdateAllImages");
 
@@ -183,7 +183,7 @@ public sealed class DockerImageManager : IDisposable
         {
             progress?.Invoke($"[ERROR] Pull aborted: {spaceError}");
             ContainerTelemetry.TrackError("DockerImageManager", "UpdateAllImagesAsync aborted due to low disk space", null, spaceError);
-            return (0, 1);
+            return (0, 1, Array.Empty<string>());
         }
 
         try
@@ -191,7 +191,7 @@ public sealed class DockerImageManager : IDisposable
             var images = await ListImagesAsync(ct).ConfigureAwait(false);
             if (images == null || images.Count == 0)
             {
-                return (0, 0);
+                return (0, 0, Array.Empty<string>());
             }
 
             var platformRaw = SafeGetSetting<string>(ContainerExtensionModule.PlatformSetting, "auto");
@@ -217,11 +217,12 @@ public sealed class DockerImageManager : IDisposable
 
             if (targets.Count == 0)
             {
-                return (0, 0);
+                return (0, 0, Array.Empty<string>());
             }
 
             int pulledCount = 0;
             int failedCount = 0;
+            var failedImages = new System.Collections.Concurrent.ConcurrentBag<string>();
 
             var tasks = targets.Select(async targetTag =>
             {
@@ -258,6 +259,7 @@ public sealed class DockerImageManager : IDisposable
                     {
                         progress?.Invoke($"[ERROR] Re-pull failed for {targetTag}: {pullError}");
                         Interlocked.Increment(ref failedCount);
+                        failedImages.Add(targetTag);
                     }
                     else
                     {
@@ -272,6 +274,7 @@ public sealed class DockerImageManager : IDisposable
                 {
                     ContainerTelemetry.TrackError("DockerImageManager", $"Re-pull failed for '{targetTag}' due to connection loss or registry failure", ex);
                     Interlocked.Increment(ref failedCount);
+                    failedImages.Add(targetTag);
                 }
                 finally
                 {
@@ -280,7 +283,7 @@ public sealed class DockerImageManager : IDisposable
             });
 
             await Task.WhenAll(tasks).ConfigureAwait(false);
-            return (pulledCount, failedCount);
+            return (pulledCount, failedCount, failedImages.ToArray());
         }
         catch (OperationCanceledException)
         {
@@ -289,7 +292,7 @@ public sealed class DockerImageManager : IDisposable
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             ContainerTelemetry.TrackError("DockerImageManager", "UpdateAllImagesAsync failed", ex);
-            return (0, 1);
+            return (0, 1, Array.Empty<string>());
         }
         finally
         {

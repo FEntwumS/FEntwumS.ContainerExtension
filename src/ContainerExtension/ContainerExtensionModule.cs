@@ -67,6 +67,13 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     public const string PerToolImagePrefix = "ContainerImage_";
     public const string FallbackImage = "hdlc/ghdl:yosys";
 
+    // The project's own full-flow toolchain image (built locally via "Build Local Image" or
+    // build_oss_cad_suite.sh; NOT published to Docker Hub). Under the local-build-only model it is the
+    // single default image for every tool — one image covers synthesis, place-and-route, packing and
+    // simulation across all supported device families, including the GateMate/Gowin tools that have no
+    // hdlc/* equivalent.
+    public const string OssCadSuiteImage = "fentwums/oss-cad-suite:latest";
+
     // Summary keys constants
     public const string SettingsKeyImage = "Image";
     public const string SettingsKeyPullPolicy = "Pull Policy";
@@ -102,14 +109,14 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
           ["nextpnr-generic"] = "hdlc/impl/generic",
           ["nextpnr-ice40"] = "hdlc/impl/icestorm",
           ["nextpnr-nexus"] = "hdlc/impl/prjoxide",
-          ["nextpnr-himbaechel"] = "hdlc/impl",
-          ["nextpnr-machxo2"] = "hdlc/impl",
+          ["nextpnr-himbaechel"] = OssCadSuiteImage,
+          ["nextpnr-machxo2"] = OssCadSuiteImage,
           ["openFPGALoader"] = "hdlc/prog",
           ["iceprog"] = "hdlc/impl/icestorm",
           ["icepack"] = "hdlc/impl/icestorm",
-          ["gowin_pack"] = "hdlc/impl",
-          ["gmpack"] = "hdlc/impl",
-          ["gmupack"] = "hdlc/impl",
+          ["gowin_pack"] = OssCadSuiteImage,
+          ["gmpack"] = OssCadSuiteImage,
+          ["gmupack"] = OssCadSuiteImage,
           ["gtkwave"] = "hdlc/gtkwave",
       }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
@@ -191,7 +198,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         ContainerTelemetry.LogLevelChecker = () => settingsService.SafeGetSetting<string>(ContainerExtensionModule.LogLevelSetting, "Errors Only");
 
         settingsService.RegisterSettingSubCategory(SettingsCategoryBinary, SettingsSubCategoryEngine);
-        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DefaultImageSetting, new TextBoxSetting("Default Toolchain Image", FallbackImage, "The default container image to pull and use for all tools.") { Validator = ImageFormatValidatorNoEmpty });
+        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DefaultImageSetting, new TextBoxSetting("Default Toolchain Image", OssCadSuiteImage, "The default container image for all tools — the project's full-flow oss-cad-suite image. It is build-only (not on Docker Hub): produce it via Build Local Image, not Pull.") { Validator = ImageFormatValidatorNoEmpty });
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, PullPolicySetting, new ComboBoxSetting("Image Pull Policy", "if-not-present", ["always", "if-not-present", "never"]));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, PlatformSetting, new ComboBoxSetting("Image Platform", "auto", ["auto", "linux/amd64", "linux/arm64", "linux/arm/v7"]));
 

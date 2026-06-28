@@ -720,10 +720,16 @@ public partial class DockerDiagnosticsView
     private bool IsDebounced(string actionKey, int ms = 500)
     {
         var now = Environment.TickCount64;
-        var last = _lastActionTimes.GetOrAdd(actionKey, now);
-        if (last != now && (now - last) < ms)
+        // Atomic first-insert: the first action for a key is always allowed. Using TryAdd (not GetOrAdd +
+        // last!=now) closes the same-tick double-click hole — two clicks within one TickCount64 quantum
+        // would otherwise both pass because last==now made the old guard false.
+        if (_lastActionTimes.TryAdd(actionKey, now))
         {
-            return true;
+            return false;
+        }
+        if (_lastActionTimes.TryGetValue(actionKey, out var last) && (now - last) < ms)
+        {
+            return true; // inside the debounce window — reject WITHOUT sliding the window
         }
         _lastActionTimes[actionKey] = now;
         return false;
@@ -830,12 +836,54 @@ public partial class DockerDiagnosticsView
         PopulateContainers(localContainers);
     }
 
+    /// <summary>
+    /// Per-refresh live update used when the container set is structurally unchanged (same count, ids and
+    /// states), so the full row rebuild in <see cref="PopulateContainers"/> is skipped. Refreshes the
+    /// cached list and re-polls stats for RUNNING containers, whose status/uptime and CPU/RAM cells are then
+    /// updated in place by <see cref="UpdateContainerStatsUI"/>. An exited container's relative-time status
+    /// legitimately freezes until the next structural change — the deliberate id+state fingerprint treats a
+    /// stopped container as static. Cheaper than a rebuild and avoids the flicker a rebuild would cause.
+    /// </summary>
+    private void RefreshLiveContainerCells(IList<Docker.DotNet.Models.ContainerListResponse> containers)
+    {
+        if (containers == null) return;
+        lock (_cachedDataLock)
+        {
+            _cachedContainers = containers;
+        }
+        foreach (var c in containers)
+        {
+            if (c.State?.Equals("running", StringComparison.OrdinalIgnoreCase) ?? false)
+            {
+                QueryContainerStats(c.ID);
+            }
+        }
+    }
+
     private void PopulateContainers(IList<Docker.DotNet.Models.ContainerListResponse> containers)
     {
         if (containers == null) return;
         lock (_cachedDataLock)
         {
             _cachedContainers = containers;
+            // Evict live-stats entries for containers that have fully disappeared (ephemeral --rm churn),
+            // so _liveStats cannot grow unbounded across a long session. The container list is All=true /
+            // Limit=250, so a present-but-stopped container is retained; only vanished IDs are removed.
+            if (_liveStats.Count > containers.Count)
+            {
+                var liveIds = new HashSet<string>(containers.Count, StringComparer.Ordinal);
+                foreach (var c in containers)
+                {
+                    liveIds.Add(c.ID);
+                }
+                foreach (var key in _liveStats.Keys)
+                {
+                    if (!liveIds.Contains(key))
+                    {
+                        _liveStats.TryRemove(key, out _);
+                    }
+                }
+            }
             foreach (var child in _containersContent.Children)
             {
                 if (child is Grid grid && grid.Margin == RowMargin)

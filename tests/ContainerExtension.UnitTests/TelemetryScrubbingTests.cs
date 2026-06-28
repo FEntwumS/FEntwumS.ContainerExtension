@@ -53,4 +53,28 @@ public sealed class TelemetryScrubbingTests
         var scrubbed = ContainerTelemetry.ScrubSensitiveInfo(benign);
         Assert.Equal(benign, scrubbed);
     }
+
+    [Theory]
+    [InlineData("fe80::1")]
+    [InlineData("2001:db8::42")]
+    [InlineData("fd00::abcd:1")]
+    public void ScrubSensitiveInfo_RedactsCompressedIPv6(string addr)
+    {
+        var scrubbed = ContainerTelemetry.ScrubSensitiveInfo($"daemon at {addr} unreachable");
+        Assert.Contains("[REDACTED_NET_ADDR]", scrubbed, StringComparison.Ordinal);
+        Assert.DoesNotContain(addr, scrubbed, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("cafe:latest")]
+    [InlineData("oss-cad-suite:dev")]
+    [InlineData("fentwums/oss-cad-suite:latest")]
+    public void ScrubSensitiveInfo_DoesNotRedactImageTags(string imageRef)
+    {
+        // The compressed-IPv6 scrub must not corrupt image:tag references that share the single-colon
+        // shape: the literal '::' requirement in the pattern is what keeps these intact.
+        var scrubbed = ContainerTelemetry.ScrubSensitiveInfo($"docker run --rm {imageRef}");
+        Assert.Contains(imageRef, scrubbed, StringComparison.Ordinal);
+        Assert.DoesNotContain("[REDACTED_NET_ADDR]", scrubbed, StringComparison.Ordinal);
+    }
 }
