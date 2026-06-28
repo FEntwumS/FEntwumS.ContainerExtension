@@ -111,18 +111,27 @@ public sealed class HardeningChallengeTests
             TokenImpersonationLevel? level = null;
             WindowsIdentity? identity = null;
 
-            var impersonateMethod = typeof(NamedPipeServerStream).GetMethod("Impersonate", new Type[] { typeof(Action) });
-            if (impersonateMethod != null)
+            // RunAsClient impersonates the connected client on the server thread, letting us observe the
+            // impersonation level the client granted. Its parameter is a Windows-only
+            // PipeStreamImpersonationWorker delegate, so bind it reflectively to keep this file compiling
+            // on non-Windows targets. (The earlier reflective lookup of a non-existent "Impersonate(Action)"
+            // method silently no-op'd, leaving the level null.)
+            Action capture = () =>
             {
-                impersonateMethod.Invoke(server, new object[] { (Action)(() =>
+                identity = WindowsIdentity.GetCurrent();
+                var levelProp = typeof(WindowsIdentity).GetProperty("ImpersonationLevel");
+                if (levelProp != null)
                 {
-                    identity = WindowsIdentity.GetCurrent();
-                    var levelProp = typeof(WindowsIdentity).GetProperty("ImpersonationLevel");
-                    if (levelProp != null)
-                    {
-                        level = (TokenImpersonationLevel)levelProp.GetValue(identity)!;
-                    }
-                }) });
+                    level = (TokenImpersonationLevel)levelProp.GetValue(identity)!;
+                }
+            };
+
+            var runAsClient = typeof(NamedPipeServerStream).GetMethod("RunAsClient");
+            if (runAsClient != null)
+            {
+                var workerType = runAsClient.GetParameters()[0].ParameterType;
+                var worker = Delegate.CreateDelegate(workerType, capture.Target, capture.Method);
+                runAsClient.Invoke(server, new object[] { worker });
             }
 
             return new Tuple<TokenImpersonationLevel?, string?>(level, identity?.Name);

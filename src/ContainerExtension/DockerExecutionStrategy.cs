@@ -944,12 +944,14 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         {
             var bind = binds[i];
             if (string.IsNullOrWhiteSpace(bind)) continue;
-            var parts = bind.Split(':');
-            if (parts.Length > 0)
-            {
-                var hostPath = parts[0].Trim();
-                if (string.IsNullOrEmpty(hostPath)) continue;
 
+            // Docker bind spec: HOST:CONTAINER[:OPTIONS]. Split drive-letter-aware so a Windows host
+            // path such as "C:\proj" is not severed at its drive-letter colon (which would reduce the
+            // host path to "C" and defeat both the rewrite and the critical-path security checks).
+            var (hostPart, containerPart, optionsPart) = SplitDockerBind(bind);
+            var hostPath = hostPart.Trim();
+            if (!string.IsNullOrEmpty(hostPath))
+            {
                 string fullPath;
                 try
                 {
@@ -961,13 +963,13 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 }
 
                 var reconstructed = fullPath;
-                if (parts.Length > 1)
+                if (containerPart != null)
                 {
-                    reconstructed += ":" + parts[1].Trim();
+                    reconstructed += ":" + containerPart.Trim();
                 }
-                if (parts.Length > 2)
+                if (optionsPart != null)
                 {
-                    reconstructed += ":" + parts[2].Trim();
+                    reconstructed += ":" + optionsPart.Trim();
                 }
                 binds[i] = reconstructed;
 
@@ -985,9 +987,9 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                     }
                 }
 
-                if (parts.Length > 1)
+                if (containerPart != null)
                 {
-                    var containerPath = parts[1].Trim();
+                    var containerPath = containerPart.Trim();
                     if (containerPath.StartsWith("/sys", StringComparison.OrdinalIgnoreCase) ||
                         containerPath.StartsWith("/proc", StringComparison.OrdinalIgnoreCase) ||
                         containerPath.StartsWith("/dev", StringComparison.OrdinalIgnoreCase) ||
@@ -998,6 +1000,26 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 }
             }
         }
+    }
+
+    // Split a Docker bind spec "HOST:CONTAINER[:OPTIONS]" into its components. A leading Windows
+    // drive-letter colon (e.g. "C:\path") is treated as part of the host path rather than the
+    // host/container separator. The container path is always POSIX, so it carries no drive letter.
+    private static (string host, string? container, string? options) SplitDockerBind(string bind)
+    {
+        int hostStart = bind.Length >= 2 && char.IsLetter(bind[0]) && bind[1] == ':' ? 2 : 0;
+        int firstSep = bind.IndexOf(':', hostStart);
+        if (firstSep < 0)
+        {
+            return (bind, null, null);
+        }
+
+        var host = bind[..firstSep];
+        var remainder = bind[(firstSep + 1)..];
+        int secondSep = remainder.IndexOf(':');
+        return secondSep < 0
+            ? (host, remainder, null)
+            : (host, remainder[..secondSep], remainder[(secondSep + 1)..]);
     }
 
     private static string GetCanonicalPath(string path)

@@ -28,6 +28,14 @@ public sealed class ContainerExtensionTests : IDisposable
     private readonly ContainerNameValidation _nameValidator = new();
     private readonly string _testTelemetryDir;
 
+    // Builds a host-native absolute path from a POSIX-style relative spec so a single assertion
+    // covers both platforms: the mapped container path is always POSIX regardless of host format.
+    // Unix -> "/work/proj"; Windows -> "C:\work\proj".
+    private static string HostAbs(string posixRelative) =>
+        OperatingSystem.IsWindows()
+            ? @"C:\" + posixRelative.Replace('/', '\\')
+            : "/" + posixRelative;
+
     public ContainerExtensionTests()
     {
         // Isolate telemetry to a temporary directory strictly for this test lifecycle
@@ -1135,14 +1143,14 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public void MapPathToContainer_OptionWithEqualsSign_MapsPathCorrectly()
     {
-        var result = DockerCommandBuilder.MapPathToContainer("--workdir=/workspace/myproj/build", "/workspace/myproj");
+        var result = DockerCommandBuilder.MapPathToContainer("--workdir=" + HostAbs("myproj/build"), HostAbs("myproj"));
         Assert.Equal("--workdir=/workspace/build", result.Replace('\\', '/'));
     }
 
     [Fact]
     public void MapPathToContainer_OptionWithP_MapsPathCorrectly()
     {
-        var result = DockerCommandBuilder.MapPathToContainer("-P/workspace/myproj/build", "/workspace/myproj");
+        var result = DockerCommandBuilder.MapPathToContainer("-P" + HostAbs("myproj/build"), HostAbs("myproj"));
         Assert.Equal("-P/workspace/build", result.Replace('\\', '/'));
     }
 
@@ -1423,6 +1431,13 @@ public sealed class ContainerExtensionTests : IDisposable
     [InlineData("unix:///var/run/docker.sock", true)]
     public void DaemonSocketFormat_RejectsSpaces(string input, bool expectedValid)
     {
+        // unix:// sockets are intentionally rejected on Windows (the daemon is reached via a named
+        // pipe there), so a well-formed unix:// URI is valid only off-Windows.
+        if (expectedValid && OperatingSystem.IsWindows() && input.StartsWith("unix://", StringComparison.OrdinalIgnoreCase))
+        {
+            expectedValid = false;
+        }
+
         var result = _socketValidator.Validate(input, out var warning);
         Assert.Equal(expectedValid, result);
         if (!expectedValid)
@@ -1536,9 +1551,9 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public void MapCommandScriptPaths_YosysScriptTest()
     {
-        var script = "synth_gatemate -top  Verilog_Blink -luttree -nomx8; write_json /work/OneWareStudio/Projects/Verilog_Blink/build/synth.json";
-        var workingDirFull = "/work/OneWareStudio/Projects/Verilog_Blink";
-        var workingDirCanonical = "/work/OneWareStudio/Projects/Verilog_Blink";
+        var workingDirFull = HostAbs("work/OneWareStudio/Projects/Verilog_Blink");
+        var workingDirCanonical = workingDirFull;
+        var script = $"synth_gatemate -top  Verilog_Blink -luttree -nomx8; write_json {HostAbs("work/OneWareStudio/Projects/Verilog_Blink/build/synth.json")}";
 
         var result = DockerCommandBuilder.MapCommandScriptPaths(script, workingDirFull, workingDirCanonical);
         Assert.Equal("synth_gatemate -top  Verilog_Blink -luttree -nomx8; write_json /workspace/build/synth.json", result);
@@ -1547,9 +1562,9 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public void MapCommandScriptPaths_YosysScriptWithQuotesTest()
     {
-        var script = "\"synth_gatemate -top  Verilog_Blink -luttree -nomx8; write_json /work/OneWareStudio/Projects/Verilog_Blink/build/synth.json\"";
-        var workingDirFull = "/work/OneWareStudio/Projects/Verilog_Blink";
-        var workingDirCanonical = "/work/OneWareStudio/Projects/Verilog_Blink";
+        var workingDirFull = HostAbs("work/OneWareStudio/Projects/Verilog_Blink");
+        var workingDirCanonical = workingDirFull;
+        var script = $"\"synth_gatemate -top  Verilog_Blink -luttree -nomx8; write_json {HostAbs("work/OneWareStudio/Projects/Verilog_Blink/build/synth.json")}\"";
 
         var result = DockerCommandBuilder.MapCommandScriptPaths(script, workingDirFull, workingDirCanonical);
         Assert.Equal("\"synth_gatemate -top  Verilog_Blink -luttree -nomx8; write_json /workspace/build/synth.json\"", result);
@@ -1558,9 +1573,9 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public void MapCommandScriptPaths_MultilineScriptTest()
     {
-        var script = "synth_gatemate -top Verilog_Blink\nwrite_json\t/work/OneWareStudio/Projects/Verilog_Blink/build/synth.json\r\n#comment";
-        var workingDirFull = "/work/OneWareStudio/Projects/Verilog_Blink";
-        var workingDirCanonical = "/work/OneWareStudio/Projects/Verilog_Blink";
+        var workingDirFull = HostAbs("work/OneWareStudio/Projects/Verilog_Blink");
+        var workingDirCanonical = workingDirFull;
+        var script = $"synth_gatemate -top Verilog_Blink\nwrite_json\t{HostAbs("work/OneWareStudio/Projects/Verilog_Blink/build/synth.json")}\r\n#comment";
 
         var result = DockerCommandBuilder.MapCommandScriptPaths(script, workingDirFull, workingDirCanonical);
         Assert.Equal("synth_gatemate -top Verilog_Blink\nwrite_json\t/workspace/build/synth.json\r\n#comment", result);
@@ -1569,9 +1584,9 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public void MapCommandScriptPaths_NestedQuotesScriptTest()
     {
-        var script = "'\"synth_gatemate -top Verilog_Blink; write_json /work/OneWareStudio/Projects/Verilog_Blink/build/synth.json\"'";
-        var workingDirFull = "/work/OneWareStudio/Projects/Verilog_Blink";
-        var workingDirCanonical = "/work/OneWareStudio/Projects/Verilog_Blink";
+        var workingDirFull = HostAbs("work/OneWareStudio/Projects/Verilog_Blink");
+        var workingDirCanonical = workingDirFull;
+        var script = $"'\"synth_gatemate -top Verilog_Blink; write_json {HostAbs("work/OneWareStudio/Projects/Verilog_Blink/build/synth.json")}\"'";
 
         var result = DockerCommandBuilder.MapCommandScriptPaths(script, workingDirFull, workingDirCanonical);
         Assert.Equal("'\"synth_gatemate -top Verilog_Blink; write_json /workspace/build/synth.json\"'", result);
@@ -2308,8 +2323,8 @@ public sealed class ContainerExtensionTests : IDisposable
         var method = typeof(DockerCommandBuilder).GetMethod("MapPathToContainerInternal", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
 
-        var workingDir = "/work/Projects/MyProject";
-        var path1 = "/work/Projects/MyProject/build/out.json";
+        var workingDir = HostAbs("work/Projects/MyProject");
+        var path1 = HostAbs("work/Projects/MyProject/build/out.json");
         var result1 = method.Invoke(null, new object[] { path1, workingDir }) as string;
         Assert.Equal("/workspace/build/out.json", result1);
 
