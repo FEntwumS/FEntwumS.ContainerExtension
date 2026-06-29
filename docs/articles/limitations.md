@@ -1,15 +1,15 @@
 # Limitations and Threats to Validity
 
 The central contribution of this work is the transparent-integration architecture: the
-`IToolExecutionStrategy` hybrid (`DockerExecutionStrategy`) that intercepts OneWare Studio's
-FPGA-tool invocations and redirects them into an isolated container without altering the tool's
-command line, working directory, or output contract. Overhead and reproducibility measurements are
+`IToolExecutionStrategy` hybrid (`DockerExecutionStrategy`) that OneWare Studio dispatches its
+FPGA-tool execution to, running the unmodified invocation in an isolated container without altering the
+tool's command line, working directory, or output contract. Overhead and reproducibility measurements are
 supporting evidence for that architecture, not the object of study. This document records the known
 boundaries of the implementation and the corresponding threats to the validity of the evaluation, so
 that measured numbers are read against the conditions that produced them.
 
 The limitations below are properties of the upstream toolchain images, the public board packages, or
-deliberate security boundaries — not defects of the interception mechanism. The architecture is
+deliberate security boundaries — not defects of the integration mechanism. The architecture is
 agnostic to which binary it dispatches; the constraints describe which binaries are *available* and
 under *what conditions* they run.
 
@@ -22,7 +22,7 @@ satisfies the full VHDL and Verilog matrix across all device families, the image
 only. On an Apple Silicon (arm64) host the container therefore runs under the daemon's binary
 emulation layer (qemu via Rosetta/`binfmt`).
 
-The interception layer accommodates this through the **Image Platform** setting
+The integration layer accommodates this through the **Image Platform** setting
 (`ContainerExtensionModule.PlatformSetting`, default `auto`), which is forwarded to both the pull and
 the run path. When set, it is attached to `ImagesCreateParameters.Platform` and to `--platform`
 on the reconstructed run command (`DockerExecutionStrategy.cs`); the pull path additionally retries
@@ -32,7 +32,7 @@ Silicon for exactly this reason.
 
 Impact on the evaluation: any overhead measured on an arm64 host that runs the amd64 image is
 dominated by instruction-level emulation, which is an artifact of the image-distribution situation,
-not of the architecture's interception or container-lifecycle code. Emulated arm64 results must not
+not of the architecture's integration or container-lifecycle code. Emulated arm64 results must not
 be compared directly against native amd64 results, and must not be attributed to the integration
 layer. They are reported separately and read as an upper bound under emulation.
 
@@ -74,8 +74,8 @@ end-to-end results come from controlled local runs, not from the CI matrix.
 
 ## Scope and non-goals
 
-This artifact is an *execution-integration layer*. Its responsibility is to intercept tool execution
-and run it transparently in a container, mediating connection, image resolution, volume mounting,
+This artifact is an *execution-integration layer*. Its responsibility is to run tool execution
+transparently in a container, mediating connection, image resolution, volume mounting,
 resource limits, I/O streaming, and telemetry. The following are explicit non-goals:
 
 - **Tool distribution.** The extension does not build, version, or vendor the FPGA toolchain. It
@@ -92,7 +92,7 @@ resource limits, I/O streaming, and telemetry. The following are explicit non-go
   container isolation.
 
 These boundaries delimit what the evaluation claims: it measures the cost and reproducibility of
-*transparent interception and containerized dispatch*, not the security of the underlying engine or
+*transparent integration and containerized dispatch*, not the security of the underlying engine or
 the provenance of the toolchain image.
 
 ## Threats to validity

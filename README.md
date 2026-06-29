@@ -6,8 +6,9 @@
 
 A [OneWare Studio](https://github.com/one-ware/OneWare) plugin that runs FPGA toolchains (GHDL, Yosys,
 nextpnr, gmpack, Icarus, Verilator, SymbiYosys) inside containers without changing the user's workflow.
-It intercepts tool execution, maps the project into a container, runs the unmodified tool, and streams
-output back to the IDE, so a build behaves identically across machines with no host toolchain install.
+It plugs into OneWare's pluggable tool-execution strategy, maps the project into a container, runs the
+unmodified tool, and streams output back to the IDE, so a build behaves identically across machines with
+no host toolchain install.
 
 Developed as part of the Master's thesis *"Design and Implementation of a Modular Architecture for the
 Transparent Integration of Containerized Execution Environments for Heterogeneous Open-Source Binaries in
@@ -36,7 +37,7 @@ Each top-level directory carries its own README with the detail; this is the map
 | [`docker/`](docker/README.md) | Build inputs for the hardened `fentwums/oss-cad-suite` toolchain image: the digest-pinned `Dockerfile`, `build_oss_cad_suite.sh`, and `pull_all_images.sh`. |
 | [`docs/`](docs/articles) | DocFX site sources — prose guides under `articles/` and the generated API reference. See [Documentation](#documentation) to build and view the HTML. |
 
-The runtime design (interception, the container lifecycle, the hybrid strategy) is summarized under
+The runtime design (the execution-strategy integration, the container lifecycle, the hybrid fallback) is summarized under
 [Execution model](#execution-model) and detailed in [docs/articles/architecture.md](docs/articles/architecture.md).
 
 ## Execution model
@@ -45,7 +46,7 @@ The plugin coordinates execution through a hybrid strategy:
 
 ```mermaid
 flowchart TD
-    A[OneWare invokes an FPGA tool] --> B[DockerExecutionStrategy intercepts the call]
+    A[OneWare runs an FPGA tool] -->|dispatches to the selected IToolExecutionStrategy| B[DockerExecutionStrategy]
     B --> C{Container engine reachable?}
     C -->|yes| D[Resolve image<br/>env var → per-tool → default → built-in fallback]
     D --> E[Map project into /workspace · inject host UID/GID<br/>cap-drop ALL · no-new-privileges · PID cap]

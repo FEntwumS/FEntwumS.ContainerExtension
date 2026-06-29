@@ -154,8 +154,8 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     }
 
     /// <summary>
-    /// Initializes the module, populates UI settings, hooks up tool interceptors to redirect execution 
-    /// through the Container API, and starts daemon connectivity polling.
+    /// Initializes the module, populates UI settings, registers the container execution strategy for the
+    /// FPGA tools, and starts daemon connectivity polling.
     /// </summary>
     /// <param name="serviceProvider">The root service provider.</param>
     public override void Initialize(IServiceProvider serviceProvider)

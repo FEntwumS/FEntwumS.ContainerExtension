@@ -12,7 +12,7 @@ The reference image `fentwums/oss-cad-suite` is published `linux/amd64` only (GH
 the upstream arm64 releases; see [Limitations](limitations.md)). On an Apple-Silicon (arm64) host the
 container therefore runs under the daemon's binary-emulation layer (Rosetta/qemu), while any native
 toolchain is arm64. A macOS/arm64 "native vs container" comparison thus measures *containerisation +
-ISA emulation*, and the emulation term dominates — it does not isolate the cost of the interception
+ISA emulation*, and the emulation term dominates — it does not isolate the cost of the integration
 layer. The macOS/arm64 figures are reported only as an emulated upper bound.
 
 A sound native baseline requires eliminating both confounds at once:

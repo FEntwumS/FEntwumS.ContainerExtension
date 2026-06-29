@@ -2,8 +2,8 @@
 
 This chapter specifies the empirical evaluation of the transparent-integration
 architecture. The central claim under test is functional: the
-`IToolExecutionStrategy` hybrid intercepts FPGA-tool execution and runs it inside
-a container without altering the result the user would otherwise obtain natively.
+`IToolExecutionStrategy` hybrid runs FPGA-tool execution inside a container
+without altering the result the user would otherwise obtain natively.
 Execution overhead and output reproducibility are supporting evidence and are
 reported as such, not as the contribution itself.
 
@@ -28,7 +28,7 @@ property of the architecture and is measured by a distinct part of the harness.
 ### Functional transparency and toolchain coverage
 
 The architecture is transparent if a tool invocation that succeeds natively also
-succeeds when intercepted and run in a container, across the breadth of the
+succeeds when dispatched to the container strategy, across the breadth of the
 open-source FPGA toolchain rather than a single tool. Coverage is exercised by
 `tests/integration/run_all.sh`, which drives the toolchain end to end through
 `docker run` over the workload corpus in `tests/integration/`: GHDL analysis,
@@ -98,7 +98,7 @@ and spans the toolchain categories:
 | `sim_iverilog` | simulation | `Verilog_Blink` | `Blink.vvp` |
 
 Each workload invokes a single FPGA tool, mirroring how OneWare drives the toolchain
-— one tool per interception — so the `DockerExecutionStrategy` dispatches an argv
+— one tool per dispatch — so the `DockerExecutionStrategy` dispatches an argv
 vector, never a `sh -c` pipeline. The per-board workloads are ordered by dependency
 (synthesis → place-and-route → bitstream packing) so each phase's artifact persists as
 the next phase's input. Each workload is self-contained in its directory under
