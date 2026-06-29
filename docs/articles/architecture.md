@@ -6,27 +6,46 @@ The OneWare Container Extension implements the **Hybrid Strategy Pattern** for t
 
 ```mermaid
 graph TD
-    subgraph IDE [OneWare Studio IDE]
-        CE[ContainerExtension Module<br/>- 19 settings + per-tool images<br/>- Strategy Injection<br/>- UI Extensions]
-        ITES[IToolExecutionStrategy<br/>Plugin Interface]
-        DES[DockerExecutionStrategy<br/>- Socket Probing<br/>- Image Resolution<br/>- Container Lifecycle<br/>- Stream Demultiplexing<br/>- Telemetry Logging]
-        SDK[Docker.DotNet SDK<br/>- DockerClient<br/>- Unix Socket / TCP]
-        DDVM[DockerDiagnosticsViewModel<br/>ExtendedTool<br/>- DockerDiagnosticsView<br/>- Connection Status<br/>- Images & Disk Usage<br/>- Live Containers<br/>- Active Configuration<br/>- Quick Actions<br/>- Recent Executions]
-        CT[ContainerTelemetry<br/>- JSON Lines Logger<br/>- Stats Aggregation<br/>- Export / Clear]
-        VAL[Validators<br/>- DockerImageFormat<br/>- DaemonSocket<br/>- ResourceThreshold<br/>- ContainerName]
-
-        CE --> ITES
-        ITES --> DES
-        DES --> SDK
-        CE --> DDVM
+    subgraph IDE["OneWare Studio"]
+        OW["FPGA tool invocation"]
+        MOD["ContainerExtensionModule<br/>settings · strategy injection · dashboard registration"]
+        DASH["DockerDiagnostics View / ViewModel<br/>live dashboard (ExtendedTool)"]
     end
+
+    OW -->|IToolExecutionStrategy| DES
+    MOD -. injects .-> DES
+    MOD --> DASH
+
+    subgraph EXT["ContainerExtension"]
+        DES["DockerExecutionStrategy<br/>orchestration · hybrid fallback · stream demux"]
+        CMD["DockerCommandBuilder<br/>path mapping · params · .env · escaping"]
+        CONN["DockerConnectionProvider<br/>socket probing · daemon info"]
+        IMG["DockerImageManager<br/>image resolution · pull"]
+        CON["DockerContainerManager<br/>create · start · stream · wait"]
+        TEL["ContainerTelemetry<br/>JSON Lines · stats · export"]
+        REG["RegistryClient<br/>tag browsing · SSRF guard"]
+        REL["GitHubReleaseClient<br/>pinned release tag · update checks"]
+    end
+
+    DES --> CMD
+    DES --> CONN
+    DES --> IMG
+    DES --> CON
+    DES --> TEL
+    DASH --> REG
+    DASH --> REL
+
+    CONN --> SDK["Docker.DotNet SDK<br/>unix socket · npipe · TCP"]
+    IMG --> SDK
+    CON --> SDK
+    DES -. native fallback .-> HOST["host PATH execution"]
 ```
 
 ## Source Files
 
 | File | Purpose |
 | ------ | --------- |
-| `ContainerExtensionModule` | Registers 19 settings (plus per-tool image overrides), injects Docker strategy, dockable DataTemplate, health check |
+| `ContainerExtensionModule` | Registers the engine settings (plus per-tool image overrides), injects the Docker strategy, dockable DataTemplate, health check |
 | `DockerExecutionStrategy` | Full container lifecycle: socket probing, auto-pull, stream demux, telemetry |
 | `DockerDiagnosticsView` | Docker Desktop-style live dashboard UserControl |
 | `DockerDiagnosticsViewModel` | `ExtendedTool` docking adapter for the dashboard |
@@ -38,8 +57,9 @@ graph TD
 ```text
 1. ONEWARE_DOCKER_IMAGE env var        (highest - CI/CD override)
 2. ContainerImage_{tool} per-tool      (settings UI)
-3. ContainerExtension_DefaultImage     (global setting)
-4. hdlc/ghdl:yosys                     (hardcoded fallback)
+3. ContainerExtension_DefaultImage     (global setting; defaults to fentwums/oss-cad-suite:latest)
+4. DefaultToolImages[tool]             (built-in per-tool map)
+5. hdlc/ghdl:yosys                     (hardcoded fallback)
 ```
 
 ## Container Lifecycle
