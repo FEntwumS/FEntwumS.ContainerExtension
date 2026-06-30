@@ -1,6 +1,6 @@
 # seven_seg_decoder
 
-> Target: iCEBreaker (iCE40 UP5K) - full flow: synth_ice40 -> nextpnr-ice40 -> icepack; simulate on GHDL.
+> Target: GateMate Eval Board - full flow: synth_gatemate -> nextpnr-himbaechel -> gmpack; simulate on GHDL.
 
 Combinational hexadecimal-to-seven-segment decoder for a common-anode display.
 A 4-bit input code `0x0..0xF` is mapped to the active-LOW segment drive for the

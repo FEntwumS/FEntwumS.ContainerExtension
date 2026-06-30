@@ -1,6 +1,6 @@
 # uart_tx
 
-> Target: iCEBreaker (iCE40 UP5K) - full flow: synth_ice40 -> nextpnr-ice40 -> icepack; simulate on Icarus Verilog.
+> Target: GateMate Eval Board - full flow: synth_gatemate -> nextpnr-himbaechel -> gmpack; simulate on Icarus Verilog.
 
 Parameterized 8N1 UART transmitter. A four-state FSM (IDLE, START, DATA, STOP)
 serializes a byte onto a single line: the line idles high, a frame begins with

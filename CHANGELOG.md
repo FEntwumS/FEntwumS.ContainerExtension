@@ -79,7 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Authorship hygiene**: Internal tracker tags (`(F##)`/`(ui-##)`/`(vt-##)`/`(int-##)`/`(Fix 107)`) and a brace-narration comment were stripped from the source.
 
 ### Documentation
-- Added `examples/`: eight graded, container-verified FPGA example projects across a GateMate / iCE40 / Gowin board matrix with a coverage index; an `examples/.gitignore` prevents the externally-provided reference projects from being committed.
+- Added `examples/`: eight graded, container-verified GateMate FPGA example projects (VHDL and Verilog) with a coverage index; an `examples/.gitignore` prevents the externally-provided reference projects from being committed.
 - Refreshed the project icon (accessibility metadata, consistent container shading) and documented the new *Bypass Named Pipe* default.
 
 ## [1.0.5] - 2026-06-26

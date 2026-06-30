@@ -1,6 +1,6 @@
 # debouncer
 
-> Target: iCEBreaker (iCE40 UP5K) - full flow: synth_ice40 -> nextpnr-ice40 -> icepack; simulate on GHDL.
+> Target: GateMate Eval Board - full flow: synth_gatemate -> nextpnr-himbaechel -> gmpack; simulate on GHDL.
 
 Synchronous push-button debouncer with rising-edge detection. The raw button
 input is resynchronised to the clock domain, filtered against contact bounce,
