@@ -19,54 +19,54 @@ jobs:
       id-token: write      # Required for OIDC artifact attestation (SLSA)
       attestations: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           submodules: recursive
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: 10.0.x
 
       - name: Cache NuGet packages
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/global.json', '**/Directory.Packages.props', '**/Directory.Build.props', '**/*.csproj') }}
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/global.json', '**/Directory.Packages.props', '**/Directory.Build.props', '**/*.csproj', '**/packages.lock.json') }}
           restore-keys: ${{ runner.os }}-nuget-
 
       - name: Get Version
-        uses: kzrnm/get-net-sdk-project-versions-action@v3.1.0
+        uses: kzrnm/get-net-sdk-project-versions-action@7d62715f5720ec339d39ab4a43b365391ad96db9 # v3.1.0
         id: get-version
         with:
           proj-path: src/ContainerExtension/ContainerExtension.csproj
 
-      - name: Build Release Bundle
-        run: dotnet build src/ContainerExtension/ContainerExtension.csproj -c Release -o publish -warnaserror
+      - name: Build Release Bundle (locked restore)
+        run: dotnet build src/ContainerExtension/ContainerExtension.csproj -c Release -o publish -warnaserror -p:RestoreLockedMode=true
         env:
           GITHUB_ACTIONS: true
 
       - name: Generate SBOM
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
           path: ./publish
           format: spdx-json
           output-file: publish/sbom.spdx.json
 
       - name: Compress Release Artifacts
-        uses: thedoctor0/zip-release@0.7.6
+        uses: thedoctor0/zip-release@b57d897cb5d60cb78b51a507f63fa184cfe35554 # 0.7.6
         with:
           type: "zip"
           filename: ../ContainerExtension_${{steps.get-version.outputs.version}}_all.zip
           directory: ./publish
 
       - name: Generate SLSA Build Provenance
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
         with:
           subject-path: ContainerExtension_${{steps.get-version.outputs.version}}_all.zip
 
       - name: Publish to GitHub Release
-        uses: ncipollo/release-action@v1.21.0
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
         with:
           artifacts: "ContainerExtension_${{steps.get-version.outputs.version}}_all.zip,./publish/compatibility.txt,./publish/sbom.spdx.json"
           tag: ${{steps.get-version.outputs.version}}

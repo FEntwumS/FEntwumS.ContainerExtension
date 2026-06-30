@@ -19,8 +19,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: '10.0.x'
       - name: Restore
@@ -38,22 +38,24 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           submodules: recursive
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: '10.0.x'
       - name: Cache NuGet packages
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/global.json', '**/Directory.Packages.props', '**/Directory.Build.props', '**/*.csproj') }}
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/global.json', '**/Directory.Packages.props', '**/Directory.Build.props', '**/*.csproj', '**/packages.lock.json') }}
           restore-keys: ${{ runner.os }}-nuget-
-      - name: Restore
-        run: dotnet restore OneWare.ContainerExtension.slnx
-      - name: Build (deterministic, warnings as errors)
-        run: dotnet build OneWare.ContainerExtension.slnx --no-restore -warnaserror -c Release
+      # Restore is performed by the build below in locked mode (RestoreLockedMode=true), so a
+      # drifted transitive dependency vs the committed packages.lock.json fails the build. The
+      # ILLink trim-analysis package is part of the build-time graph, so locked-mode is enforced
+      # through the build command rather than a standalone restore (which omits it).
+      - name: Build (locked restore, deterministic, warnings as errors)
+        run: dotnet build OneWare.ContainerExtension.slnx -c Release -warnaserror -p:RestoreLockedMode=true
         env:
           GITHUB_ACTIONS: true
       - name: Test
@@ -71,22 +73,22 @@ jobs:
       security-events: write
       actions: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           submodules: recursive
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: '10.0.x'
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
+        uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
         with:
           languages: csharp
       - name: Build for analysis
-        run: dotnet build OneWare.ContainerExtension.slnx -c Release
+        run: dotnet build OneWare.ContainerExtension.slnx -c Release -p:RestoreLockedMode=true
         env:
           GITHUB_ACTIONS: true
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@v4
+        uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
         # SARIF upload requires GitHub Advanced Security, which is unavailable on
         # this private repository; tolerate the rejected upload so the scan stays
         # informational rather than failing the workflow. Enabling code scanning
