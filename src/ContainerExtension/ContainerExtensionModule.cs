@@ -96,6 +96,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     /// User-facing label key for the native fallback configuration summary on the diagnostics screen.
     /// </summary>
     public const string SettingsKeyAllowNativeFallback = "Allow Native Fallback";
+    public const string SettingsKeyAllowPrivileged = "Privileged Mode";
 
     public static readonly FrozenDictionary<string, string> DefaultToolImages =
       new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)

@@ -600,7 +600,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         _strategyLock.EnterReadLock();
         try
         {
-            return new Dictionary<string, string>(15, StringComparer.Ordinal)
+            return new Dictionary<string, string>(16, StringComparer.Ordinal)
             {
                 [ContainerExtensionModule.SettingsKeyImage] = _settingsService.SafeGetSetting(ContainerExtensionModule.DefaultImageSetting, ContainerExtensionModule.FallbackImage),
                 [ContainerExtensionModule.SettingsKeyPullPolicy] = _settingsService.SafeGetSetting(ContainerExtensionModule.PullPolicySetting, "if-not-present"),
@@ -618,7 +618,8 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 [ContainerExtensionModule.SettingsKeyRetention] = _settingsService.SafeGetSetting(ContainerExtensionModule.TelemetryRetentionSetting, "25"),
                 [ContainerExtensionModule.SettingsKeyRuntimePath] = _settingsService.SafeGetSetting(ContainerExtensionModule.DockerRuntimePathSetting, "") is var r && string.IsNullOrWhiteSpace(r) ? "docker (PATH)" : r,
                 [ContainerExtensionModule.SettingsKeyBypassNamedPipeCheck] = _settingsService.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false) ? "Bypassed" : "Active",
-                [ContainerExtensionModule.SettingsKeyAllowNativeFallback] = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowNativeFallbackSetting, false) ? "Enabled" : "Disabled"
+                [ContainerExtensionModule.SettingsKeyAllowNativeFallback] = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowNativeFallbackSetting, false) ? "Enabled" : "Disabled",
+                [ContainerExtensionModule.SettingsKeyAllowPrivileged] = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowPrivilegedSetting, false) ? "Allowed" : "Disabled"
             };
         }
         finally
@@ -1278,7 +1279,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         }
 
         // If no candidate is active/live, see if any candidate file exists on disk
-        // We check in reverse order to prefer specific runtimes (orbstack, colima, podman) over generic defaults.
+        // Checked in reverse order to prefer specific runtimes (orbstack, colima, podman) over generic defaults.
         for (int i = candidates.Length - 1; i >= 0; i--)
         {
             var (path, name) = candidates[i];
@@ -1807,7 +1808,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         var sysInfo = ConnectionProvider.CachedSystemInfo;
         double? remoteCpuCores = sysInfo?.NCPU;
         // Rootless runtimes advertise "name=rootless" in /info SecurityOptions. When system info is
-        // unavailable (e.g. a runtime whose /info we could not read), default to false so the standard
+        // unavailable (e.g. a runtime whose /info could not be read), default to false so the standard
         // uid:gid path is used — correct for Docker, OrbStack, and rootful Podman.
         var isRootless = sysInfo?.SecurityOptions?.Any(
             o => o != null && o.Contains("name=rootless", StringComparison.OrdinalIgnoreCase)) ?? false;
@@ -2357,15 +2358,20 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             activity?.SetTag("tool.name", command.ToolName);
             activity?.SetTag("tool.executable", System.IO.Path.GetFileNameWithoutExtension(command.Executable ?? string.Empty));
         }
+        CancellationToken strategyToken;
         try
         {
             ThrowIfDisposed();
             await EnsureInitializedAsync(_strategyCts.Token).ConfigureAwait(false);
+            // Capture the strategy token inside the guarded scope: a shutdown-time Dispose can race the
+            // linked-CTS construction below, where reading _strategyCts.Token would otherwise throw an
+            // ObjectDisposedException outside any try.
+            strategyToken = _strategyCts.Token;
         }
         catch (Exception ex) when (ex is ObjectDisposedException or OperationCanceledException)
         {
-            // Dispose raced this call during shutdown: the strategy CTS was disposed/cancelled as we
-            // entered the prologue (which reads it outside any try). Return a cancelled result rather than
+            // Dispose raced this call during shutdown: the strategy CTS was disposed/cancelled as the
+            // prologue (which reads it outside any try) ran. Return a cancelled result rather than
             // letting an ObjectDisposedException/OperationCanceledException escape ExecuteAsync unhandled.
             return (false, string.Empty);
         }
@@ -2440,11 +2446,11 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         if (timeoutMinutes > 0)
         {
             timeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(timeoutMinutes));
-            cts = CancellationTokenSource.CreateLinkedTokenSource(_strategyCts.Token, timeoutCts.Token, cancellationToken);
+            cts = CancellationTokenSource.CreateLinkedTokenSource(strategyToken, timeoutCts.Token, cancellationToken);
         }
         else
         {
-            cts = CancellationTokenSource.CreateLinkedTokenSource(_strategyCts.Token, cancellationToken);
+            cts = CancellationTokenSource.CreateLinkedTokenSource(strategyToken, cancellationToken);
         }
         var ct = cts.Token;
 
@@ -2460,9 +2466,19 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             bool isDockerOffline = false;
             Exception? dockerConnectionEx = null;
 
-            if (_daemonUri!.Scheme.Equals("unix", StringComparison.OrdinalIgnoreCase))
+            if (_daemonUri is null || _client is null || _connectionProvider is null)
             {
-                var socketPath = _daemonUri!.LocalPath;
+                // EnsureInitializedAsync caught a connection failure (URI resolution, named-pipe
+                // verification, or client construction) and returned with the connection fields unset.
+                // Treat this as offline so the native fallback can engage and an actionable message
+                // surfaces, instead of dereferencing a null _daemonUri/_client below and reporting the
+                // resulting NullReferenceException as an internal error.
+                isDockerOffline = true;
+                dockerConnectionEx = new DockerExecutionException("The container runtime could not be initialized. Verify the daemon is running and the runtime path or socket is correct.");
+            }
+            else if (_daemonUri.Scheme.Equals("unix", StringComparison.OrdinalIgnoreCase))
+            {
+                var socketPath = _daemonUri.LocalPath;
                 var (live, socketErr) = await IsUnixSocketLiveAndWritableAsync(socketPath, ct).ConfigureAwait(false);
                 if (!live)
                 {
@@ -2493,9 +2509,9 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                     }
                 }
             }
-            else if (_daemonUri!.Scheme.Equals("npipe", StringComparison.OrdinalIgnoreCase))
+            else if (_daemonUri.Scheme.Equals("npipe", StringComparison.OrdinalIgnoreCase))
             {
-                var pipeName = _daemonUri!.AbsolutePath.TrimStart('/');
+                var pipeName = _daemonUri.AbsolutePath.TrimStart('/');
                 if (pipeName.StartsWith("pipe/", StringComparison.OrdinalIgnoreCase))
                 {
                     pipeName = pipeName[5..];
