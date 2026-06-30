@@ -2959,9 +2959,19 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             input = input.Replace(home, "~", StringComparison.OrdinalIgnoreCase);
         }
         var user = Environment.UserName;
-        if (!string.IsNullOrWhiteSpace(user))
+        // Replace the account name only at identifier boundaries with a 3-character floor, mirroring
+        // ContainerTelemetry.ScrubSensitiveInfo: a bare substring replace corrupts unrelated text such as
+        // "max-frequency" when the username is short or a common token. Escape the name so it is matched
+        // literally, never as a regex pattern.
+        if (!string.IsNullOrWhiteSpace(user) && user.Length >= 3)
         {
-            input = input.Replace(user, "***", StringComparison.OrdinalIgnoreCase);
+            try
+            {
+                input = System.Text.RegularExpressions.Regex.Replace(input,
+                    $@"(?<![A-Za-z0-9]){System.Text.RegularExpressions.Regex.Escape(user)}(?![A-Za-z0-9])",
+                    "***", System.Text.RegularExpressions.RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(1000));
+            }
+            catch { /* Ignore regex timeout/errors */ }
         }
         return input;
     }

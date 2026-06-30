@@ -1382,7 +1382,9 @@ public static partial class ContainerTelemetry
                         }
                         catch (Exception ex)
                         {
-                            TrackError("ContainerTelemetry", "Failed to deserialize telemetry line", ex, line);
+                            // A malformed tail line must not itself spawn a persisted error on every
+                            // (2 s) dashboard read — that would grow container_errors.jsonl without bound.
+                            System.Diagnostics.Debug.WriteLine($"[ContainerTelemetry] Skipping malformed telemetry line: {ex.Message}");
                         }
                     }
                 }
