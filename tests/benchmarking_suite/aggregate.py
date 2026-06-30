@@ -143,6 +143,10 @@ def write_determinism(data, out_md):
              "machine. Identical hashes across platforms are direct evidence that the containerized",
              "architecture makes tool outputs machine-independent.", "",
              f"Platforms compared: {', '.join(platforms) if platforms else '(none)'}", ""]
+    if len(platforms) < 2:
+        lines += ["> **Cross-platform determinism requires at least two platforms.** With a single platform",
+                  "> the matrix below is informational only — an artifact trivially equals itself. Collect a",
+                  "> second platform before claiming machine-independent outputs.", ""]
     if not art:
         lines += ["_No artifact hashes recorded yet — run run_evaluation.py on at least one platform._"]
     for wl in sorted(art):
@@ -155,8 +159,16 @@ def write_determinism(data, out_md):
             present = [hashes.get(p) for p in platforms]
             shorts = [(h[:12] if h else "-") for h in present]
             non_null = [h for h in present if h]
-            identical = "YES" if non_null and len(set(non_null)) == 1 and len(non_null) == len(platforms) else (
-                "partial" if non_null and len(set(non_null)) == 1 else "NO")
+            if len(platforms) < 2:
+                # A single platform cannot establish cross-platform determinism; "YES" here would be
+                # vacuous (the artifact only equals itself).
+                identical = "n/a (1 platform)"
+            elif non_null and len(set(non_null)) == 1 and len(non_null) == len(platforms):
+                identical = "YES"
+            elif non_null and len(set(non_null)) == 1:
+                identical = "partial"
+            else:
+                identical = "NO"
             lines.append(f"| `{name}` | " + " | ".join(shorts) + f" | {identical} |")
         lines.append("")
     with open(out_md, "w", encoding="utf-8") as f:
