@@ -92,7 +92,7 @@ public sealed class ContainerExtensionTests : IDisposable
     }
 
     [Fact]
-    public void ShortId_ReturnsEmptyOnWhitespaceIfEmpty()
+    public void ShortId_WhitespaceOnly_ReturnsInputVerbatim()
     {
         var result = "   ".ShortId();
         Assert.Equal("   ", result); // Preserves exact string structure up to 12
