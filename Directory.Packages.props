@@ -22,7 +22,11 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageVersion>
-    <PackageVersion Include="System.IO.Pipelines" Version="10.0.9" />
+    <!-- Pinned to the version OneWare bundles (10.0.0): OneWare's plugin loader rejects a plugin
+         that REQUIRES a newer transitive dependency than the host provides, so a Dependabot bump here
+         silently breaks plugin loading at runtime (compiles and tests fine). Do not raise without
+         confirming the OneWare host provides at least the new version. -->
+    <PackageVersion Include="System.IO.Pipelines" Version="10.0.0" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
   </ItemGroup>

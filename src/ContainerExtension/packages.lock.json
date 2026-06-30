@@ -71,9 +71,9 @@
       },
       "System.IO.Pipelines": {
         "type": "Direct",
-        "requested": "[10.0.9, )",
-        "resolved": "10.0.9",
-        "contentHash": "raEAXJHu1ERuQnLhfaMUhK19A+i/CLHH5tFWi+azKxq2O4kzgvdeNuZTzMzyT7pyM1+zE2Pqb2g/DXJsuPp/LQ=="
+        "requested": "[10.0.0, )",
+        "resolved": "10.0.0",
+        "contentHash": "M1eb3nfXntaRJPrrMVM9EFS8I1bDTnt0uvUS6QP/SicZf/ZZjydMD5NiXxfmwW/uQwaMDP/yX2P+zQN1NBHChg=="
       },
       "Acornima": {
         "type": "Transitive",

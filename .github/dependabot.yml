@@ -17,6 +17,16 @@ updates:
       - "security"
     commit-message:
       prefix: "deps(nuget)"
+    ignore:
+      # Runtime dependencies shared with — and provided by — the OneWare host. The plugin loader
+      # rejects a plugin that requires a newer version than the host bundles, so these must be pinned
+      # manually to match the targeted OneWare version and never auto-bumped (a bump compiles and tests
+      # green but breaks plugin loading at runtime; see Directory.Packages.props).
+      - dependency-name: "OneWare.Essentials"
+      - dependency-name: "Avalonia"
+      - dependency-name: "Avalonia.Themes.Fluent"
+      - dependency-name: "System.IO.Pipelines"
+      - dependency-name: "Microsoft.Extensions.DependencyInjection"
 
   - package-ecosystem: "github-actions"
     directory: "/"
