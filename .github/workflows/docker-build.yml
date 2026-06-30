@@ -56,11 +56,9 @@ jobs:
         tags: |
           fentwums/oss-cad-suite:latest
           fentwums/oss-cad-suite:2026-06-26
-        build-args: |
-          RELEASE_TAG=2026-06-26
-          RELEASE_DATE=20260626
-          ARCH=linux-x64
-          OSS_CAD_SUITE_SHA256=091122431af82e0229ee693e1a126096cb88ba8979896a586518af957ae68cf0
+        # Release tag/date/arch and the tarball SHA-256 are pinned once, as ARG defaults in the
+        # Dockerfile, which is the single source of truth for the toolchain provenance. Do not
+        # duplicate them here.
         load: true
         cache-from: type=gha
         cache-to: type=gha,mode=max
