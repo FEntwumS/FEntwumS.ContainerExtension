@@ -41,7 +41,7 @@ sbom.spdx.json
 TestResults/
 coverage/
 
-# Exclude tests and benchmarking harness (fixtures, integration scripts, unit tests)
+# Exclude the unit-test project from the image build context
 tests/
 __pycache__/
 .DS_Store

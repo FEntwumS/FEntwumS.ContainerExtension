@@ -9,6 +9,5 @@
     <File Path="oneware-extension.json" />
   </Folder>
   <Project Path="src/ContainerExtension/ContainerExtension.csproj" />
-  <Project Path="src/ContainerBenchmarkHarness/ContainerBenchmarkHarness.csproj" />
   <Project Path="tests/ContainerExtension.UnitTests/ContainerExtension.UnitTests.csproj" />
 </Solution>

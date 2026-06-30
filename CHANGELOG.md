@@ -4,7 +4,7 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.7] - 2026-06-30
 
 ### Fixed
 - Native-fallback output capture appended to a `StringBuilder` from the concurrent stdout/stderr handlers without the lock used on the container path, risking corrupted output; both appends and the final read are now synchronized.
@@ -36,12 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 - The unused `neorv32` and `picorv32` submodules, the tracked `.vscode` directory, and stale broken benchmark result files.
+- Extracted the evaluation apparatus to the thesis repository: the `ContainerBenchmarkHarness` console driver, the Python benchmarking suite (`benchmark.py`, `run_evaluation.py`, `aggregate.py`) with its tracked results, the shell integration tests and HDL fixtures, and the eight FPGA example projects. The plugin, its unit tests (including the gated container E2E suite), the Docker build inputs, and the DocFX site remain.
+- Relocated the `evaluation.md` and `amd64-native-baseline-protocol.md` articles to the thesis, as evaluation methodology is research output rather than extension usage.
 
 ### Added
 - `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, and per-directory `README` files under `src`, `tests`, and `docker`.
 - Unit tests for the registry SSRF guards, release-tag validation, image disk-usage aggregation, container-name validation, settings fallback, and the resource-threshold advisory branch.
 - Unit tests for container-space path-traversal containment and compressed/link-local IPv6 telemetry scrubbing.
-- `docs/articles/amd64-native-baseline-protocol.md`: the toolchain-parity provisioning protocol for collecting a valid native-vs-container overhead baseline on `linux/amd64` and `windows/amd64`, complementing the evaluation methodology.
 
 ## [1.0.6] - 2026-06-27
 

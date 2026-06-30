@@ -72,15 +72,6 @@ docs/api/*.yml
 docs/api/.manifest
 docs/api/toc.yml
 
-# -- Python & Benchmarking ----------------------------------------------------
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-harness_bin/
-*_verification*.txt
-final_*.txt
-
 # -- Logs & Debugging ---------------------------------------------------------
 full_source_bundle.md
 *.log

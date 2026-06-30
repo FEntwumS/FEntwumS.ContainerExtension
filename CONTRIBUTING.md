@@ -10,8 +10,7 @@ Contributions are welcome. This document describes how to build, test, and submi
 ## Prerequisites
 
 - .NET SDK 10 (see `global.json` for the pinned version).
-- A container engine (Docker, Podman, OrbStack, or Colima) for the integration and E2E tests.
-- Python 3.8+ for the benchmarking suite (optional; `matplotlib` only for figures).
+- A container engine (Docker, Podman, OrbStack, or Colima) for the gated E2E tests.
 
 ## Build and test
 

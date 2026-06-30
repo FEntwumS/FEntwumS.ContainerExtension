@@ -31,9 +31,8 @@ Each top-level directory carries its own README with the detail; this is the map
 
 | Path | Contents |
 |---|---|
-| [`src/`](src/README.md) | The plugin assemblies. `ContainerExtension` is the core: `IToolExecutionStrategy`/`DockerExecutionStrategy`, the registry client, settings, telemetry, and the Avalonia Docker dashboard (`net10.0`, `IsAotCompatible`, source-generated JSON and regex). `ContainerBenchmarkHarness` is a headless driver used by the benchmarking suite and smoke runner. |
-| [`tests/`](tests/README.md) | `ContainerExtension.UnitTests` (xUnit: validators, command building, path mapping, telemetry, registry parsing, SSRF guards, plus gated container E2E), `integration` (HDL fixtures and shell smoke runners), and `benchmarking_suite` (the cross-platform evaluation pipeline). |
-| [`examples/`](examples/README.md) | Eight self-contained GateMate FPGA designs in VHDL and Verilog that drive the full synthesis → place-and-route → bitstream and simulation flow through the container; also the integration-test corpus. |
+| [`src/`](src/README.md) | The plugin assemblies. `ContainerExtension` is the core: `IToolExecutionStrategy`/`DockerExecutionStrategy`, the registry client, settings, telemetry, and the Avalonia Docker dashboard (`net10.0`, `IsAotCompatible`, source-generated JSON and regex). |
+| [`tests/`](tests/README.md) | `ContainerExtension.UnitTests` (xUnit: validators, command building, path mapping, telemetry, registry parsing, SSRF guards, plus gated container E2E). |
 | [`docker/`](docker/README.md) | Build inputs for the hardened `fentwums/oss-cad-suite` toolchain image: the digest-pinned `Dockerfile`, `build_oss_cad_suite.sh`, and `pull_all_images.sh`. |
 | [`docs/`](docs/articles) | DocFX site sources — prose guides under `articles/` and the generated API reference. See [Documentation](#documentation) to build and view the HTML. |
 
@@ -104,9 +103,6 @@ cd FEntwumS.ContainerExtension
 dotnet format OneWare.ContainerExtension.slnx --verify-no-changes
 dotnet build  OneWare.ContainerExtension.slnx -warnaserror -c Release
 dotnet test   OneWare.ContainerExtension.slnx -c Release
-
-# Optional: headless integration smoke (requires a container engine)
-cd tests/integration && ./run_all.sh
 ```
 
 The container E2E tests are skipped in CI (Docker Hub rate limits and image-pull flakiness); they run
@@ -115,7 +111,7 @@ locally when a daemon and the toolchain image are present.
 ## Documentation
 
 Prose guides live under [docs/articles](docs/articles): getting started, configuration, architecture,
-telemetry, evaluation, and limitations. The full site bundles those guides with an API reference
+telemetry, and limitations. The full site bundles those guides with an API reference
 generated from the source by [DocFX](https://dotnet.github.io/docfx/):
 
 ```bash

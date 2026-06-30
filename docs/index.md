@@ -10,7 +10,6 @@ Developed as part of the Master's Thesis: "Design and Implementation of a Modula
 - [Configuration Guide](articles/configuration.md) - All 19 settings explained
 - [Telemetry & Troubleshooting](articles/telemetry.md) - Debug execution issues, data protection
 - [Architecture Overview](articles/architecture.md) - Internal design and component diagram
-- [Evaluation Methodology](articles/evaluation.md) - Cross-platform benchmark and reproducibility protocol
 - [Limitations and Threats to Validity](articles/limitations.md) - Scope, known limits, emulation overhead
 - [API Reference](api/index.md) - Auto-generated from XML doc comments
 
