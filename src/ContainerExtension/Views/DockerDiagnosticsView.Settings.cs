@@ -76,9 +76,9 @@ public partial class DockerDiagnosticsView
 
         formPanel.Children.Add(CreateFormSectionHeader("IMAGE & EXECUTION"));
 
-        var defaultImage = _settingsService.SafeGetSetting(ContainerExtensionModule.DefaultImageSetting, ContainerExtensionModule.FallbackImage);
+        var defaultImage = _settingsService.SafeGetSetting(ContainerExtensionModule.DefaultImageSetting, ContainerExtensionModule.OssCadSuiteImage);
         var defaultImageTextBox = new TextBox { Text = defaultImage, FontSize = 12, MinHeight = 28, VerticalContentAlignment = VerticalAlignment.Center };
-        formPanel.Children.Add(CreateFormItem("Default Toolchain Image", "The default container image to pull and use for all tools.", defaultImageTextBox));
+        formPanel.Children.Add(CreateFormItem("Default Toolchain Image", "The default container image for all tools. It is build-only (not published to a registry): produce it via Build Local Image rather than pulling.", defaultImageTextBox));
 
         var pullPolicy = _settingsService.SafeGetSetting(ContainerExtensionModule.PullPolicySetting, "if-not-present");
         var pullPolicyComboBox = new ComboBox
@@ -327,7 +327,7 @@ public partial class DockerDiagnosticsView
 
         resetBtn.Command = new RelayCommand(() =>
         {
-            defaultImageTextBox.Text = ContainerExtensionModule.FallbackImage;
+            defaultImageTextBox.Text = ContainerExtensionModule.OssCadSuiteImage;
             pullPolicyComboBox.SelectedItem = "if-not-present";
             platformComboBox.SelectedItem = "auto";
             networkModeComboBox.SelectedItem = "bridge";

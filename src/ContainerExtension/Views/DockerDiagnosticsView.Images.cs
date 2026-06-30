@@ -121,6 +121,19 @@ public partial class DockerDiagnosticsView
             }
         }
 
+        if (!string.IsNullOrEmpty(_searchFilter) && taggedImages.Count == 0)
+        {
+            newChildren.Add(new TextBlock
+            {
+                Text = $"No images matching \"{Truncate(_searchFilter, 20)}\".",
+                Foreground = MutedColor,
+                FontSize = 11,
+                FontStyle = FontStyle.Italic
+            });
+            _imagesContent.Children.AddRange(newChildren);
+            return;
+        }
+
         newChildren.Add(CreateSortableHeaderRow(
           [("REPOSITORY:TAG", "repo"), ("SIZE", "size"), ("CREATED", "created")],
           _imageSort,
@@ -239,7 +252,7 @@ public partial class DockerDiagnosticsView
             });
         }
 
-        // -- Disk Usage Summary (merged from standalone section) ------
+        // Disk Usage Summary (merged from standalone section)
         if (diskUsage.totalSizeBytes > 0)
         {
             newChildren.Add(new Border

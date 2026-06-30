@@ -40,7 +40,7 @@ public partial class DockerDiagnosticsView : UserControl
     private static readonly Geometry WhaleGeometry = Geometry.Parse(ContainerExtensionModule.WhaleIconPath);
     private static readonly SolidColorBrush DockerBlueBrush = new(Color.Parse(ContainerExtensionModule.DockerBlueHex));
 
-    // -- Instance State --------------------------------------------------
+    // Instance State
     private readonly DockerExecutionStrategy _strategy;
     private readonly ITerminalManagerService _terminalService;
 
@@ -72,7 +72,7 @@ public partial class DockerDiagnosticsView : UserControl
     // message text, so a newer banner is never cleared early by a previous message's still-pending timer.
     private long _bannerToken;
 
-    // -- KPI Metrics Controls (assigned via CreateMetricCard in the constructor) ----------
+    // KPI Metrics Controls (assigned via CreateMetricCard in the constructor)
     private readonly TextBlock _metricDaemonStatusText;
     private readonly TextBlock _metricDaemonDetailText;
     private readonly Border _metricDaemonBorder;
@@ -102,7 +102,7 @@ public partial class DockerDiagnosticsView : UserControl
     private bool _justAttached;
     private IDisposable? _isVisibleSubscription;
 
-    // -- Cached Data (for re-sorting without re-querying the daemon) --
+    // Cached Data (for re-sorting without re-querying the daemon)
     private readonly System.Threading.Lock _cachedDataLock = new();
     private readonly List<Grid> _recycledContainerRows = new();
     private readonly List<Grid> _recycledImageRows = new();
@@ -112,15 +112,15 @@ public partial class DockerDiagnosticsView : UserControl
     private bool _showAllImages;
     private (int imageCount, long totalSizeBytes, long reclaimableBytes) _cachedDiskUsage;
 
-    // -- Search/Filter State ------------------------------------------
+    // Search/Filter State
     private string _searchFilter = "";
 
-    // -- Sort State (column name + direction per table) ---------------
+    // Sort State (column name + direction per table)
     private (string column, bool ascending) _containerSort = ("name", true);
     private (string column, bool ascending) _imageSort = ("repo", true);
     private (string column, bool ascending) _historySort = ("time", false); // newest-first default
 
-    // -- Data Fingerprints (skip UI rebuild when data is unchanged) ----
+    // Data Fingerprints (skip UI rebuild when data is unchanged)
     private int _lastContainerFingerprint;
     private int _lastImageFingerprint;
     private bool? _wasDockerOnline;
@@ -162,7 +162,7 @@ public partial class DockerDiagnosticsView : UserControl
         // wired after _refreshIndicator is constructed below.
         _indicatorBlinkTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
 
-        // -- Header ------------------------------------------------------
+        // Header
         var whaleIcon = new PathIcon
         {
             Data = WhaleGeometry,
@@ -190,7 +190,7 @@ public partial class DockerDiagnosticsView : UserControl
         headerTitlePanel.Children.Add(whaleIcon);
         headerTitlePanel.Children.Add(_headerTitle);
 
-        // -- Global Search / Filter --------------------------------------
+        // Global Search / Filter
         var searchShortcut = OperatingSystem.IsMacOS() ? "Cmd+F" : "Ctrl+F";
         _searchBox = new TextBox
         {
@@ -298,12 +298,12 @@ public partial class DockerDiagnosticsView : UserControl
         header.Children.Add(headerTitlePanel);
         header.Children.Add(statusBar);
 
-        // -- Quick Actions (inline below header) -------------------------
+        // Quick Actions (inline below header)
         _quickActionsRow = BuildQuickActionsRow();
         _quickActionsRow.Opacity = 0.5;  // dimmed until daemon is confirmed reachable
         _quickActionsRow.IsEnabled = false;
 
-        // -- KPI Row -----------------------------------------------------
+        // KPI Row
         var kpiGrid = new Grid
         {
             Margin = new Thickness(0, 4, 0, 8),
@@ -413,7 +413,7 @@ public partial class DockerDiagnosticsView : UserControl
         // cannot re-show the banner after the user has explicitly dismissed it.
         closeBannerBtn.Command = new RelayCommand(() => { System.Threading.Interlocked.Increment(ref _bannerToken); _statusBanner.IsVisible = false; });
 
-        // -- Sections Panel (1-Grid Layout) ------------------------------
+        // Sections Panel (1-Grid Layout)
         var sectionsPanel = new StackPanel
         {
             Spacing = 12,
@@ -429,7 +429,7 @@ public partial class DockerDiagnosticsView : UserControl
             }
         };
 
-        // -- Layout ------------------------------------------------------
+        // Layout
         var mainPanel = new StackPanel
         {
             Margin = new Thickness(20),
@@ -669,7 +669,7 @@ public partial class DockerDiagnosticsView : UserControl
         }
     }
 
-    // -- Drag & Drop Handlers for Search Box -----------------------------
+    // Drag & Drop Handlers for Search Box
     private static void OnSearchBoxDragOver(object? sender, DragEventArgs e)
     {
         if (e.DataTransfer.Contains(DataFormat.File))
@@ -723,7 +723,7 @@ public partial class DockerDiagnosticsView : UserControl
         return true;
     }
 
-    // -- TextChanged Event Handler ---------------------------------------
+    // TextChanged Event Handler
     private void OnSearchBoxTextChanged(object? sender, EventArgs e)
     {
         if (_searchBox.InnerRightContent is Button clearBtn)
@@ -743,7 +743,7 @@ public partial class DockerDiagnosticsView : UserControl
     }
 
 
-    // -- Dashboard Keyboard Shortcuts ------------------------------------
+    // Dashboard Keyboard Shortcuts
     private void OnDashboardKeyDown(object? sender, KeyEventArgs e)
     {
         var primaryModifier = OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control;
@@ -1553,7 +1553,7 @@ public partial class DockerDiagnosticsView : UserControl
     {
         _configContent.Children.Clear();
 
-        // -- Extension Metadata Card --------------------------------------
+        // Extension Metadata Card
         var telemetryPath = ContainerTelemetry.TelemetryFilePath;
         try
         {
@@ -1592,7 +1592,7 @@ public partial class DockerDiagnosticsView : UserControl
 
         _configContent.Children.Add(CreateSubCard(metaPanel));
 
-        // -- Grouped Settings --------------------------------------------
+        // Grouped Settings
         var groups = new (string title, string[] keys)[]
         {
             ("IMAGE & EXECUTION", [ ContainerExtensionModule.SettingsKeyImage, ContainerExtensionModule.SettingsKeyPullPolicy, ContainerExtensionModule.SettingsKeyPlatform, ContainerExtensionModule.SettingsKeyNetwork ]),
@@ -1648,14 +1648,19 @@ public partial class DockerDiagnosticsView : UserControl
                 var val = pairs[i].value;
                 var valColor = val switch
                 {
-                    "On" => GreenColor,
-                    "Off" => RedColor,
                     "always" => GreenColor,
                     "if-not-present" => AccentColor,
                     "never" => RedColor,
                     "No limit" => MutedColor,
                     "None" => MutedColor,
                     "(none)" => MutedColor,
+                    // Security posture: warn when a guard is relaxed, reassure when it is enforced.
+                    // Benign on/off preferences (auto-remove, timestamps) keep the default colour.
+                    "Allowed" => RedColor,
+                    "Bypassed" => YellowColor,
+                    "Enabled" => YellowColor,
+                    "Active" => GreenColor,
+                    "Disabled" => GreenColor,
                     _ => FontColor
                 };
 
@@ -2563,7 +2568,7 @@ public partial class DockerDiagnosticsView : UserControl
         grid.Children.Add(accentBar);
         grid.Children.Add(mainPanel);
 
-        return new Border
+        var card = new Border
         {
             Background = CardBg,
             CornerRadius = CardCornerRadius,
@@ -2571,5 +2576,8 @@ public partial class DockerDiagnosticsView : UserControl
             BorderBrush = BorderColor,
             Child = grid
         };
+        AutomationProperties.SetName(card, label);
+        AutomationProperties.SetLiveSetting(valText, AutomationLiveSetting.Polite);
+        return card;
     }
 }
