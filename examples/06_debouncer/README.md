@@ -55,7 +55,7 @@ Yosys VHDL synthesis path inside the `fentwums/oss-cad-suite` container.
 ### Standalone verification
 
 ```sh
-docker run --rm -v "$PWD":/work -w /work fentwums/oss-cad-suite:2026-06-26 \
+docker run --rm -v "$PWD":/work -w /work fentwums/oss-cad-suite:2026-06-30 \
   bash -lc 'ghdl -a --std=08 --workdir=/tmp debouncer.vhd debouncer_tb.vhd \
             && ghdl -e --std=08 --workdir=/tmp debouncer_tb \
             && ghdl -r --std=08 --workdir=/tmp debouncer_tb \

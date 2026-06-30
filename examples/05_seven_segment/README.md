@@ -34,7 +34,7 @@ array and reports `seven_seg_decoder: PASS - 16 cases` on success.
 ### Standalone container check
 
 ```sh
-docker run --rm -v "$PWD":/work -w /work fentwums/oss-cad-suite:2026-06-26 \
+docker run --rm -v "$PWD":/work -w /work fentwums/oss-cad-suite:2026-06-30 \
   bash -lc 'ghdl -a --std=08 --workdir=/tmp seven_seg_decoder.vhd seven_seg_decoder_tb.vhd \
             && ghdl -e --std=08 --workdir=/tmp seven_seg_decoder_tb \
             && ghdl -r --std=08 --workdir=/tmp seven_seg_decoder_tb --assert-level=error'

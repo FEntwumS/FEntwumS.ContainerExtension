@@ -37,7 +37,7 @@ Every containerized tool execution is recorded as a JSON Lines entry in `~/.onew
 
 ### Dashboard Telemetry
 
-The Container Dashboard's **Recent Executions** section shows the last 10 entries with:
+The Container Dashboard's **Recent Executions** section shows up to 50 entries with:
 
 - Color-coded exit status (green = success, red = failure, yellow = cancelled)
 - Execution timing

@@ -48,7 +48,7 @@ Yosys toolchain, and passes `--std=08` to GHDL (`vhdlStandard: "08"`). Run the
 testbench from the simulation panel, or reproduce the container flow directly:
 
 ```sh
-docker run --rm -v "$PWD":/work -w /work fentwums/oss-cad-suite:2026-06-26 \
+docker run --rm -v "$PWD":/work -w /work fentwums/oss-cad-suite:2026-06-30 \
   bash -lc 'ghdl -a --std=08 --workdir=/tmp sync_fifo.vhd sync_fifo_tb.vhd && \
             ghdl -e --std=08 --workdir=/tmp sync_fifo_tb && \
             ghdl -r --std=08 --workdir=/tmp sync_fifo_tb --assert-level=error'

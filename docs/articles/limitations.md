@@ -109,15 +109,21 @@ CV-adaptive repetition (sampling continues until the relative standard deviation
 or a cap is reached), 95 % Student-t confidence intervals on every mean, and 2-sigma outlier flagging.
 Native-versus-container comparisons use Welch's unpaired t-test, with an interleaved paired mode that
 alternates execution backends per iteration so that drift in machine state affects both arms equally.
-Residual variance from background load on the host is not eliminated, only bounded and reported. Where
-a concrete measured value belongs, it is drawn from `results/summary.csv` rather than stated here.
+Residual variance from background load on the host is not eliminated, only bounded and reported. The
+CV-adaptive scheme bounds each mean's confidence-interval width rather than the between-group test's
+statistical power; the low observed coefficients of variation (typically below 6 %) imply high realised
+power for the reported effect sizes. Where a concrete measured value belongs, it is drawn from
+`results/summary.csv` rather than stated here.
 
 **Workload selection (external validity).** The example suite is a coverage matrix, not a
 representative sample of production designs. It is constructed to drive every back-end tool the
 extension containerizes — three synthesis back ends (`synth_gatemate`, `synth_ice40`, `synth_ecp5`),
 three routers (`nextpnr-himbaechel`, `nextpnr-ice40`, `nextpnr-ecp5`), three packers (`gmpack`,
 `icepack`, `ecppack`), and both simulation front ends (`ghdl`, `iverilog`) — across the GateMate, iCE40,
-and ECP5 families and both source languages.
+and ECP5 families and both source languages. The *quantitative* overhead matrix, however, is the iCE40,
+ECP5, and Icarus Verilog subset emitted by `run_evaluation.py`; GateMate and GHDL synthesis/simulation
+are exercised functionally by the example suite and the integration smoke tests but are not part of the
+measured benchmark, which the evaluation tables reflect.
 The designs are small interface examples with synthetic pin assignments, not pin-locked reference
 designs, so absolute runtimes are short and the relative weight of fixed per-invocation container
 overhead is correspondingly larger than it would be for long-running industrial syntheses. The

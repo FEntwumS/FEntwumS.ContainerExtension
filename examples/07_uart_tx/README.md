@@ -49,7 +49,7 @@ eight data bits, and the stop bit. On success it prints
 ### Standalone verification
 
 ```
-docker run --rm -v "$PWD":/work -w /work fentwums/oss-cad-suite:2026-06-26 \
+docker run --rm -v "$PWD":/work -w /work fentwums/oss-cad-suite:2026-06-30 \
   bash -lc 'iverilog -g2012 -o /tmp/tb.out uart_tx.v uart_tx_tb.sv && vvp /tmp/tb.out \
             && yosys -q -p "read_verilog -sv uart_tx.v; hierarchy -top uart_tx; proc; opt; check"'
 ```

@@ -9,7 +9,7 @@
 ## Secure Infrastructure
 
 This project executes user-specified FPGA toolchains inside Docker/Podman containers and adheres to zero-trust principles:
-- **SLSA Level 3 Provenance** for all published artifacts and generated SBOMs.
+- **SLSA build provenance (L2)** for the published release archive (the release zip is the attestation subject).
 - **Deterministic Builds** ensuring verifiable and reproducible binary outputs.
 - **Non-root Container Execution** preventing namespace privilege escalation.
 - **Static Analysis** enforced via GitHub CodeQL and Trivy.

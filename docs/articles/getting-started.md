@@ -61,7 +61,7 @@ The Container Dashboard provides:
 | **Containers** | Live container list with stop/remove/view-logs buttons |
 | **Images & Disk** | Cached images with sizes, reclaimable space indicator |
 | **Configuration** | Snapshot of all active Container Engine settings |
-| **Recent Executions** | Last 10 telemetry entries with timing and exit codes |
+| **Recent Executions** | Up to 50 telemetry entries with timing and exit codes |
 
 ## Next Steps
 

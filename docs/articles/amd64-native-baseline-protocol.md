@@ -26,14 +26,14 @@ A sound native baseline requires eliminating both confounds at once:
 ## Toolchain-version parity (the load-bearing step)
 
 The image pins a single `oss-cad-suite` release in `docker/oss-cad-suite/Dockerfile`
-(`ARG RELEASE_TAG`, currently `2026-06-26`, with a checksum-verified `linux-x64` tarball). The native
+(`ARG RELEASE_TAG`, currently `2026-06-30`, with a checksum-verified `linux-x64` tarball). The native
 host must install **the same dated release**, so that `yosys`, `ghdl`, `nextpnr-*`, `icepack`/`ecppack`
 and `iverilog` are byte-for-byte the binaries that run in the container.
 
 ```bash
 # 1. Read the pinned release the container is built from (single source of truth).
 RELEASE_TAG=$(grep -m1 '^ARG RELEASE_TAG=' docker/oss-cad-suite/Dockerfile | cut -d= -f2)
-DATE=${RELEASE_TAG//-/}          # e.g. 2026-06-26 -> 20260626
+DATE=${RELEASE_TAG//-/}          # e.g. 2026-06-30 -> 20260630
 
 # 2. Install the matching native oss-cad-suite for the host architecture.
 #    Linux/amd64:
