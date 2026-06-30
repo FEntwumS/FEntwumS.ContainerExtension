@@ -26,6 +26,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     private static readonly System.Threading.Lock InitializeLock = new();
     private static System.ComponentModel.PropertyChangedEventHandler? _propertyChangedHandler;
     private static DockerDiagnosticsViewModel? _cachedDashboardVm;
+    private static IDisposable? _telemetryRetentionSubscription;
     internal static IServiceProvider? GlobalServiceProvider { get; private set; }
 
     // Settings category and subcategory constants to prevent multiple string literal references
@@ -229,6 +230,19 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         // execution. Users on a hardened Windows host can uncheck it to re-enable the impersonation guard.
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, BypassNamedPipeCheckSetting, new CheckBoxSetting("Bypass Named Pipe Security Check", true));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, AllowNativeFallbackSetting, new CheckBoxSetting("Allow Native Fallback", false));
+
+        // Eager GDPR erasure: purge any persisted history the moment the user opts out
+        // (Telemetry Retention = None), not merely on the next read/export/execution. The
+        // observable also emits the current value on subscribe, so a session that starts
+        // already opted out is purged at initialization; ClearEntries is idempotent.
+        _telemetryRetentionSubscription?.Dispose();
+        _telemetryRetentionSubscription = settingsService
+            .GetSettingObservable<string>(TelemetryRetentionSetting)
+            .Subscribe(retention =>
+            {
+                if (string.Equals(retention, "None", StringComparison.Ordinal))
+                    ContainerTelemetry.ClearEntries();
+            });
 
         IToolService toolService;
         DockerExecutionStrategy dockerStrategy;
@@ -608,6 +622,10 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
 
             _workspaceCts?.Dispose();
             _workspaceCts = null;
+
+            try { _telemetryRetentionSubscription?.Dispose(); }
+            catch (ObjectDisposedException) { /* already disposed */ }
+            _telemetryRetentionSubscription = null;
 
             if (_processExitHandler != null)
             {
