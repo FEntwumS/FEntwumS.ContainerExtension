@@ -886,7 +886,7 @@ internal static class DockerCommandBuilder
                         }
                     }
 
-                    // If quotes are not balanced, we have a multi-line value
+                    // Unbalanced quotes indicate a multi-line value
                     if ((inDoubleQuotes || inSingleQuotes) && value.Length > 0)
                     {
                         char quoteChar = inDoubleQuotes ? '"' : '\'';

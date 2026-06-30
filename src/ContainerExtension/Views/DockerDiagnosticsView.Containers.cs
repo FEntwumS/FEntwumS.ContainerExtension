@@ -712,7 +712,7 @@ public partial class DockerDiagnosticsView
     }
 
 
-    // -- Debouncer and Stats Cache State ----------------------
+    // Debouncer and Stats Cache State
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _lastActionTimes = new(StringComparer.Ordinal);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _liveStats = new(StringComparer.Ordinal);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _activeStatsQueries = new(StringComparer.Ordinal);

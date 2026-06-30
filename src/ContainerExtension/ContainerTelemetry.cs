@@ -120,7 +120,7 @@ public static partial class ContainerTelemetry
 
     private static readonly System.Threading.Lock MutexLock = new();
 
-    // -- Testing Hook --------------------------------------------------------
+    // Testing Hook
     /// <summary>Isolates telemetry to a temporary directory during xUnit test execution.</summary>
     internal static void InitializeTestEnvironment(string tempDir)
     {

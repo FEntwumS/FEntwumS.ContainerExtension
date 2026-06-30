@@ -16,7 +16,7 @@ namespace ContainerExtension.Views;
 /// </summary>
 public static class UIBuilderHelpers
 {
-    // -- Color Palette ---------------------------------------------------
+    // Color Palette
     // Resolves a host theme resource for the application's *current* theme variant.
     // Resolving against ActualThemeVariant (rather than the default variant) is what
     // lets a light/dark toggle re-pick the correct brush when InitializeBrushes() re-runs.
