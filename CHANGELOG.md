@@ -4,6 +4,11 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.8] - 2026-06-30
+
+### Changed
+- Bumped the SHA-pinned CI actions to current releases (`actions/checkout` v7, `actions/cache` v6, `docker/setup-qemu-action` v4, `docker/setup-buildx-action` v4, `docker/build-push-action` v7, `aquasecurity/trivy-action`), clearing the Node 20 runner deprecation. Build infrastructure only; the extension artifact is unchanged from 1.0.7.
+
 ## [1.0.7] - 2026-06-30
 
 ### Fixed
