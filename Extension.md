@@ -7,8 +7,9 @@ or requiring a host toolchain install.
 
 ## Capabilities
 
-- **Non-root execution:** injects the host UID/GID and runs as `USER oneware`, so container output is not
-  root-owned. `tini` runs as PID 1 to reap children and forward signals.
+- **Non-root execution:** pins the container process to the host UID/GID via `--user`, so container output
+  is not root-owned; on rootless runtimes, where `--user` is omitted, the image's `oneware` user applies.
+  `tini` runs as PID 1 to reap children and forward signals.
 - **Hybrid execution:** runs GHDL, Yosys, nextpnr, gmpack, Icarus, Verilator, and SymbiYosys in a
   container, with path and script mapping; falls back to a host-native tool when the daemon is offline.
 - **Multi-runtime detection:** detects Docker, Podman, Colima, and OrbStack, with retry.

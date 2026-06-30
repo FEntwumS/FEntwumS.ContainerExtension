@@ -50,7 +50,7 @@ flowchart TD
     B --> C{Container engine reachable?}
     C -->|yes| D[Resolve image<br/>env var → per-tool → default → built-in fallback]
     D --> E[Map project into /workspace · inject host UID/GID<br/>cap-drop ALL · no-new-privileges · PID cap]
-    E --> F[Run the unmodified tool in the container<br/>tini as PID 1 · non-root 'oneware' user]
+    E --> F[Run the unmodified tool in the container<br/>tini as PID 1 · non-root host UID/GID]
     C -->|no, native fallback enabled| G[Run the tool from the host PATH]
     C -->|no, fallback disabled| H[Fail: daemon unreachable]
     F --> I[Stream stdout/stderr to the IDE<br/>same working dir and exit code]
@@ -58,8 +58,9 @@ flowchart TD
     I --> J[Record JSON Lines telemetry at the configured level]
 ```
 
-- **Containerized (default):** pulls and runs the toolchain image, injecting the host UID/GID and running
-  as a non-root `oneware` user so output files are not root-owned. `tini` runs as PID 1 to reap
+- **Containerized (default):** pulls and runs the toolchain image, pinning the container process to the host
+  UID/GID via `--user` so output files are not root-owned (on rootless runtimes the image's `oneware` user
+  applies instead). `tini` runs as PID 1 to reap
   children and forward signals.
 - **Native fallback:** if the daemon is unreachable and `Allow Native Fallback` is enabled, the tool is
   located on the host `PATH` and run natively so work is not blocked.

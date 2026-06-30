@@ -123,3 +123,14 @@ designs, so absolute runtimes are short and the relative weight of fixed per-inv
 overhead is correspondingly larger than it would be for long-running industrial syntheses. The
 measured overhead is therefore a conservative (upper-bound) estimate of the steady-state cost on
 larger designs, where the fixed container setup amortizes over a longer tool execution.
+
+## Future work
+
+Two internal refactors are recognised but deliberately deferred on this artifact. `DockerExecutionStrategy`
+concentrates connection probing, image resolution, command assembly, and stream handling in a single class;
+extracting these into dedicated collaborators would improve cohesion. The path-canonicalisation helper is
+likewise duplicated across the telemetry, strategy, and command-builder layers. Both are behaviour-preserving
+moves with no correctness payoff, and the path-canonicalisation and bind-validation code lies on the
+per-invocation execution path the overhead evaluation measures; consolidating it would perturb the measured
+subject and require a re-baseline. They are left for a post-evaluation maintenance pass rather than undertaken
+on the frozen, benchmarked codebase.

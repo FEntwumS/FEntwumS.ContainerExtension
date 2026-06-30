@@ -51,6 +51,11 @@ graph TD
 | `DockerDiagnosticsViewModel` | `ExtendedTool` docking adapter for the dashboard |
 | `DockerCommandBuilder` | Host-to-container path mapping, parameter assembly, `.env` parsing, shell escaping |
 | `ContainerTelemetry` | JSON Lines logger with stats and export |
+| `DockerConnectionProvider` | Daemon connection, runtime detection, API-version negotiation, system-info caching |
+| `DockerContainerManager` | Container create/start/wait/inspect/stop/remove over Docker.DotNet |
+| `DockerImageManager` | Image pull/build/list/remove and digest resolution |
+| `RegistryClient` | Registry tag/manifest queries with SSRF-guarded realm resolution |
+| `GitHubReleaseClient` | GitHub release lookups for the toolchain image |
 
 ## Image Resolution Hierarchy
 
