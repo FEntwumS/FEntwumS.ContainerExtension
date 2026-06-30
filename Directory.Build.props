@@ -37,6 +37,11 @@
         <NuGetAudit>true</NuGetAudit>
         <NuGetAuditMode>all</NuGetAuditMode>
         <NuGetAuditLevel>low</NuGetAuditLevel>
+
+        <!-- Pin the restore graph to a committed packages.lock.json. CI restores in locked
+             mode (RestoreLockedMode=true), so a drifted transitive dependency fails the build
+             rather than resolving silently: restore is reproducible, not only the compile. -->
+        <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     </PropertyGroup>
 
     <!-- Metadata -->
