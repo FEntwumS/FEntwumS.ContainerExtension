@@ -21,8 +21,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-RELEASE_TAG="2026-06-26"
-RELEASE_DATE="20260626"
+RELEASE_TAG="2026-06-30"
+RELEASE_DATE="20260630"
 IMAGE_NAME="fentwums/oss-cad-suite"
 
 # Force linux-x64 (linux/amd64) for GHDL compatibility.

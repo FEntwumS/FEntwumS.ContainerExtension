@@ -1,7 +1,7 @@
 # OSS CAD Suite Build
 
 # Stage 1
-FROM ubuntu@sha256:f3d28607ddd78734bb7f71f117f3c6706c666b8b76cbff7c9ff6e5718d46ff64 AS downloader
+FROM ubuntu@sha256:53958ec7b67c2c9355df922dd08dbf0360611f8c3cdb656875e81873db9ffdba AS downloader
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -11,12 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tar \
     && rm -rf /var/lib/apt/lists/*
 
-ARG RELEASE_TAG=2026-06-26
-ARG RELEASE_DATE=20260626
+ARG RELEASE_TAG=2026-06-30
+ARG RELEASE_DATE=20260630
 ARG ARCH=linux-x64
-# SHA-256 of the release asset (GitHub-published digest for the pinned tag/date/arch).
-# The build fails closed if the downloaded tarball does not match.
-ARG OSS_CAD_SUITE_SHA256=091122431af82e0229ee693e1a126096cb88ba8979896a586518af957ae68cf0
+# SHA-256 of the release asset for the pinned tag/date/arch (oss-cad-suite-build does not publish
+# per-asset checksums; computed from the tarball). The build fails closed on a mismatch.
+ARG OSS_CAD_SUITE_SHA256=28f1018973618732dd35c0f95550ff85ee7687fc3b87860608eeffb86ad7909e
 
 # Download and verify integrity before extraction
 RUN wget --progress=dot:giga --retry-connrefused --read-timeout=60 --timeout=30 -O /tmp/oss-cad-suite.tgz \
@@ -28,7 +28,7 @@ RUN wget --progress=dot:giga --retry-connrefused --read-timeout=60 --timeout=30 
     && rm -rf /opt/oss-cad-suite/lib/python3*/test
 
 # Stage 2
-FROM ubuntu@sha256:f3d28607ddd78734bb7f71f117f3c6706c666b8b76cbff7c9ff6e5718d46ff64
+FROM ubuntu@sha256:53958ec7b67c2c9355df922dd08dbf0360611f8c3cdb656875e81873db9ffdba
 
 LABEL org.opencontainers.image.authors="YosysHQ, Mert Torun"
 LABEL org.opencontainers.image.title="OSS CAD Suite"
