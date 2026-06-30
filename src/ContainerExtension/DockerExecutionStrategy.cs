@@ -2329,10 +2329,6 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     }
 
     /// <summary>
-    /// Translates a host tool command into an ephemeral container execution payload.
-    /// Manages pulling images, configuring container properties, executing the command, and streaming results.
-    /// </summary>
-    /// <summary>
     /// The resource profile (peak container memory, max CPU, OOM flag) of the most recently completed
     /// container execution. A diagnostic side channel for the benchmark harness, which needs the real
     /// in-container memory the stats stream captures; <see cref="ExecuteAsync(ToolCommand)"/> can only
@@ -2341,6 +2337,10 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     /// </summary>
     internal ResourceProfile? LastResourceProfile { get; private set; }
 
+    /// <summary>
+    /// Translates a host tool command into an ephemeral container execution payload.
+    /// Manages pulling images, configuring container properties, executing the command, and streaming results.
+    /// </summary>
     /// <param name="command">The tool command payload to execute.</param>
     /// <returns>A tuple indicating success status and any buffered output if captured.</returns>
     public Task<(bool success, string output)> ExecuteAsync(ToolCommand command)
