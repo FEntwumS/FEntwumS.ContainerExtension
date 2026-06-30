@@ -42,7 +42,7 @@ cp -r src/ContainerExtension/bin/Release/net10.0/* \
 ## Your First Containerized Build
 
 1. Open an FPGA project in OneWare Studio (e.g., a VHDL project)
-2. In any tool's settings, switch the **Execution Strategy** from `Native` to `Docker`
+2. In any tool's settings, switch the **Execution Strategy** from `NativeExecutionStrategy` to `DockerExecutionStrategy` (OneWare lists the raw strategy keys)
 3. Run the tool (e.g., GHDL Analyze) - the extension will:
    - Pull the required image if not cached locally
    - Mount your project directory into the container

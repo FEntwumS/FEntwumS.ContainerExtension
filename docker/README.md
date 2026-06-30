@@ -1,7 +1,8 @@
 # docker
 
-Build inputs for the hardened toolchain image the plugin runs by default
-(`fentwums/oss-cad-suite`).
+Build inputs for the hardened toolchain image the plugin uses by default when a tool is routed to the Docker
+strategy (`fentwums/oss-cad-suite`). The image is build-only — produce it locally via *Build Local Image*; it
+is not published to a registry.
 
 | Path | Description |
 |---|---|

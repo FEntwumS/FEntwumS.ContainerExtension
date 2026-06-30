@@ -58,10 +58,11 @@ flowchart TD
     I --> J[Record JSON Lines telemetry at the configured level]
 ```
 
-- **Containerized (default):** pulls and runs the toolchain image, pinning the container process to the host
-  UID/GID via `--user` so output files are not root-owned (on rootless runtimes the image's `oneware` user
-  applies instead). `tini` runs as PID 1 to reap
-  children and forward signals.
+- **Containerized (opt-in per tool):** each tool's *Execution Strategy* setting defaults to native; selecting
+  the Docker strategy routes that tool through a container, which pulls and runs the toolchain image, pinning
+  the container process to the host UID/GID via `--user` so output files are not root-owned (on rootless
+  runtimes the image's `oneware` user applies instead). `tini` runs as PID 1 to reap children and forward
+  signals.
 - **Native fallback:** if the daemon is unreachable and `Allow Native Fallback` is enabled, the tool is
   located on the host `PATH` and run natively so work is not blocked.
 - **Telemetry:** execution records are written as JSON Lines with a configurable level (`Off`,
@@ -122,7 +123,9 @@ dotnet tool install -g docfx     # once
 docfx docs/docfx.json --serve    # build and serve at http://localhost:8080
 ```
 
-`docfx build docs/docfx.json` produces the static HTML under `docs/_site/` without serving.
+`docfx docs/docfx.json` (omitting `--serve`) regenerates the API metadata and produces the static HTML under
+`docs/_site/`. The bare `docfx build` subcommand skips metadata generation, so run the full command above for
+a complete site with the API reference.
 
 ## Citation
 
