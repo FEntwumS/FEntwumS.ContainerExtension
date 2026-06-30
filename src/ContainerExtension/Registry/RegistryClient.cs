@@ -697,17 +697,7 @@ public static partial class RegistryClient
 
         if (tagsRes?.Tags != null)
         {
-            var rawTags = tagsRes.Tags;
-            var list = new List<string>(Math.Min(20, rawTags.Count));
-            for (int i = rawTags.Count - 1; i >= 0 && list.Count < 20; i--)
-            {
-                var t = rawTags[i];
-                if (!string.IsNullOrEmpty(t))
-                {
-                    list.Add(t);
-                }
-            }
-            return list;
+            return ProcessRawTags(tagsRes.Tags);
         }
 
         return [];
