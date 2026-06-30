@@ -179,9 +179,9 @@ Telemetry is local-only. It is written to `~/.oneware/` and is never transmitted
 machine; the extension contains no network sink for these records. The user controls
 retention through the `Telemetry Retention` setting: selecting `None` sets
 `TelemetryOptedOutChecker`, after which `LogExecution` and `TrackError` return before
-writing, and the read and export paths surface nothing and **purge** any prior on-disk
-history on first observation of the opt-out — opting out erases, not merely pauses,
-collection. `Export Telemetry` additionally requires an absolute destination. The numeric
+writing, and any prior on-disk history is **purged** immediately by a settings observer
+when `None` is selected (and defensively again on the next read or export) — opting out
+erases, not merely pauses, collection. `Export Telemetry` additionally requires an absolute destination. The numeric
 values bound the retained history, and `Clear Recents` truncates both logs on demand. The
 default level is privacy-conscious (`Errors Only`, retention `25`).
 
@@ -202,6 +202,6 @@ No personal data leaves the machine: collection is confined to the user's profil
 directory, the redaction pipeline removes credentials, home paths, usernames, and internal
 network addresses before persistence, and the records are never transmitted. The data
 subject is the local user, who retains full control over collection (opt-out via
-`Telemetry Retention = None`) and erasure (`Clear Recents`). Measured redaction coverage
-and false-negative rates are reported with the evaluation results (see
-`results/summary.csv`).
+`Telemetry Retention = None`, which stops collection and erases any existing history) and
+on-demand truncation (`Clear Recents`). The redaction pipeline's coverage across the secret
+classes enumerated above is exercised by the unit test suite (`TelemetryScrubbingTests`).
