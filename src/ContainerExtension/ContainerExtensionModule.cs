@@ -224,7 +224,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, ExtraFlagsSetting, new TextBoxSetting("Extra Container Labels", "", "Additional key=value labels attached to the container."));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DashboardRefreshSetting, new ComboBoxSetting("Dashboard Refresh", "Manual", ["Manual", "2s", "5s", "10s", "15s", "30s", "60s", "120s"]));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, TelemetryRetentionSetting, new ComboBoxSetting("Telemetry Retention", "25", ["None", "25", "50", "100", "250", "500", "1000", "Unlimited"]));
-        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DockerRuntimePathSetting, new FilePathSetting("Container Runtime Path", "", "Absolute path to the container runtime executable.", null, ValidateRuntimePath));
+        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DockerRuntimePathSetting, new FilePathSetting("Container Runtime Path", "", "Leave empty to auto-detect docker/podman on PATH, or set an absolute path to the runtime executable.", null, ValidateRuntimePath));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DaemonSocketSetting, new TextBoxSetting("Custom Daemon Socket", "", "Optional: Override DOCKER_HOST.") { Validator = DaemonSocketValidatorInstance });
         // Default to bypass: the named-pipe host-process check is Windows-only and yields false positives on
         // common non-default daemon setups (WSL2 relays, rootless/remote engines), where it would block

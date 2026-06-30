@@ -673,7 +673,7 @@ public static partial class RegistryClient
 
         using var tagsReq = new HttpRequestMessage(HttpMethod.Get, $"https://ghcr.io/v2/{scopeRepoEscaped}/tags/list");
         tagsReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        tagsReq.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.docker.distribution.manifest.v2+json"));
+        tagsReq.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
         using var tagsResponse = await SendWithRetryAsync(tagsReq, cancellationToken).ConfigureAwait(false);
         tagsResponse.EnsureSuccessStatusCode();
