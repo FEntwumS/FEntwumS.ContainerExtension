@@ -2300,10 +2300,14 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             ActiveContainers.TryRemove(containerId, out _);
 
             // Defense in depth: if auto-remove was requested but the container never reached a
-            // clean auto-removing exit (start/attach/wait threw before completion), force-remove
-            // it so it does not linger. Harmless 404 if Docker already reaped it. Containers the
-            // user explicitly opted to keep (auto-remove off) are left untouched.
-            if (autoRemove && !ranToCompletion)
+            // clean auto-removing exit, force-remove it so it does not linger. This covers two
+            // paths: (1) start/attach/wait threw before completion; and (2) cancellation/timeout,
+            // where the wait and inspect OperationCanceledExceptions are caught rather than
+            // rethrown, so ranToCompletion is still set — without the wasCancelled clause the
+            // container would be untracked here yet never force-removed, leaking it if the
+            // fire-and-forget cancel-time stop also failed. Harmless 404 if Docker already reaped
+            // it. Containers the user explicitly opted to keep (auto-remove off) are left untouched.
+            if (autoRemove && (!ranToCompletion || Volatile.Read(ref wasCancelledFlag) != 0))
             {
                 try
                 {
