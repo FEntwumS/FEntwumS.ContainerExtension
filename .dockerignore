@@ -4,6 +4,10 @@
 **/publish/
 **/publish_debug/
 
+# Exclude non-synced build/scratch state
+.tmp.nosync/
+*.nosync
+
 # Exclude IDE and workspace settings
 .idea/
 .vs/
