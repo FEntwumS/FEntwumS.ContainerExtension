@@ -21,8 +21,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-RELEASE_TAG="2026-06-30"
-RELEASE_DATE="20260630"
+# Single source of truth: read the pinned tag/date from the Dockerfile ARG defaults so this script,
+# the Dockerfile, and CI cannot drift.
+DOCKERFILE="${SCRIPT_DIR}/oss-cad-suite/Dockerfile"
+RELEASE_TAG="$(grep -m1 '^ARG RELEASE_TAG=' "${DOCKERFILE}" | cut -d= -f2)"
+RELEASE_DATE="$(grep -m1 '^ARG RELEASE_DATE=' "${DOCKERFILE}" | cut -d= -f2)"
 IMAGE_NAME="fentwums/oss-cad-suite"
 
 # Force linux-x64 (linux/amd64) for GHDL compatibility.
