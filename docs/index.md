@@ -18,7 +18,7 @@ Developed as part of the Master's Thesis: "Design and Implementation of a Modula
 
 | Feature | Description |
 | ------- | ----------- |
-| Transparent Docker Execution | FPGA tools run inside containers without UI changes |
+| Transparent Docker Execution | FPGA tools run inside containers, enabled per tool via the Execution Strategy setting, with no change to the tool-invocation UI |
 | Multi-Runtime Support | Auto-detects Docker, Podman, Colima, and OrbStack |
 | Execution Telemetry | JSON Lines log with stats, export, and retention |
 | Dockable Docker Dashboard | Live daemon status, containers, images, disk usage |
