@@ -197,6 +197,11 @@ public sealed class DockerImageManager : IDisposable
             var platformRaw = SafeGetSetting<string>(ContainerExtensionModule.PlatformSetting, "auto");
             var platform = string.IsNullOrWhiteSpace(platformRaw) ? "auto" : (platformRaw.Contains(' ') ? platformRaw.Trim() : platformRaw);
 
+            // The project's own oss-cad-suite image is build-only (never published to a registry), so
+            // pulling it always 404s. Exclude it from the bulk-update set rather than surfacing a
+            // guaranteed "1 failed" on the recommended Build-Local-Image then Update-All path.
+            var localBuildImageRepo = ContainerExtensionModule.OssCadSuiteImage.Split(':')[0] + ":";
+
             var targets = new List<string>();
             var processedImageIds = new HashSet<string>(images.Count, StringComparer.Ordinal);
             foreach (var img in images)
@@ -208,7 +213,8 @@ public sealed class DockerImageManager : IDisposable
 
                 foreach (var tag in img.RepoTags)
                 {
-                    if (tag != null && !tag.Contains("<none>") && !tag.Contains("..") && !tag.Contains("\\"))
+                    if (tag != null && !tag.Contains("<none>") && !tag.Contains("..") && !tag.Contains("\\")
+                        && !tag.StartsWith(localBuildImageRepo, StringComparison.OrdinalIgnoreCase))
                     {
                         targets.Add(tag);
                     }
