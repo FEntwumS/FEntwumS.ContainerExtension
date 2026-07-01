@@ -35,11 +35,17 @@ jobs:
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/global.json', '**/Directory.Packages.props', '**/Directory.Build.props', '**/*.csproj', '**/packages.lock.json') }}
           restore-keys: ${{ runner.os }}-nuget-
 
-      - name: Get Version
-        uses: kzrnm/get-net-sdk-project-versions-action@7d62715f5720ec339d39ab4a43b365391ad96db9 # v3.1.0
-        id: get-version
-        with:
-          proj-path: src/ContainerExtension/ContainerExtension.csproj
+      - name: Resolve release version
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          # Derive the version from the published release tag (falling back to the ref for a manual
+          # workflow_dispatch), never from the project <Version>, so the artifact name, attestation
+          # subject, and release tag always match the release actually being published.
+          version="${RELEASE_TAG:-$REF_NAME}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Build Release Bundle (locked restore)
         run: dotnet build src/ContainerExtension/ContainerExtension.csproj -c Release -o publish -warnaserror -p:RestoreLockedMode=true
@@ -57,17 +63,17 @@ jobs:
         uses: thedoctor0/zip-release@b57d897cb5d60cb78b51a507f63fa184cfe35554 # 0.7.6
         with:
           type: "zip"
-          filename: ../ContainerExtension_${{steps.get-version.outputs.version}}_all.zip
+          filename: ../ContainerExtension_${{steps.version.outputs.version}}_all.zip
           directory: ./publish
 
       - name: Generate SLSA Build Provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
         with:
-          subject-path: ContainerExtension_${{steps.get-version.outputs.version}}_all.zip
+          subject-path: ContainerExtension_${{steps.version.outputs.version}}_all.zip
 
       - name: Publish to GitHub Release
         uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
         with:
-          artifacts: "ContainerExtension_${{steps.get-version.outputs.version}}_all.zip,./publish/compatibility.txt,./publish/sbom.spdx.json"
-          tag: ${{steps.get-version.outputs.version}}
+          artifacts: "ContainerExtension_${{steps.version.outputs.version}}_all.zip,./publish/compatibility.txt,./publish/sbom.spdx.json"
+          tag: ${{steps.version.outputs.version}}
           allowUpdates: true
