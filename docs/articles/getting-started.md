@@ -30,7 +30,9 @@ cp -r src/ContainerExtension/bin/Release/net10.0/* \
 
 ### From OneWare Package Manager
 
-> Coming soon - the plugin will be available via OneWare Studio's built-in package manager.
+1. Open OneWare Studio and go to the **Extension Manager**.
+2. Search for **Container Extension** and click **Install**.
+3. Restart OneWare Studio to load the extension.
 
 ## First Run
 
