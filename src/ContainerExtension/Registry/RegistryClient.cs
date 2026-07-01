@@ -62,6 +62,11 @@ public static partial class RegistryClient
             KeepAlivePingDelay = TimeSpan.FromSeconds(60),
             KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
             AllowAutoRedirect = false,
+            // Enforce the SSRF address gate at connection time (see ValidatedConnectAsync): resolve the
+            // target, dial the vetted IP directly, and refuse internal ranges. This backstops the
+            // reference-level check in FetchTagsAsync against a WWW-Authenticate realm on an internal
+            // host or a DNS rebind between the pre-flight resolve and the socket connect.
+            ConnectCallback = ValidatedConnectAsync,
             AutomaticDecompression = System.Net.DecompressionMethods.Brotli | System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate,
             SslOptions = new System.Net.Security.SslClientAuthenticationOptions
             {
@@ -73,6 +78,35 @@ public static partial class RegistryClient
         client.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("br"));
         client.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("gzip"));
         return client;
+    }
+
+    // Resolve the target host and connect to a vetted address directly, refusing any loopback, private,
+    // CGNAT, or link-local destination. Because the socket is dialled at the exact IP that passed the
+    // gate, a DNS record that rebinds after resolution — or a server-supplied realm/redirect naming an
+    // internal host — cannot steer the connection at the local network. Explicit loopback registries
+    // (a developer's own localhost registry) stay reachable.
+    private static async ValueTask<Stream> ValidatedConnectAsync(SocketsHttpConnectionContext context, CancellationToken token)
+    {
+        var host = context.DnsEndPoint.Host;
+        var allowLoopback = IsLoopbackRegistry(host);
+        var addresses = await ResolveDnsAsync(host, token).ConfigureAwait(false);
+        var target = Array.Find(addresses, ip => allowLoopback || !IsDisallowedAddress(ip));
+        if (target is null)
+        {
+            throw new IOException($"Refusing to connect to '{host}': it resolves only to disallowed internal addresses.");
+        }
+
+        var socket = new System.Net.Sockets.Socket(target.AddressFamily, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp) { NoDelay = true };
+        try
+        {
+            await socket.ConnectAsync(new System.Net.IPEndPoint(target, context.DnsEndPoint.Port), token).ConfigureAwait(false);
+            return new System.Net.Sockets.NetworkStream(socket, ownsSocket: true);
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
     }
 
     private static async Task<System.Net.IPAddress[]> ResolveDnsAsync(string host, CancellationToken ct)
