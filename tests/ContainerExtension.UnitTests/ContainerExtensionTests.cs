@@ -2597,6 +2597,34 @@ public sealed class ContainerExtensionTests : IDisposable
         }
     }
 
+    // Wait for the asynchronous error channel to flush the entry to disk. TrackError only enqueues the
+    // write; a background reader drains it, so a fixed sleep is racy on a loaded runner. Poll the file
+    // (shared read, tolerating the writer's momentary lock) until the expected content lands.
+    private static void WaitForErrorLog(string path, string mustContain, int timeoutMs = 5000)
+    {
+        var deadline = Environment.TickCount64 + timeoutMs;
+        while (Environment.TickCount64 < deadline)
+        {
+            if (File.Exists(path))
+            {
+                try
+                {
+                    using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    using var reader = new StreamReader(stream);
+                    if (reader.ReadToEnd().Contains(mustContain, StringComparison.Ordinal))
+                    {
+                        return;
+                    }
+                }
+                catch (IOException)
+                {
+                    // Writer holds the file momentarily; retry until the deadline.
+                }
+            }
+            System.Threading.Thread.Sleep(20);
+        }
+    }
+
     [Fact]
     public void Telemetry_RespectsLogLevelErrorsOnly()
     {
@@ -2607,14 +2635,13 @@ public sealed class ContainerExtensionTests : IDisposable
         ContainerTelemetry.LogExecution("test-image", "test-tool-fail", 1.5, 1, errorMessage: "Failed");
         ContainerTelemetry.TrackError("test-component", "test-action", new InvalidOperationException("test exception"));
 
-        System.Threading.Thread.Sleep(200);
-
         var entries = ContainerTelemetry.GetRecentEntries(10);
         Assert.NotEmpty(entries);
         Assert.DoesNotContain(entries, e => e.Tool != null && e.Tool.Equals("test-tool-success", StringComparison.Ordinal));
         Assert.Contains(entries, e => e.Tool != null && e.Tool.Equals("test-tool-fail", StringComparison.Ordinal));
 
         var errorLogFile = Path.Combine(_testTelemetryDir, "container_errors.jsonl");
+        WaitForErrorLog(errorLogFile, "test exception");
         Assert.True(File.Exists(errorLogFile));
         var errorsContent = File.ReadAllText(errorLogFile);
         Assert.Contains("test exception", errorsContent);
@@ -2628,9 +2655,8 @@ public sealed class ContainerExtensionTests : IDisposable
 
         ContainerTelemetry.TrackError("test-component", "test-action", new InvalidOperationException("test stack trace exception"));
 
-        System.Threading.Thread.Sleep(200);
-
         var errorLogFile = Path.Combine(_testTelemetryDir, "container_errors.jsonl");
+        WaitForErrorLog(errorLogFile, "test stack trace exception");
         Assert.True(File.Exists(errorLogFile));
         var errorsContent = File.ReadAllText(errorLogFile);
         Assert.Contains("test stack trace exception", errorsContent);
