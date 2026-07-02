@@ -4,6 +4,12 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.10] - 2026-07-02
+
+### Fixed
+
+- Containerized execution over the Windows named pipe (`npipe://`, the Docker Desktop default endpoint) failed with `NotSupportedException: "Cannot shutdown write on this transport"` before the container could run. Docker.DotNet's `AttachContainerAsync` requires a write-closable transport to half-close the hijacked stream, which the named-pipe stream does not provide, so every tool invocation threw. When the daemon endpoint is a named pipe the strategy now streams the container's stdout/stderr through the non-hijacked logs-follow endpoint (`GetContainerLogsAsync` with `Follow`), which carries the same multiplexed framing without the write-close requirement; auto-remove is disabled on that path so a fast-exiting container is not reaped before its output drains, and the container is force-removed explicitly afterwards. Socket transports (Unix domain socket, TCP) are unchanged. Verified on Windows 11 with Docker Desktop over the named pipe across the full FPGA toolchain workload set.
+
 ## [1.0.9] - 2026-07-01
 
 ### Fixed
