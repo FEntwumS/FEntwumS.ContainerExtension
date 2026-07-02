@@ -4,6 +4,27 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.11] - 2026-07-02
+
+### Security
+
+- The workspace-containment scan that pre-creates a tool's output directories on the host now canonicalizes each candidate through the same symlink-resolving routine used for bind mounts before the boundary test, and gates `Directory.CreateDirectory` on the canonical path. Previously an intermediate symlink in an untrusted project (for example a checked-in `out` link pointing outside the workspace) was left unresolved by the pre-creation scan, so directory creation could follow it and create a directory outside the mounted workspace. The impact was bounded to empty-directory creation, but it broke the workspace-containment invariant.
+
+### Fixed
+
+- The marketplace manifest advertised five versions (1.0.4–1.0.8) that were never published as releases, so selecting one in the OneWare Package Manager produced a hard, silent download failure. Only versions with a published artifact are now advertised.
+- The dashboard search filter mutated the cached telemetry snapshot in place, so after a filter had been applied the history view, trend sparklines, and resource aggregates continued to show only the filtered subset until the next reload. The cached snapshot is now returned as a copy.
+- Native-fallback execution accumulated tool output without the 32 MB cap enforced on the container path, so a host tool emitting an unbounded stream could exhaust IDE memory; both native-path output handlers now honour the same cap.
+- On the Windows named-pipe path the daemon-side auto-remove override added in 1.0.10 was also recorded as the shutdown reaper's removal decision, so a named-pipe container still tracked at teardown was stopped but not removed. The reaper now uses the user's configured auto-remove intent, restoring parity with the socket path.
+
+### Changed
+
+- The offline image-cache helper (`docker/pull_all_images.sh`) derives the Ubuntu base digest from the Dockerfile `FROM` line rather than a hard-coded copy, so a base-image bump can no longer leave the pre-pull cache pointing at a stale digest.
+
+### Docs
+
+- `CITATION.cff` records the current release version and date.
+
 ## [1.0.10] - 2026-07-02
 
 ### Fixed
