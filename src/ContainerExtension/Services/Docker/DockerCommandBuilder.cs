@@ -184,13 +184,6 @@ internal static class DockerCommandBuilder
         var workingDirCanonical = GetCanonicalPath(workingDirFull);
         var rawPrefix = settingsService.SafeGetSetting(ContainerExtensionModule.ContainerNamePrefixSetting, "containerextension-");
 
-        // Compute strict bounds suffix to prevent prefix bleed (e.g. matching /project2 against /project)
-        var workingDirBound = workingDirFull;
-        if (!workingDirBound.EndsWith(Path.DirectorySeparatorChar) && !workingDirBound.EndsWith(Path.AltDirectorySeparatorChar))
-        {
-            workingDirBound += Path.DirectorySeparatorChar;
-        }
-
         if (command.Arguments != null && command.Arguments.Count > 0)
         {
             foreach (var arg in command.Arguments)
@@ -272,12 +265,21 @@ internal static class DockerCommandBuilder
 
                                 if (absoluteDir.StartsWith(workingDirFull, osAwareComparison))
                                 {
-                                    var physicalDir = ResolvePhysicalPath(absoluteDir);
-                                    var absBound = physicalDir;
-                                    if (!absBound.EndsWith(Path.DirectorySeparatorChar) && !absBound.EndsWith(Path.AltDirectorySeparatorChar))
-                                        absBound += Path.DirectorySeparatorChar;
+                                    // Containment must be checked on the fully canonical candidate, not the
+                                    // lexical path. GetCanonicalPath resolves intermediate symlinks realpath-
+                                    // style (appending any not-yet-created leaf verbatim), so a checked-in
+                                    // symlinked ancestor (e.g. out -> /home/victim/.ssh) is exposed as an
+                                    // out-of-bound target here; ResolvePhysicalPath would leave it unresolved
+                                    // and let Directory.CreateDirectory follow it at the OS level.
+                                    var canonicalDir = GetCanonicalPath(absoluteDir);
+                                    var canonicalBound = workingDirCanonical;
+                                    if (!canonicalBound.EndsWith(Path.DirectorySeparatorChar) && !canonicalBound.EndsWith(Path.AltDirectorySeparatorChar))
+                                        canonicalBound += Path.DirectorySeparatorChar;
+                                    var canonicalDirBound = canonicalDir;
+                                    if (!canonicalDirBound.EndsWith(Path.DirectorySeparatorChar) && !canonicalDirBound.EndsWith(Path.AltDirectorySeparatorChar))
+                                        canonicalDirBound += Path.DirectorySeparatorChar;
 
-                                    if (absBound.StartsWith(workingDirBound, osAwareComparison) && !Directory.Exists(absoluteDir))
+                                    if (canonicalDirBound.StartsWith(canonicalBound, osAwareComparison) && !Directory.Exists(absoluteDir))
                                     {
                                         try
                                         {
