@@ -42,46 +42,6 @@
       ]
     },
     {
-      "version": "1.0.8",
-      "targets": [
-        {
-          "target": "all"
-        }
-      ]
-    },
-    {
-      "version": "1.0.7",
-      "targets": [
-        {
-          "target": "all"
-        }
-      ]
-    },
-    {
-      "version": "1.0.6",
-      "targets": [
-        {
-          "target": "all"
-        }
-      ]
-    },
-    {
-      "version": "1.0.5",
-      "targets": [
-        {
-          "target": "all"
-        }
-      ]
-    },
-    {
-      "version": "1.0.4",
-      "targets": [
-        {
-          "target": "all"
-        }
-      ]
-    },
-    {
       "version": "1.0.3",
       "targets": [
         {
