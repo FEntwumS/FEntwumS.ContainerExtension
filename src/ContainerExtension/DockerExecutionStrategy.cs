@@ -3231,7 +3231,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         {
             if (e.Data != null)
             {
-                lock (outputBuilder) { outputBuilder.AppendLine(e.Data); }
+                lock (outputBuilder) { AppendCapped(outputBuilder, e.Data); AppendCapped(outputBuilder, "\n"); }
                 SafeInvoke(() => command.OutputHandler?.Invoke(e.Data));
             }
         };
@@ -3240,7 +3240,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         {
             if (e.Data != null)
             {
-                lock (outputBuilder) { outputBuilder.AppendLine(e.Data); }
+                lock (outputBuilder) { AppendCapped(outputBuilder, e.Data); AppendCapped(outputBuilder, "\n"); }
                 SafeInvoke(() => command.ErrorHandler?.Invoke(e.Data));
             }
         };
