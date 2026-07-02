@@ -2059,6 +2059,21 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         // Volatile to establish the cross-thread happens-before the EOF-drain decision relies on.
         int wasCancelledFlag = 0;
 
+        // Docker.DotNet's AttachContainerAsync only accepts a write-closable (socket) transport: it
+        // rejects any hijacked stream whose CanCloseWrite is false with
+        // NotSupportedException("Cannot shutdown write on this transport"). The Windows named-pipe
+        // stream reports CanCloseWrite == false, so attach is unusable over npipe — the Docker Desktop
+        // default endpoint. Since the strategy only ever reads stdout/stderr and never writes stdin, on
+        // npipe it streams output through the non-hijacked logs-follow endpoint instead: same
+        // multiplexed framing, no write-close requirement. That stream is opened after the container
+        // starts, so auto-remove is disabled on this path to stop a fast-exiting container from being
+        // reaped before its logs drain; it is force-removed explicitly in the finally.
+        var useLogsStreaming = _daemonUri?.Scheme.Equals("npipe", StringComparison.OrdinalIgnoreCase) == true;
+        if (useLogsStreaming && createParams.HostConfig is not null)
+        {
+            createParams.HostConfig.AutoRemove = false;
+        }
+
         var container = await Client.Containers.CreateContainerAsync(createParams, ct).ConfigureAwait(false);
         var containerId = container.ID;
         var autoRemove = createParams.HostConfig?.AutoRemove ?? true;
@@ -2106,13 +2121,27 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var readToken = readCts.Token;
 
-            stream = await Client.Containers.AttachContainerAsync(
-              containerId, false,
-              new ContainerAttachParameters { Stream = true, Stdout = true, Stderr = true }, ct).ConfigureAwait(false);
-
             var containerStopwatch = Stopwatch.StartNew();
-            await Client.Containers.StartContainerAsync(containerId, new ContainerStartParameters(), ct).ConfigureAwait(false);
-            SdkLog(command, $"[Docker SDK] Container {containerId.ShortId()} started.", RankInfo);
+            if (useLogsStreaming)
+            {
+                // npipe: no hijacked attach. Start first, then follow the container's log stream. The
+                // logging driver captures stdout/stderr from process start, so opening the stream after
+                // the start call loses no output; the framing is identical to a non-TTY attach.
+                await Client.Containers.StartContainerAsync(containerId, new ContainerStartParameters(), ct).ConfigureAwait(false);
+                SdkLog(command, $"[Docker SDK] Container {containerId.ShortId()} started.", RankInfo);
+                stream = await Client.Containers.GetContainerLogsAsync(
+                  containerId, false,
+                  new ContainerLogsParameters { ShowStdout = true, ShowStderr = true, Follow = true, Timestamps = false }, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                // Socket transports (unix/tcp): attach before start so no early output can be missed.
+                stream = await Client.Containers.AttachContainerAsync(
+                  containerId, false,
+                  new ContainerAttachParameters { Stream = true, Stdout = true, Stderr = true }, ct).ConfigureAwait(false);
+                await Client.Containers.StartContainerAsync(containerId, new ContainerStartParameters(), ct).ConfigureAwait(false);
+                SdkLog(command, $"[Docker SDK] Container {containerId.ShortId()} started.", RankInfo);
+            }
 
             readTask = Task.Run(async () =>
             {
@@ -2308,7 +2337,9 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             // container would be untracked here yet never force-removed, leaking it if the
             // fire-and-forget cancel-time stop also failed. Harmless 404 if Docker already reaped
             // it. Containers the user explicitly opted to keep (auto-remove off) are left untouched.
-            if (autoRemove && (!ranToCompletion || Volatile.Read(ref wasCancelledFlag) != 0))
+            // On the npipe logs-streaming path auto-remove was forced off (above) so the log stream
+            // could drain, so that container is always force-removed here regardless of outcome.
+            if (useLogsStreaming || (autoRemove && (!ranToCompletion || Volatile.Read(ref wasCancelledFlag) != 0)))
             {
                 try
                 {
