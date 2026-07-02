@@ -2069,6 +2069,11 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         // starts, so auto-remove is disabled on this path to stop a fast-exiting container from being
         // reaped before its logs drain; it is force-removed explicitly in the finally.
         var useLogsStreaming = _daemonUri?.Scheme.Equals("npipe", StringComparison.OrdinalIgnoreCase) == true;
+        // The reaper's force-remove gate must reflect the user's actual Auto-Remove intent, not the
+        // daemon-side npipe workaround. Capture it before the override below clobbers HostConfig.AutoRemove
+        // to false: otherwise an npipe container still tracked at teardown would be stopped but never
+        // removed, diverging from the socket path which inherits the user's setting verbatim.
+        var autoRemove = createParams.HostConfig?.AutoRemove ?? true;
         if (useLogsStreaming && createParams.HostConfig is not null)
         {
             createParams.HostConfig.AutoRemove = false;
@@ -2076,7 +2081,6 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
 
         var container = await Client.Containers.CreateContainerAsync(createParams, ct).ConfigureAwait(false);
         var containerId = container.ID;
-        var autoRemove = createParams.HostConfig?.AutoRemove ?? true;
         ActiveContainers.TryAdd(containerId, autoRemove);
 
         var cancelRegistration = ct.CanBeCanceled
