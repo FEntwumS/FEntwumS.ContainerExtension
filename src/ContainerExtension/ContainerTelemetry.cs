@@ -1981,7 +1981,11 @@ public static partial class ContainerTelemetry
                     var newCache = new CachedStats(results, total, successRate, avgDuration, count, finalWriteTime, finalLength, _telemetryPath);
                     Volatile.Write(ref _cachedStats, newCache);
 
-                    return (results, total, successRate, avgDuration);
+                    // Hand the caller its own list. The cache holds `results`; returning it directly would let
+                    // a caller's in-place mutation (e.g. the dashboard search filter's RemoveAll) shrink the
+                    // cached snapshot, so subsequent cache hits would serve the filtered subset. Mirror the
+                    // defensive copy the cache-hit branch above already returns.
+                    return (new List<TelemetryEntry>(results), total, successRate, avgDuration);
                 }
                 finally
                 {
