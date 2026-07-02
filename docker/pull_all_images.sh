@@ -9,6 +9,12 @@ TOTAL=0
 FAILED=0
 SUCCEEDED=0
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Single source of truth: derive the digest-pinned base from the Dockerfile FROM line so the offline
+# cache and the build cannot drift onto distinct digests (which would cache separately and miss).
+DOCKERFILE="${SCRIPT_DIR}/oss-cad-suite/Dockerfile"
+UBUNTU_BASE="$(grep -m1 '^FROM ubuntu@sha256:' "${DOCKERFILE}" | awk '{print $2}')"
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry)
@@ -124,7 +130,7 @@ pull "hdlc/verible"              "Verible (SystemVerilog linter/formatter)"
 
 echo -e "\n--------------------------------------------------------------"
 echo " BASE - Build prerequisites"
-pull "ubuntu@sha256:f3d28607ddd78734bb7f71f117f3c6706c666b8b76cbff7c9ff6e5718d46ff64"              "Ubuntu 26.04 LTS (Dockerfile base target)"
+pull "${UBUNTU_BASE}"              "Ubuntu 26.04 LTS (Dockerfile base target)"
 
 echo -e "\n==============================================================="
 printf "  Total: %-3d  |  OK: %-3d  |  Failed: %-3d                   \n" "$TOTAL" "$SUCCEEDED" "$FAILED"
