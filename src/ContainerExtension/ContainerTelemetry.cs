@@ -1125,9 +1125,12 @@ public static partial class ContainerTelemetry
                 Timestamp = DateTime.UtcNow,
                 Component = component ?? string.Empty,
                 Action = ScrubSensitiveInfo(action) ?? string.Empty,
-                ExceptionMessage = ScrubSensitiveInfo(ex?.Message),
-                StackTrace = IsVerbose ? ScrubSensitiveInfo(ex?.StackTrace) : null,
-                Context = ScrubSensitiveInfo(context)
+                // Free-text that can carry secrets: run the KEY=value secret scrub before the path/host
+                // scrub, matching LogExecution — TrackError previously applied only the latter, so
+                // "password=..."-style values in an exception message reached the error log in the clear.
+                ExceptionMessage = ScrubSensitiveInfo(ScrubSecrets(ex?.Message)),
+                StackTrace = IsVerbose ? ScrubSensitiveInfo(ScrubSecrets(ex?.StackTrace)) : null,
+                Context = ScrubSensitiveInfo(ScrubSecrets(context))
             };
 
             ErrorChannel.Writer.TryWrite(entry);

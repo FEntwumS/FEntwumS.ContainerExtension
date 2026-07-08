@@ -2534,6 +2534,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         string? imageDigest = null;
         string? reconstructedDockerRun = null;
         long exitCode = -1;
+        bool nativeFallbackUsed = false;
         bool wasCancelled = false;
         ResourceProfile? resourceProfile = null;
 
@@ -2657,6 +2658,10 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                     var resolvedPath = FindExecutableInPath(executable);
                     if (resolvedPath != null)
                     {
+                        // ExecuteNativelyAsync logs its own host-native telemetry entry; flag the fallback so
+                        // the finally does not also log a phantom container entry (exit -1) for a run that
+                        // never happened, nor wipe the real one under retention=None.
+                        nativeFallbackUsed = true;
                         return await ExecuteNativelyAsync(command, resolvedPath, stopwatch, ct).ConfigureAwait(false);
                     }
                     else
@@ -2789,7 +2794,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             timeoutCts?.Dispose();
             stopwatch.Stop();
             var retentionStr = _settingsService.SafeGetSetting<string>(ContainerExtensionModule.TelemetryRetentionSetting, "25");
-            if (string.Equals(retentionStr, "None", StringComparison.Ordinal))
+            if (!nativeFallbackUsed && string.Equals(retentionStr, "None", StringComparison.Ordinal))
             {
                 _ = Task.Run(() =>
                 {
@@ -2803,7 +2808,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                     }
                 }, CancellationToken.None);
             }
-            else
+            else if (!nativeFallbackUsed)
             {
                 var maxEntries = string.Equals(retentionStr, "Unlimited", StringComparison.Ordinal) ? 0 : int.TryParse(retentionStr, out var n) ? n : 100;
                 if (ContainerTelemetry.IsTestEnvironment)
@@ -2875,7 +2880,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 }
             }
 
-            if (stopwatch.Elapsed.TotalSeconds > 30)
+            if (!nativeFallbackUsed && stopwatch.Elapsed.TotalSeconds > 30)
             {
                 var status = exitCode == 0 ? "succeeded" : (wasCancelled ? "cancelled" : "failed");
                 Console.WriteLine(
