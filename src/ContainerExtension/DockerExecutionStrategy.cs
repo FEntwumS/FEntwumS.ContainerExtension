@@ -1723,24 +1723,41 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             return;
         }
 
+        // Stop/remove all tracked containers concurrently under a single shared time budget, rather than
+        // blocking the caller (Dispose can run on the UI thread) for up to 2 s PER container in sequence.
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        var tasks = new List<Task>();
         foreach (var key in keys)
         {
             if (ActiveContainers.TryRemove(key, out var shouldAutoRemove))
             {
-                try
-                {
-                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                    client.Containers.StopContainerAsync(key, new ContainerStopParameters { WaitBeforeKillSeconds = 1 }, cts.Token).GetAwaiter().GetResult();
-                    if (shouldAutoRemove)
-                    {
-                        client.Containers.RemoveContainerAsync(key, new ContainerRemoveParameters { Force = true }, cts.Token).GetAwaiter().GetResult();
-                    }
-                }
-                catch (Exception)
-                {
-                    // Best effort on exit
-                }
+                tasks.Add(StopAndRemoveContainerAsync(client, key, shouldAutoRemove, cts.Token));
             }
+        }
+
+        try
+        {
+            Task.WhenAll(tasks).GetAwaiter().GetResult();
+        }
+        catch (Exception)
+        {
+            // Best effort on exit
+        }
+    }
+
+    private static async Task StopAndRemoveContainerAsync(DockerClient client, string key, bool shouldAutoRemove, CancellationToken ct)
+    {
+        try
+        {
+            await client.Containers.StopContainerAsync(key, new ContainerStopParameters { WaitBeforeKillSeconds = 1 }, ct).ConfigureAwait(false);
+            if (shouldAutoRemove)
+            {
+                await client.Containers.RemoveContainerAsync(key, new ContainerRemoveParameters { Force = true }, ct).ConfigureAwait(false);
+            }
+        }
+        catch (Exception)
+        {
+            // Best effort per container
         }
     }
 

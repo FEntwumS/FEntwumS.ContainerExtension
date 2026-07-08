@@ -331,6 +331,7 @@ public partial class DockerDiagnosticsView
                                     });
 
                                     saveBtn.Content = "Saved";
+                                    saveBtn.IsEnabled = true; // re-enable on success too, not only on cancel/error
                                     return;
                                 }
                             }
