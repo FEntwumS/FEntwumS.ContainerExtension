@@ -675,7 +675,7 @@ public static partial class RegistryClient
             throw new RegistryConnectionException("Invalid registry response: expected JSON media type.");
         }
 
-        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var stream = await ReadCappedAsync(response, cancellationToken).ConfigureAwait(false);
         HubResponse? res;
         try
         {
@@ -726,7 +726,7 @@ public static partial class RegistryClient
             return [];
         }
 
-        using var tokenStream = await tokenResponse.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var tokenStream = await ReadCappedAsync(tokenResponse, cancellationToken).ConfigureAwait(false);
         GhcrTokenResponse? tokenRes;
         try
         {
@@ -779,7 +779,7 @@ public static partial class RegistryClient
             return [];
         }
 
-        using var tagsStream = await tagsResponse.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var tagsStream = await ReadCappedAsync(tagsResponse, cancellationToken).ConfigureAwait(false);
         GhcrTagsResponse? tagsRes;
         try
         {
@@ -931,7 +931,7 @@ public static partial class RegistryClient
                         using var tokenResponse = await SendWithRetryAsync(tokenReq, cancellationToken).ConfigureAwait(false);
                         if (tokenResponse.IsSuccessStatusCode)
                         {
-                            using var tokenStream = await tokenResponse.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                            using var tokenStream = await ReadCappedAsync(tokenResponse, cancellationToken).ConfigureAwait(false);
                             var tokenRes = await JsonSerializer.DeserializeAsync(tokenStream, RegistryJsonContext.Default.GhcrTokenResponse, cancellationToken).ConfigureAwait(false);
                             var tokenVal = tokenRes?.Token ?? tokenRes?.AccessToken;
                             if (!string.IsNullOrEmpty(tokenVal))
@@ -942,7 +942,7 @@ public static partial class RegistryClient
                                 using var retryResponse = await SendWithRetryAsync(retryRequest, cancellationToken).ConfigureAwait(false);
                                 if (retryResponse.IsSuccessStatusCode)
                                 {
-                                    using var retryStream = await retryResponse.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                                    using var retryStream = await ReadCappedAsync(retryResponse, cancellationToken).ConfigureAwait(false);
                                     var retryTagsRes = await JsonSerializer.DeserializeAsync(retryStream, RegistryJsonContext.Default.GhcrTagsResponse, cancellationToken).ConfigureAwait(false);
                                     if (retryTagsRes?.Tags != null)
                                     {
@@ -957,7 +957,7 @@ public static partial class RegistryClient
         }
 
         response.EnsureSuccessStatusCode();
-        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var stream = await ReadCappedAsync(response, cancellationToken).ConfigureAwait(false);
         GhcrTagsResponse? tagsRes;
         try
         {
@@ -988,13 +988,43 @@ public static partial class RegistryClient
         return list;
     }
 
+    // A tags/token JSON is a few KB; cap the buffered body well above that so a hostile or misbehaving
+    // registry cannot force unbounded allocation during deserialization (the tag list is truncated to 20
+    // only AFTER parsing, so the parse itself must be bounded).
+    private const long MaxRegistryResponseBytes = 8 * 1024 * 1024;
+
+    private static async Task<Stream> ReadCappedAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        if (response.Content.Headers.ContentLength is > MaxRegistryResponseBytes)
+        {
+            throw new RegistryConnectionException("Registry response exceeds the maximum allowed size.");
+        }
+        using var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await source.ReadAsync(chunk, ct).ConfigureAwait(false)) > 0)
+        {
+            if (buffer.Length + read > MaxRegistryResponseBytes)
+            {
+                await buffer.DisposeAsync().ConfigureAwait(false);
+                throw new RegistryConnectionException("Registry response exceeds the maximum allowed size.");
+            }
+            await buffer.WriteAsync(chunk.AsMemory(0, read), ct).ConfigureAwait(false);
+        }
+        buffer.Position = 0;
+        return buffer;
+    }
+
     private static string ScrubSecrets(string input)
     {
         if (string.IsNullOrEmpty(input))
         {
             return input;
         }
-        if (input.Contains("token=", StringComparison.OrdinalIgnoreCase) || input.Contains("bearer", StringComparison.OrdinalIgnoreCase))
+        // Gate on the bare word, not "token=": SecretScrubRegex also matches a whitespace separator
+        // (token <value>), so requiring the '=' let whitespace-separated tokens bypass redaction.
+        if (input.Contains("token", StringComparison.OrdinalIgnoreCase) || input.Contains("bearer", StringComparison.OrdinalIgnoreCase))
         {
             input = SecretScrubRegex().Replace(input, m => $"{m.Groups["type"].Value}{m.Groups["sep"].Value}***");
         }

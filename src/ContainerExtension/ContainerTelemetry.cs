@@ -1983,7 +1983,10 @@ public static partial class ContainerTelemetry
                         }
                         catch (JsonException ex)
                         {
-                            TrackError("ContainerTelemetry", "Failed to deserialize stats line", ex, line);
+                            // Hot dashboard-stats path (~250 ms poll): a malformed tail line must not spawn a
+                            // persisted error on every poll (write amplification). Match the sibling
+                            // GetRecentEntries and only trace it.
+                            System.Diagnostics.Debug.WriteLine($"[ContainerTelemetry] Skipping malformed stats line: {ex.Message}");
                         }
                     }
 
