@@ -194,7 +194,7 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.Equal(expectedValid, result);
         if (!expectedValid)
         {
-            Assert.Contains("CPU cores limit must be between 0.1 and 32.0", warning, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("CPU cores limit must be between 0.1 and 8.0", warning, StringComparison.OrdinalIgnoreCase);
         }
     }
 
@@ -1059,7 +1059,10 @@ public sealed class ContainerExtensionTests : IDisposable
             WorkingDirectory = "/workspace/dir",
             CommandArguments = new List<ICommandArgument>()
         };
-        await Assert.ThrowsAsync<ArgumentException>(() => strategy.ExecuteAsync(command, TestContext.Current.CancellationToken));
+        // Contract: invalid input is rejected via the (success, output) tuple, not by throwing.
+        var (success, output) = await strategy.ExecuteAsync(command, TestContext.Current.CancellationToken);
+        Assert.False(success);
+        Assert.Contains("executable", output);
     }
 
     [Fact]
@@ -1078,7 +1081,9 @@ public sealed class ContainerExtensionTests : IDisposable
                 new TestCommandArgument("arg; rm -rf /")
             }
         };
-        await Assert.ThrowsAsync<ArgumentException>(() => strategy.ExecuteAsync(command, TestContext.Current.CancellationToken));
+        var (success, output) = await strategy.ExecuteAsync(command, TestContext.Current.CancellationToken);
+        Assert.False(success);
+        Assert.Contains("Nested shell expansion", output);
     }
 
     [Fact]

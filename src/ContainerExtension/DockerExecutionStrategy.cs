@@ -2524,14 +2524,16 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
 
             if (exeName.AsSpan().ContainsAny(DockerCommandBuilder.ShellSpecialChars))
             {
-                throw new ArgumentException("Command executable contains prohibited shell control characters.", nameof(command));
+                // Honor the (success, output) contract: reject via the tuple rather than throwing out of
+                // ExecuteAsync (this validation runs before the execution try block).
+                return (false, "Command executable contains prohibited shell control characters.");
             }
 
             foreach (var ch in exeName)
             {
                 if (char.IsControl(ch))
                 {
-                    throw new ArgumentException("Command executable contains invalid control characters.", nameof(command));
+                    return (false, "Command executable contains invalid control characters.");
                 }
             }
         }
@@ -2550,7 +2552,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
 
                     if (hasForbidden)
                     {
-                        throw new ArgumentException("Nested shell expansion or command separators detected in argument: " + arg, nameof(command));
+                        return (false, "Nested shell expansion or command separators detected in argument: " + arg);
                     }
                 }
             }

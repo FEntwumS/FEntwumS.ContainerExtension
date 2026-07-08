@@ -128,10 +128,11 @@ internal sealed class ResourceThresholdValidation : ISettingValidation
             return false;
         }
 
-        if (_resourceKind == ResourceKind.Cpu && (numericValue < 0.1 || numericValue > Math.Max(32.0, _total)))
+        if (_resourceKind == ResourceKind.Cpu && (numericValue < 0.1 || numericValue > _total))
         {
-            var maxLimit = Math.Max(32.0, _total);
-            warningMessage = string.Create(CultureInfo.InvariantCulture, $"CPU cores limit must be between 0.1 and {maxLimit.ToString("F1", CultureInfo.InvariantCulture)} (or 0 for unlimited).");
+            // The host core count is the authoritative ceiling (enforced below for both kinds); report it
+            // rather than an unreachable max(32, _total) that the over-capacity check would reject anyway.
+            warningMessage = string.Create(CultureInfo.InvariantCulture, $"CPU cores limit must be between 0.1 and {_total.ToString("F1", CultureInfo.InvariantCulture)} (or 0 for unlimited).");
             return false;
         }
 
