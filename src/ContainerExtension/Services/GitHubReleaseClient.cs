@@ -65,6 +65,11 @@ internal static class GitHubReleaseClient
     {
         OperationCanceledException when !ct.IsCancellationRequested =>
             new InvalidOperationException("Network connection timed out while contacting GitHub (10s limit exceeded).", ex),
+        // A status-carrying HttpRequestException came from EnsureSuccessStatusCode (a 5xx/4xx server
+        // response), not a transport failure — report it as a server error rather than blaming the
+        // user's network.
+        HttpRequestException { StatusCode: { } status } =>
+            new InvalidOperationException($"GitHub returned an unexpected status ({(int)status} {status}); the service may be unavailable.", ex),
         HttpRequestException =>
             new InvalidOperationException("Network connection failed while contacting GitHub: " + ex.Message, ex),
         _ => new InvalidOperationException("Failed to query GitHub: " + ex.Message, ex),

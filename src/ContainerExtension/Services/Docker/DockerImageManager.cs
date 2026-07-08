@@ -48,6 +48,15 @@ public sealed class DockerImageManager : IDisposable
     private static bool CheckFreeDiskSpace(long requiredBytes, out string? errorMessage)
     {
         errorMessage = null;
+        // Docker's image store determines whether a pull fits, not the host UserProfile volume. On macOS
+        // and Windows the daemon runs inside a VM, so host free space here is unrelated to the store and
+        // this check would spuriously abort (or falsely pass); skip it and let the daemon report a real
+        // out-of-space error. On native Linux the UserProfile and /var/lib/docker usually share a volume,
+        // so the check stays a useful rough pre-flight.
+        if (!OperatingSystem.IsLinux())
+        {
+            return true;
+        }
         try
         {
             var path = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);

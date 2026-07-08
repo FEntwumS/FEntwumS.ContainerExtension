@@ -22,6 +22,10 @@ public sealed class DockerContainerManager : IDisposable
     private readonly SemaphoreSlim _listSemaphore = new(1, 1);
     private volatile bool _disposed;
 
+    // Upper bound on a not-yet-terminated live-log line, so carriage-return-only output cannot grow the
+    // pending buffer without bound.
+    private const int MaxPendingLineChars = 64 * 1024;
+
     private IList<ContainerListResponse>? _cachedContainers;
     private long _containersCacheExpiration;
     private readonly System.Threading.Lock _containersCacheLock = new();
@@ -326,7 +330,11 @@ public sealed class DockerContainerManager : IDisposable
               ct).ConfigureAwait(false);
 
             var output = new System.Text.StringBuilder();
-            var decoder = System.Text.Encoding.UTF8.GetDecoder();
+            // Separate decoders per stream: stdout and stderr frames are interleaved on one connection, so a
+            // single shared decoder corrupts a multibyte character split across a frame boundary when the
+            // next frame belongs to the other stream (matches StreamContainerLogsInternalAsync).
+            var stdoutDecoder = System.Text.Encoding.UTF8.GetDecoder();
+            var stderrDecoder = System.Text.Encoding.UTF8.GetDecoder();
 
             while (!ct.IsCancellationRequested)
             {
@@ -335,18 +343,26 @@ public sealed class DockerContainerManager : IDisposable
                 {
                     break;
                 }
+                var decoder = result.Target == global::Docker.DotNet.MultiplexedStream.TargetStream.StandardError ? stderrDecoder : stdoutDecoder;
                 var charCount = decoder.GetChars(buffer, 0, result.Count, charBuf, 0, flush: false);
                 output.Append(charBuf, 0, charCount);
             }
-            var remaining = decoder.GetChars(Array.Empty<byte>(), 0, 0, charBuf, 0, flush: true);
-            if (remaining > 0)
+            var remainingStdout = stdoutDecoder.GetChars(Array.Empty<byte>(), 0, 0, charBuf, 0, flush: true);
+            if (remainingStdout > 0)
             {
-                output.Append(charBuf, 0, remaining);
+                output.Append(charBuf, 0, remainingStdout);
+            }
+            var remainingStderr = stderrDecoder.GetChars(Array.Empty<byte>(), 0, 0, charBuf, 0, flush: true);
+            if (remainingStderr > 0)
+            {
+                output.Append(charBuf, 0, remainingStderr);
             }
             return output.ToString();
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
+            // Let a caller cancellation propagate as OperationCanceledException rather than swallowing it
+            // into a returned error string and emitting spurious error telemetry.
             ContainerTelemetry.TrackError("DockerContainerManager", $"GetContainerLogsAsync failed for container {containerId}", ex);
             return $"Error fetching logs: {ex.Message}";
         }
@@ -449,6 +465,14 @@ public sealed class DockerContainerManager : IDisposable
                 if (start < charCount)
                 {
                     sb.Append(charBuf, start, charCount - start);
+                }
+
+                // Carriage-return-only output (progress bars) never reaches a '\n'; flush the pending
+                // buffer when it hits the cap so it cannot grow without bound.
+                if (sb.Length >= MaxPendingLineChars)
+                {
+                    yield return sb.ToString();
+                    sb.Clear();
                 }
             }
 
