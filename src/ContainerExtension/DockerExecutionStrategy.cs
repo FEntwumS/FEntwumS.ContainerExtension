@@ -2149,9 +2149,36 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             createParams.HostConfig.AutoRemove = false;
         }
 
-        var container = await Client.Containers.CreateContainerAsync(createParams, ct).ConfigureAwait(false);
-        var containerId = container.ID;
+        // Track the container by its unique name BEFORE creating it, closing the window in which the
+        // container exists on the daemon but is not yet tracked by ID: if the process is torn down in that
+        // window the exit reaper (CleanupContainers) can still stop/remove it, since Docker accepts a name
+        // or an ID. Once the ID is tracked, drop the name entry so teardown and the reaper key off the ID.
+        var containerName = createParams.Name;
+        var trackByName = !string.IsNullOrEmpty(containerName);
+        if (trackByName)
+        {
+            ActiveContainers.TryAdd(containerName!, autoRemove);
+        }
+
+        string containerId;
+        try
+        {
+            var container = await Client.Containers.CreateContainerAsync(createParams, ct).ConfigureAwait(false);
+            containerId = container.ID;
+        }
+        catch
+        {
+            if (trackByName)
+            {
+                ActiveContainers.TryRemove(containerName!, out _);
+            }
+            throw;
+        }
         ActiveContainers.TryAdd(containerId, autoRemove);
+        if (trackByName)
+        {
+            ActiveContainers.TryRemove(containerName!, out _);
+        }
 
         var cancelRegistration = ct.CanBeCanceled
           ? ct.Register(() =>

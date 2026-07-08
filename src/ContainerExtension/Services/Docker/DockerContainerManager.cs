@@ -20,6 +20,7 @@ public sealed class DockerContainerManager : IDisposable
 
     private readonly DockerClient _client;
     private readonly SemaphoreSlim _listSemaphore = new(1, 1);
+    private volatile bool _disposed;
 
     private IList<ContainerListResponse>? _cachedContainers;
     private long _containersCacheExpiration;
@@ -27,12 +28,28 @@ public sealed class DockerContainerManager : IDisposable
 
     public void Dispose()
     {
-        _listSemaphore.Dispose();
-        foreach (var entry in _containerSemaphores)
+        lock (_semaphoresLock)
         {
-            entry.Value.Semaphore.Dispose();
+            if (_disposed)
+            {
+                return;
+            }
+            _disposed = true;
+            try { _listSemaphore.Dispose(); }
+            catch (ObjectDisposedException) { /* already disposed by a concurrent teardown */ }
+            foreach (var entry in _containerSemaphores)
+            {
+                // Only dispose locks no operation still holds; an in-flight op disposes its own once its
+                // RefCount reaches zero. Disposing an in-use semaphore is exactly what faulted callers
+                // with ObjectDisposedException on their Release.
+                if (entry.Value.RefCount == 0)
+                {
+                    try { entry.Value.Semaphore.Dispose(); }
+                    catch (ObjectDisposedException) { /* already disposed by a concurrent teardown */ }
+                }
+            }
+            _containerSemaphores.Clear();
         }
-        _containerSemaphores.Clear();
     }
 
     private void InvalidateCache()
@@ -81,6 +98,7 @@ public sealed class DockerContainerManager : IDisposable
             }
         }
 
+        ObjectDisposedException.ThrowIf(_disposed, this);
         await _listSemaphore.WaitAsync(ct).ConfigureAwait(false);
         try
         {
@@ -120,7 +138,8 @@ public sealed class DockerContainerManager : IDisposable
         }
         finally
         {
-            _listSemaphore.Release();
+            try { _listSemaphore.Release(); }
+            catch (ObjectDisposedException) { /* already disposed by a concurrent teardown */ }
         }
     }
 
@@ -211,14 +230,20 @@ public sealed class DockerContainerManager : IDisposable
         {
             if (acquired)
             {
-                containerLock.Semaphore.Release();
+                try { containerLock.Semaphore.Release(); }
+                catch (ObjectDisposedException) { /* already disposed by a concurrent teardown */ }
             }
             lock (_semaphoresLock)
             {
                 containerLock.RefCount--;
-                if (containerLock.RefCount == 0 && _containerSemaphores.TryRemove(containerId, out var removed))
+                if (containerLock.RefCount == 0)
                 {
-                    removed.Semaphore.Dispose();
+                    // Dispose our own lock once no operation holds it, whether or not it is still in the
+                    // map (Dispose may have cleared it): the last op out owns the teardown, avoiding both a
+                    // leak and disposing a semaphore another op is still using.
+                    _containerSemaphores.TryRemove(containerId, out _);
+                    try { containerLock.Semaphore.Dispose(); }
+                    catch (ObjectDisposedException) { /* already disposed by a concurrent teardown */ }
                 }
             }
             InvalidateCache();
@@ -463,14 +488,20 @@ public sealed class DockerContainerManager : IDisposable
             }
             if (acquired)
             {
-                containerLock.Semaphore.Release();
+                try { containerLock.Semaphore.Release(); }
+                catch (ObjectDisposedException) { /* already disposed by a concurrent teardown */ }
             }
             lock (_semaphoresLock)
             {
                 containerLock.RefCount--;
-                if (containerLock.RefCount == 0 && _containerSemaphores.TryRemove(containerId, out var removed))
+                if (containerLock.RefCount == 0)
                 {
-                    removed.Semaphore.Dispose();
+                    // Dispose our own lock once no operation holds it, whether or not it is still in the
+                    // map (Dispose may have cleared it): the last op out owns the teardown, avoiding both a
+                    // leak and disposing a semaphore another op is still using.
+                    _containerSemaphores.TryRemove(containerId, out _);
+                    try { containerLock.Semaphore.Dispose(); }
+                    catch (ObjectDisposedException) { /* already disposed by a concurrent teardown */ }
                 }
             }
         }

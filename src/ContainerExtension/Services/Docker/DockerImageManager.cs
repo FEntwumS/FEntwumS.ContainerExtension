@@ -502,6 +502,13 @@ public sealed class DockerImageManager : IDisposable
                 }
             }
         }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // The 5 s HttpClient timeout surfaces as OperationCanceledException too; treat it as a
+            // graceful fallback (return null) rather than letting it escape. Only a genuine caller
+            // cancellation (ct signalled) propagates.
+            return null;
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
             // Fallback
