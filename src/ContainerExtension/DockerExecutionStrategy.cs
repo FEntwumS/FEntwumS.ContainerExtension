@@ -1344,6 +1344,24 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         return defaultName;
     }
 
+    // Resolve a Unix system utility to a trusted absolute path instead of a bare name (Sonar S4036).
+    // A bare "stat"/"id"/"open" is resolved against $PATH, so a writable directory earlier on PATH could
+    // shadow the real binary. Prefer /usr/bin then /bin (usr-merged on modern Linux; both fixed on macOS).
+    // On a non-FHS layout where neither exists (e.g. NixOS) return the canonical absolute path anyway, so
+    // the launch fails cleanly and degrades to the caller's fallback rather than resolving through PATH.
+    internal static string ResolveTrustedUnixBinary(string name)
+    {
+        string[] candidates = [$"/usr/bin/{name}", $"/bin/{name}"];
+        foreach (var candidate in candidates)
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+        return candidates[0];
+    }
+
     private static async Task<string?> GetUnixFileOwnerAsync(string path, CancellationToken ct = default)
     {
         if (OperatingSystem.IsWindows())
@@ -1361,7 +1379,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             {
                 p.StartInfo = new ProcessStartInfo
                 {
-                    FileName = "stat",
+                    FileName = ResolveTrustedUnixBinary("stat"),
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
@@ -1448,7 +1466,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             {
                 StartInfo = new ProcessStartInfo
                 {
-                    FileName = "id",
+                    FileName = ResolveTrustedUnixBinary("id"),
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,

@@ -84,7 +84,7 @@ public partial class DockerDiagnosticsView
         {
             if (OperatingSystem.IsMacOS())
             {
-                var psi = new ProcessStartInfo("open");
+                var psi = new ProcessStartInfo(DockerExecutionStrategy.ResolveTrustedUnixBinary("open"));
                 // A local file with no default app association (e.g. the .jsonl telemetry log) makes a bare
                 // `open <file>` exit non-zero and nothing opens. `-t` opens it in the default TEXT editor.
                 // URLs (which do not exist as files) keep the plain `open` so the browser handles them.
@@ -101,7 +101,7 @@ public partial class DockerDiagnosticsView
             }
             else
             {
-                var psi = new ProcessStartInfo("xdg-open");
+                var psi = new ProcessStartInfo(DockerExecutionStrategy.ResolveTrustedUnixBinary("xdg-open"));
                 psi.ArgumentList.Add(path);
                 using var _ = Process.Start(psi);
             }
@@ -160,7 +160,7 @@ public partial class DockerDiagnosticsView
             if (OperatingSystem.IsMacOS())
             {
                 if (GetMacOsAppBundle(runtime) is not { } bundle) return false;
-                using var proc = Process.Start("open", new[] { "-a", bundle });
+                using var proc = Process.Start(DockerExecutionStrategy.ResolveTrustedUnixBinary("open"), new[] { "-a", bundle });
                 if (proc is null) return false;
                 // `open` exits non-zero when the app bundle is not found; a still-running process
                 // after the grace period means it launched.

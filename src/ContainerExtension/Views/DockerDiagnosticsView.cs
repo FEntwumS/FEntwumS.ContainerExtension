@@ -1986,7 +1986,10 @@ public partial class DockerDiagnosticsView : UserControl
                     }
 
                     var dateStr = releaseTag.Replace("-", "", StringComparison.Ordinal);
-                    extraArgs += $"--build-arg RELEASE_TAG={releaseTag} --build-arg RELEASE_DATE={dateStr} --build-arg OSS_CAD_SUITE_SHA256={sha256} ";
+                    // The digest is now charset-validated at the source (GitHubReleaseClient) and the tag is
+                    // grammar-gated; quote the values as defense in depth so no build-arg can ever break out
+                    // of its token in the terminal command.
+                    extraArgs += $"--build-arg RELEASE_TAG=\"{releaseTag}\" --build-arg RELEASE_DATE=\"{dateStr}\" --build-arg OSS_CAD_SUITE_SHA256=\"{sha256}\" ";
                     ShowTemporaryStatus($"Building oss-cad-suite {releaseTag} (linux/amd64) in terminal...");
                 }
                 else

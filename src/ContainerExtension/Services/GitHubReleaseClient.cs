@@ -183,15 +183,7 @@ internal static class GitHubReleaseClient
             foreach (var asset in release.Assets)
             {
                 if (!string.Equals(asset.Name, assetName, StringComparison.Ordinal)) continue;
-                var digest = asset.Digest?.Trim();
-                if (string.IsNullOrEmpty(digest)) return null;
-                const string prefix = "sha256:";
-                if (digest.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    digest = digest[prefix.Length..];
-                }
-                // A SHA-256 hex digest is exactly 64 lowercase hex characters.
-                return digest.Length == 64 ? digest.ToLowerInvariant() : null;
+                return NormalizeSha256Digest(asset.Digest);
             }
             return null;
         }
@@ -199,5 +191,38 @@ internal static class GitHubReleaseClient
         {
             throw Translate(ex, ct);
         }
+    }
+
+    /// <summary>
+    /// Normalize a registry asset digest to a bare 64-character lowercase hex string, or null when it is
+    /// missing or not a well-formed SHA-256. The charset (not just the length) is enforced because the
+    /// value is interpolated as a --build-arg into the build command; a length-only check would admit
+    /// shell metacharacters if the digest field were ever attacker-influenced (e.g. a TLS-MitM).
+    /// </summary>
+    internal static string? NormalizeSha256Digest(string? digest)
+    {
+        if (string.IsNullOrEmpty(digest))
+        {
+            return null;
+        }
+        var value = digest.Trim();
+        const string prefix = "sha256:";
+        if (value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            value = value[prefix.Length..];
+        }
+        if (value.Length != 64)
+        {
+            return null;
+        }
+        var lower = value.ToLowerInvariant();
+        foreach (var c in lower)
+        {
+            if (!char.IsAsciiHexDigitLower(c))
+            {
+                return null;
+            }
+        }
+        return lower;
     }
 }
