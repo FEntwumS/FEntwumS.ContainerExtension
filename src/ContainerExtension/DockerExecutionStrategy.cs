@@ -70,9 +70,22 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
 
     private readonly ReaderWriterLockSlim _strategyLock = new();
 
-    private static bool IsProcessTrusted(uint pid)
+    private enum PipeServerTrust
     {
-        if (!OperatingSystem.IsWindows()) return true;
+        Untrusted,
+        CurrentUser,
+        Elevated,
+    }
+
+    // Classify the process on the far end of a named pipe. Elevated (SYSTEM / Administrators) is the
+    // Docker service itself. CurrentUser covers rootless / user-mode runtimes (podman, colima, ssh
+    // proxies) that legitimately run as the caller, but which a same-user process could also impersonate,
+    // so the caller gates CurrentUser on a known runtime name rather than trusting it outright. On a query
+    // failure fail open (Elevated) to match the prior behaviour and avoid breaking connections whose
+    // identity cannot be read; on an explicit denial fail closed (Untrusted).
+    private static PipeServerTrust GetPipeServerTrust(uint pid)
+    {
+        if (!OperatingSystem.IsWindows()) return PipeServerTrust.Elevated;
         const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
         const uint TOKEN_QUERY = 0x0008;
 
@@ -81,7 +94,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             using var hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
             if (hProcess == null || hProcess.IsInvalid)
             {
-                return false; // Fail closed
+                return PipeServerTrust.Untrusted; // Fail closed
             }
 
             if (OpenProcessToken(hProcess, TOKEN_QUERY, out var hToken))
@@ -101,22 +114,28 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                     {
                         isAdmin = false;
                     }
-                    bool isSystem = identity.IsSystem;
+                    if (isAdmin || identity.IsSystem)
+                    {
+                        return PipeServerTrust.Elevated;
+                    }
                     using var currentIdentity = System.Security.Principal.WindowsIdentity.GetCurrent();
-                    bool isCurrentUser = identity.User != null && currentIdentity.User != null && identity.User.Equals(currentIdentity.User);
-                    return isAdmin || isSystem || isCurrentUser;
+                    if (identity.User != null && currentIdentity.User != null && identity.User.Equals(currentIdentity.User))
+                    {
+                        return PipeServerTrust.CurrentUser;
+                    }
+                    return PipeServerTrust.Untrusted;
                 }
             }
         }
         catch (PlatformNotSupportedException)
         {
-            return true; // Fail-open / fallback if identity queries are not supported
+            return PipeServerTrust.Elevated; // Fail-open where identity queries are not supported
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            ContainerTelemetry.TrackError("DockerExecutionStrategy", $"IsProcessTrusted failed for pid {pid}", ex);
+            ContainerTelemetry.TrackError("DockerExecutionStrategy", $"GetPipeServerTrust failed for pid {pid}", ex);
         }
-        return false;
+        return PipeServerTrust.Untrusted;
     }
 
     private async Task<bool> VerifyWindowsNamedPipeAsync(string pipeName, int timeoutMs = 200, CancellationToken ct = default)
@@ -187,14 +206,21 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                                                             name.Contains("socat", StringComparison.OrdinalIgnoreCase) ||
                                                             name.Contains("ssh", StringComparison.OrdinalIgnoreCase);
 
-                                    if (IsProcessTrusted(pid))
+                                    var trust = GetPipeServerTrust(pid);
+                                    if (trust == PipeServerTrust.Elevated)
                                     {
-                                        if (!isNameWhitelisted)
-                                        {
-                                            ContainerTelemetry.TrackError("DockerExecutionStrategy",
-                                                $"Named pipe host process '{name}' (PID: {pid}) is trusted but not in default whitelist. Allowing connection.", null);
-                                        }
                                         return true;
+                                    }
+                                    if (trust == PipeServerTrust.CurrentUser)
+                                    {
+                                        if (isNameWhitelisted)
+                                        {
+                                            return true;
+                                        }
+                                        // The whitelist is a gate here, not merely advisory: a current-user
+                                        // process whose name matches no known runtime could be a pipe squatter.
+                                        ContainerTelemetry.TrackError("DockerExecutionStrategy",
+                                            $"Named pipe host process '{name}' (PID: {pid}) runs as the current user but matches no known runtime; refusing the connection.", null);
                                     }
                                     else
                                     {
@@ -204,7 +230,9 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                                 }
                                 catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5 || ex.Message.Contains("Access is denied", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    return IsProcessTrusted(pid);
+                                    // Name/start-time were unreadable (access denied); fall back to the token
+                                    // classification alone, staying lenient (elevated or current-user) as before.
+                                    return GetPipeServerTrust(pid) != PipeServerTrust.Untrusted;
                                 }
                                 catch (PlatformNotSupportedException)
                                 {
@@ -1185,6 +1213,18 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                         var d = System.Delegate.CreateDelegate(delegateType, this, method);
                         field.SetValue(innerHandler, d);
                     }
+                    else
+                    {
+                        // Do not fail open silently: if our own opener cannot be bound, the pipe would be
+                        // dialled without the impersonation cap. Surface it rather than downgrade unseen.
+                        ContainerTelemetry.TrackError("DockerExecutionStrategy",
+                            "SecureNamedPipeCredentials: SecureStreamOpenerAsync not found; named-pipe impersonation cap NOT installed.", null);
+                    }
+                }
+                else
+                {
+                    ContainerTelemetry.TrackError("DockerExecutionStrategy",
+                        "SecureNamedPipeCredentials: ManagedHandler._streamOpener field not found (Docker.DotNet drift); named-pipe impersonation cap NOT installed.", null);
                 }
             }
             return innerHandler;
@@ -1226,6 +1266,18 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             try
             {
                 await pipe.ConnectAsync(token).ConfigureAwait(false);
+                // Verify the server on the SAME handle that carries traffic, not just the throwaway probe
+                // in VerifyWindowsNamedPipeAsync — otherwise a squatter that lost the probe race could still
+                // win the data connection. Fail open on any ambiguity (unreadable handle/pid) to match the
+                // probe's posture; reject only a definitively untrusted server.
+                if (OperatingSystem.IsWindows()
+                    && pipe.SafePipeHandle is { IsInvalid: false } dataHandle
+                    && GetNamedPipeServerProcessId(dataHandle, out var serverPid)
+                    && GetPipeServerTrust(serverPid) == PipeServerTrust.Untrusted)
+                {
+                    // The catch below disposes the pipe on the way out.
+                    throw new IOException($"Refusing to use Docker named pipe: data-stream server process (PID {serverPid}) is not trusted.");
+                }
                 return pipe;
             }
             catch
