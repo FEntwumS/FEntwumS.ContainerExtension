@@ -44,8 +44,15 @@ public static partial class ContainerTelemetry
         }
         if (Interlocked.CompareExchange(ref _purgedForOptOut, 1, 0) == 0)
         {
-            try { ClearEntries(); }
+            bool cleared = false;
+            try { cleared = ClearEntries(); }
             catch (Exception ex) when (ex is not OutOfMemoryException) { /* best-effort purge */ }
+            if (!cleared)
+            {
+                // The purge did not confirm truncation (mutex contention or a locked file); release the
+                // latch so a later observation retries, rather than leaving prior PII un-erased forever.
+                Volatile.Write(ref _purgedForOptOut, 0);
+            }
         }
         return true;
     }
@@ -954,6 +961,13 @@ public static partial class ContainerTelemetry
                 localLock.EnterWriteLock();
                 try
                 {
+                    // Re-check opt-out under the write lock: the opt-out purge (ClearEntries) takes this
+                    // same lock, so this closes the window where a write that passed the entry-point check
+                    // could append into a file the purge just truncated.
+                    if (IsOptedOut())
+                    {
+                        return;
+                    }
                     EnsureFileLimit(_telemetryPath);
                     var streamOptions = CreateAppendStreamOptions();
                     bool written = false;
@@ -1147,6 +1161,36 @@ public static partial class ContainerTelemetry
         }
     }
 
+    // Truncate a telemetry file, retrying transient IO/sharing errors. Returns true when the file is
+    // absent or was truncated, false when every attempt failed — so the opt-out purge is not latched as
+    // complete and will be retried on a later observation.
+    private static bool TruncateFileWithRetry(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return true;
+        }
+        int delay = 15;
+        for (int attempt = 0; attempt < 5; attempt++)
+        {
+            try
+            {
+                using (new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)) { /* Truncate file */ }
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                if (attempt == 4)
+                {
+                    return false;
+                }
+                Thread.Sleep(delay);
+                delay *= 2;
+            }
+        }
+        return false;
+    }
+
     private static void WriteErrorEntryToDisk(TelemetryErrorEntry entry)
     {
         if (Volatile.Read(ref _isShutdown) == 1)
@@ -1161,7 +1205,6 @@ public static partial class ContainerTelemetry
                 return;
             }
             EnsureDirectoryAndFileSecure(_telemetryDir, _errorTelemetryPath);
-            EnsureFileLimit(_errorTelemetryPath);
 
             var mutex = ProcessMutex;
             bool acquired = false;
@@ -1188,6 +1231,10 @@ public static partial class ContainerTelemetry
                 localLock.EnterWriteLock();
                 try
                 {
+                    // Trim under the same mutex+write-lock as the append (matching the execution-log path),
+                    // so the trim's File.Replace cannot resurrect lines a concurrent opt-out purge just
+                    // removed, nor race a cross-process append.
+                    EnsureFileLimit(_errorTelemetryPath);
                     var streamOptions = CreateAppendStreamOptions();
                     bool written = false;
                     int delay = 15;
@@ -1623,18 +1670,19 @@ public static partial class ContainerTelemetry
         }
     }
 
-    public static void ClearEntries()
+    public static bool ClearEntries()
     {
         if (Volatile.Read(ref _isShutdown) == 1)
         {
-            return;
+            return false;
         }
+        bool cleared = false;
         Interlocked.Increment(ref _activeOperations);
         try
         {
             if (Volatile.Read(ref _isShutdown) == 1)
             {
-                return;
+                return false;
             }
             try
             {
@@ -1656,61 +1704,23 @@ public static partial class ContainerTelemetry
                     }
                     if (!acquired)
                     {
-                        return;
+                        return false;
                     }
 
                     var localLock = RwLock;
                     localLock.EnterWriteLock();
                     try
                     {
-                        // FileMode.Create safely truncates resolving IOException on 0-byte files natively.
-                        if (File.Exists(_telemetryPath))
-                        {
-                            int clearDelay = 15;
-                            for (int attempt = 0; attempt < 5; attempt++)
-                            {
-                                try
-                                {
-                                    using (new FileStream(_telemetryPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)) { /* Truncate file */ }
-                                    break;
-                                }
-                                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-                                {
-                                    if (attempt == 4)
-                                    {
-                                        break;
-                                    }
-                                    Thread.Sleep(clearDelay);
-                                    clearDelay *= 2;
-                                }
-                            }
-                        }
-
-                        if (File.Exists(_errorTelemetryPath))
-                        {
-                            int clearErrorDelay = 15;
-                            for (int attempt = 0; attempt < 5; attempt++)
-                            {
-                                try
-                                {
-                                    using (new FileStream(_errorTelemetryPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)) { /* Truncate file */ }
-                                    break;
-                                }
-                                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-                                {
-                                    if (attempt == 4)
-                                    {
-                                        break;
-                                    }
-                                    Thread.Sleep(clearErrorDelay);
-                                    clearErrorDelay *= 2;
-                                }
-                            }
-                        }
+                        // Report success only when both files are actually truncated: the opt-out purge
+                        // latches its "done" flag on this result, so a failed clear must not be recorded as
+                        // complete (see PurgeIfOptedOut).
+                        bool telemetryCleared = TruncateFileWithRetry(_telemetryPath);
+                        bool errorCleared = TruncateFileWithRetry(_errorTelemetryPath);
 
                         _cachedLineCount = -1;
                         _cachedErrorLineCount = -1;
                         Volatile.Write(ref _cachedStats, null);
+                        cleared = telemetryCleared && errorCleared;
                     }
                     finally
                     {
@@ -1741,6 +1751,7 @@ public static partial class ContainerTelemetry
         {
             Interlocked.Decrement(ref _activeOperations);
         }
+        return cleared;
     }
 
     private static void ProcessLineStats(ReadOnlySpan<byte> lineSpan, ref int successes, ref double totalDuration, ref int durationCount, out bool isCancelled)
