@@ -1,3 +1,5 @@
+// MA0051 (method length) is suppressed file-wide: the argv/mount construction methods are long but
+// cohesive single-responsibility builders; splitting them would scatter tightly-coupled mapping logic.
 #pragma warning disable MA0051
 
 using System;

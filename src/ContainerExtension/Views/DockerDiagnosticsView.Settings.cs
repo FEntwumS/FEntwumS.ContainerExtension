@@ -1,3 +1,6 @@
+// MA0004 (ConfigureAwait) is suppressed file-wide: Avalonia UI code whose awaits must resume on the UI
+// thread. MA0006/S108 cover pervasive UI-event-handler style (control reference equality; empty
+// best-effort catch blocks).
 #pragma warning disable MA0004, MA0006, S108
 using static ContainerExtension.Views.UIBuilderHelpers;
 using System;
