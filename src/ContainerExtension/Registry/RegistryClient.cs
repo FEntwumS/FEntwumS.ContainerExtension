@@ -86,6 +86,10 @@ public static partial class RegistryClient
             KeepAlivePingDelay = TimeSpan.FromSeconds(60),
             KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
             AllowAutoRedirect = false,
+            // Disable proxy use: a configured HTTP(S)_PROXY would tunnel the request through the proxy
+            // via CONNECT, so ConnectCallback would vet only the proxy's address while the real (possibly
+            // internal) target rode the tunnel unchecked, defeating the SSRF gate.
+            UseProxy = false,
             // Enforce the SSRF address gate at connection time (see ValidatedConnectAsync): resolve the
             // target, dial the vetted IP directly, and refuse internal ranges. This backstops the
             // reference-level check in FetchTagsAsync against a WWW-Authenticate realm on an internal
@@ -191,7 +195,7 @@ public static partial class RegistryClient
     }
 
     // SSRF gate: reject any address that targets the local host or a non-routable / internal range.
-    private static bool IsDisallowedAddress(System.Net.IPAddress address)
+    internal static bool IsDisallowedAddress(System.Net.IPAddress address)
     {
         // Collapse IPv4-mapped IPv6 (::ffff:a.b.c.d) to IPv4 so the private/CGNAT/link-local byte tests
         // below also catch mapped forms, and reject the unspecified/wildcard addresses outright. Without
@@ -199,6 +203,14 @@ public static partial class RegistryClient
         if (address.IsIPv4MappedToIPv6)
         {
             address = address.MapToIPv4();
+        }
+        // NAT64 (64:ff9b::/96) and the deprecated IPv4-compatible (::a.b.c.d) forms also embed an IPv4
+        // address but are not IsIPv4MappedToIPv6; without extracting and re-testing the embedded IPv4,
+        // 64:ff9b::a9fe:a9fe (169.254.169.254) or ::0a00:0001 (10.0.0.1) would slip the gate on a network
+        // that can route them.
+        else if (TryGetEmbeddedIPv4(address, out var embedded))
+        {
+            address = embedded;
         }
         if (address.Equals(System.Net.IPAddress.Any) || address.Equals(System.Net.IPAddress.IPv6Any))
         {
@@ -216,6 +228,31 @@ public static partial class RegistryClient
             if (b[0] == 192 && b[1] == 168) return true;                 // 192.168.0.0/16
             if (b[0] == 169 && b[1] == 254) return true;                 // 169.254.0.0/16 link-local
             if (b[0] == 100 && b[1] >= 64 && b[1] <= 127) return true;   // 100.64.0.0/10 CGNAT
+        }
+        return false;
+    }
+
+    // Extract the IPv4 address embedded in a NAT64 (64:ff9b::/96) or deprecated IPv4-compatible
+    // (::a.b.c.d, the ::/96 form) IPv6 address so the IPv4 range checks apply to it. Excludes the
+    // unspecified (::) and loopback (::1) addresses, which the caller handles separately, and the
+    // IPv4-mapped (::ffff:) form, which the caller collapses before calling here.
+    private static bool TryGetEmbeddedIPv4(System.Net.IPAddress address, out System.Net.IPAddress embedded)
+    {
+        embedded = address;
+        if (address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6)
+        {
+            return false;
+        }
+        var b = address.GetAddressBytes();
+        var highBitsZero = b[4] == 0 && b[5] == 0 && b[6] == 0 && b[7] == 0
+            && b[8] == 0 && b[9] == 0 && b[10] == 0 && b[11] == 0;
+        var isNat64 = b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b && highBitsZero;
+        var isCompat = b[0] == 0 && b[1] == 0 && b[2] == 0 && b[3] == 0 && highBitsZero
+            && !(b[12] == 0 && b[13] == 0 && b[14] == 0 && (b[15] == 0 || b[15] == 1));
+        if (isNat64 || isCompat)
+        {
+            embedded = new System.Net.IPAddress(new[] { b[12], b[13], b[14], b[15] });
+            return true;
         }
         return false;
     }
