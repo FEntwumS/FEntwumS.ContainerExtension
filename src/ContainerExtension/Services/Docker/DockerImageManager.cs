@@ -333,6 +333,13 @@ public sealed class DockerImageManager : IDisposable
         }
     }
 
+    // An image is "unused"/reclaimable when it carries no real repository tag — an untagged or dangling
+    // <none> image. The /images/json list endpoint leaves per-image container counts unpopulated (-1), so
+    // this tag-based test is the reliable signal shared by the reclaimable-size metric and the unused-image
+    // count (which previously read the always-(-1) Containers field and so always reported zero).
+    internal static bool IsUnusedImage(ImagesListResponse image)
+        => image.RepoTags is null || image.RepoTags.Count == 0 || image.RepoTags.All(t => t != null && t.Contains("<none>", StringComparison.Ordinal));
+
     public static (int imageCount, long totalSizeBytes, long reclaimableBytes) ComputeDiskUsage(IList<ImagesListResponse>? images, CancellationToken ct = default)
     {
         if (images == null || images.Count == 0)
@@ -347,7 +354,7 @@ public sealed class DockerImageManager : IDisposable
             {
                 return (0, 0, 0);
             }
-            long rec = (single.RepoTags is null || single.RepoTags.Count == 0 || single.RepoTags.All(t => t != null && t.Contains("<none>"))) ? single.Size : 0;
+            long rec = IsUnusedImage(single) ? single.Size : 0;
             return (1, single.Size, rec);
         }
 
@@ -370,7 +377,7 @@ public sealed class DockerImageManager : IDisposable
                 total += i.Size;
             }
 
-            if (i.RepoTags is null || i.RepoTags.Count == 0 || i.RepoTags.All(t => t != null && t.Contains("<none>")))
+            if (IsUnusedImage(i))
             {
                 unchecked
                 {

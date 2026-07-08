@@ -1032,6 +1032,10 @@ public partial class DockerDiagnosticsView
                 Grid.SetColumn(btnPanel, 6);
                 row.Children.Add(btnPanel);
             }
+            // A row action disables this panel while it runs and re-enables it only on the error path; the
+            // success path relies on this recycle. Reset it here so a recycled panel never carries a stale
+            // disabled state onto a live row (Avalonia propagates a disabled parent to its buttons).
+            btnPanel.IsEnabled = true;
 
             var diagram = BuildNetworkDiagram(c.Ports);
             var rowToolTip = new TextBlock

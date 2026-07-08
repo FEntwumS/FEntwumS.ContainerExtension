@@ -1098,7 +1098,9 @@ public partial class DockerDiagnosticsView : UserControl
         _metricImagesDetailText.Text = $"{FormatBytesBinary(diskUsage.totalSizeBytes)} total size";
 
         _metricDiskText.Text = FormatBytesBinary(diskUsage.reclaimableBytes);
-        _metricDiskDetailText.Text = $"{images.Count(i => i.Containers == 0)} unused images";
+        // Count untagged/dangling images (matching the reclaimable-size metric): the /images/json list
+        // endpoint leaves i.Containers unpopulated (-1), so the prior "Containers == 0" count was always 0.
+        _metricDiskDetailText.Text = $"{images.Count(ContainerExtension.Services.Docker.DockerImageManager.IsUnusedImage)} unused images";
 
         if (_wasDockerOnline == false)
         {
