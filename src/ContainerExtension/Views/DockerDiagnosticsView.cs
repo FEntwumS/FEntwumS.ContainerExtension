@@ -1341,6 +1341,13 @@ public partial class DockerDiagnosticsView : UserControl
                 ShowTemporaryStatus($"'{activeImg}' is built locally, not pulled — use Build Local Image to produce or update it.", isError: false, isTemporary: false);
                 return;
             }
+            // Defense in depth: registry tags are grammar-validated at the source (RegistryClient), but never
+            // interpolate an image reference into the interactive terminal without re-checking it here.
+            if (!ContainerExtension.Validations.DockerImageFormatValidation.IsValidReference(activeImg))
+            {
+                ShowTemporaryStatus($"Refusing to pull '{activeImg}': not a valid image reference.", isError: true, isTemporary: false);
+                return;
+            }
             var prevTip = ToolTip.GetTip(btn);
             try
             {
@@ -1899,6 +1906,11 @@ public partial class DockerDiagnosticsView : UserControl
                 if (IsBuildOnlyImage(img))
                 {
                     ShowTemporaryStatus($"'{img}' is built locally, not pulled — use Build Local Image to produce or update it.", isError: false, isTemporary: false);
+                    return;
+                }
+                if (!ContainerExtension.Validations.DockerImageFormatValidation.IsValidReference(img))
+                {
+                    ShowTemporaryStatus($"Refusing to pull '{img}': not a valid image reference.", isError: true, isTemporary: false);
                     return;
                 }
                 ShowTemporaryStatus($"Pulling default image '{img}' in terminal...");

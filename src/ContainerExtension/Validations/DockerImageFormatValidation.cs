@@ -20,6 +20,27 @@ internal sealed partial class DockerImageFormatValidation : ISettingValidation
     [GeneratedRegex(@"^[a-zA-Z0-9][a-zA-Z0-9._\-]*(:\d{1,5})?(/[a-zA-Z0-9._\-]+)*(:[a-zA-Z0-9._\-]+)?(@sha256:[a-fA-F0-9]{64})?$", RegexOptions.ExplicitCapture | RegexOptions.IgnoreCase | RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]
     private static partial Regex ImagePatternRegex();
 
+    /// <summary>
+    /// Defense-in-depth guard for call sites that interpolate an image reference into the interactive
+    /// terminal. The grammar admits no shell metacharacters, so a reference that matches cannot carry an
+    /// injection even if it reached a setting or a registry tag list unvetted.
+    /// </summary>
+    internal static bool IsValidReference(string? image)
+    {
+        if (string.IsNullOrWhiteSpace(image))
+        {
+            return false;
+        }
+        try
+        {
+            return ImagePatternRegex().IsMatch(image.Trim());
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
+    }
+
     public bool Validate(object? value, out string? warningMessage)
     {
         warningMessage = null;

@@ -34,6 +34,30 @@ public static partial class RegistryClient
     [System.Text.RegularExpressions.GeneratedRegex(@"(?<key>[a-zA-Z0-9_\-\.]+)\s*=\s*""(?<value>[^""]*)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.ExplicitCapture | System.Text.RegularExpressions.RegexOptions.NonBacktracking)]
     private static partial System.Text.RegularExpressions.Regex ChallengeParameterRegex();
 
+    // The diagnostics UI interpolates a registry-supplied tag into a command typed at the interactive
+    // terminal (DockerDiagnosticsView), which is a real shell. Enforce the OCI/Docker tag grammar at the
+    // source so a hostile or compromised registry cannot smuggle shell metacharacters through the tag
+    // list: a tag is 1-128 characters, opening with an alphanumeric or underscore, then word characters,
+    // '.', or '-'. NonBacktracking with a match timeout keeps this safe on adversarial input.
+    [System.Text.RegularExpressions.GeneratedRegex(@"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$", System.Text.RegularExpressions.RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]
+    private static partial System.Text.RegularExpressions.Regex DockerTagRegex();
+
+    internal static bool IsValidDockerTag([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? tag)
+    {
+        if (string.IsNullOrEmpty(tag))
+        {
+            return false;
+        }
+        try
+        {
+            return DockerTagRegex().IsMatch(tag);
+        }
+        catch (System.Text.RegularExpressions.RegexMatchTimeoutException)
+        {
+            return false;
+        }
+    }
+
     private static readonly string CachedUserName = Environment.UserName;
     private static readonly string CachedUserProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
@@ -630,7 +654,7 @@ public static partial class RegistryClient
         var list = new List<string>(results.Count);
         foreach (var r in results)
         {
-            if (!string.IsNullOrEmpty(r.Name))
+            if (IsValidDockerTag(r.Name))
             {
                 list.Add(r.Name);
             }
@@ -919,7 +943,7 @@ public static partial class RegistryClient
         for (int i = rawTags.Count - 1; i >= 0 && list.Count < 20; i--)
         {
             var t = rawTags[i];
-            if (!string.IsNullOrEmpty(t))
+            if (IsValidDockerTag(t))
             {
                 list.Add(t);
             }
