@@ -1090,6 +1090,12 @@ public sealed class ContainerExtensionTests : IDisposable
     public async Task ExecuteAsync_AllowsCommandSemicolonsInYosysArguments()
     {
         using var provider = new TestServiceProvider();
+        // Pin an offline daemon so the check exercises argument validation deterministically: a valid
+        // yosys command is accepted by the shell-safety validation and then short-circuits on the
+        // unreachable socket, rather than dialing an ambiguous host daemon whose reachability (and
+        // connect timeout) varies by runner and could block the test.
+        var settings = (MockSettingsService)provider.GetService(typeof(ISettingsService))!;
+        settings.SetSettingValue(ContainerExtensionModule.DaemonSocketSetting, "unix:///invalid/offline/socket.sock");
         using var strategy = new DockerExecutionStrategy(provider);
         var command = new ToolCommand
         {
