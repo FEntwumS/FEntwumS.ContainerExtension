@@ -2511,30 +2511,11 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             activity?.SetTag("tool.name", command.ToolName);
             activity?.SetTag("tool.executable", System.IO.Path.GetFileNameWithoutExtension(command.Executable ?? string.Empty));
         }
-        CancellationToken strategyToken;
-        try
-        {
-            ThrowIfDisposed();
-            await EnsureInitializedAsync(_strategyCts.Token).ConfigureAwait(false);
-            // Capture the strategy token inside the guarded scope: a shutdown-time Dispose can race the
-            // linked-CTS construction below, where reading _strategyCts.Token would otherwise throw an
-            // ObjectDisposedException outside any try.
-            strategyToken = _strategyCts.Token;
-        }
-        catch (Exception ex) when (ex is ObjectDisposedException or OperationCanceledException)
-        {
-            // Dispose raced this call during shutdown: the strategy CTS was disposed/cancelled as the
-            // prologue (which reads it outside any try) ran. Return a cancelled result rather than
-            // letting an ObjectDisposedException/OperationCanceledException escape ExecuteAsync unhandled.
-            return (false, string.Empty);
-        }
 
-        if (IsTargetingEmptyGhdlLibrary(command))
-        {
-            SdkLog(command, "[Docker SDK] Bypassing GHDL make/elaboration on empty library targeting to prevent compilation failures.", RankInfo);
-            return (true, string.Empty);
-        }
-
+        // Validate the command before awaiting daemon initialization. These checks are cheap and
+        // daemon-independent; running them first rejects a malformed command immediately instead of
+        // first blocking on EnsureInitializedAsync, which — on a host with no reachable daemon — waits
+        // on the background connect and would otherwise hang before the command is ever inspected.
         var executable = (command.Executable ?? command.ToolName ?? string.Empty).Trim('\r', '\n', ' ', '\t');
         executable = Services.Docker.DockerCommandBuilder.HealEscapedPaths(executable);
 
@@ -2545,8 +2526,6 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
 
             if (exeName.AsSpan().ContainsAny(DockerCommandBuilder.ShellSpecialChars))
             {
-                // Honor the (success, output) contract: reject via the tuple rather than throwing out of
-                // ExecuteAsync (this validation runs before the execution try block).
                 return (false, "Command executable contains prohibited shell control characters.");
             }
 
@@ -2577,6 +2556,30 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                     }
                 }
             }
+        }
+
+        CancellationToken strategyToken;
+        try
+        {
+            ThrowIfDisposed();
+            await EnsureInitializedAsync(_strategyCts.Token).ConfigureAwait(false);
+            // Capture the strategy token inside the guarded scope: a shutdown-time Dispose can race the
+            // linked-CTS construction below, where reading _strategyCts.Token would otherwise throw an
+            // ObjectDisposedException outside any try.
+            strategyToken = _strategyCts.Token;
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or OperationCanceledException)
+        {
+            // Dispose raced this call during shutdown: the strategy CTS was disposed/cancelled as the
+            // prologue (which reads it outside any try) ran. Return a cancelled result rather than
+            // letting an ObjectDisposedException/OperationCanceledException escape ExecuteAsync unhandled.
+            return (false, string.Empty);
+        }
+
+        if (IsTargetingEmptyGhdlLibrary(command))
+        {
+            SdkLog(command, "[Docker SDK] Bypassing GHDL make/elaboration on empty library targeting to prevent compilation failures.", RankInfo);
+            return (true, string.Empty);
         }
 
         var stopwatch = Stopwatch.StartNew();
