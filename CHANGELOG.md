@@ -32,7 +32,7 @@ and CLI-parity semantics on the measured evaluation path are unchanged.
 ### Changed
 
 - The file-wide `VSTHRD002`/`VSTHRD105`/`VSTHRD110` suppression over the 3300-line `DockerExecutionStrategy` — which had hidden the synchronous-over-asynchronous reaper defect fixed above — is narrowed to a single scoped disable at the one intentional teardown block, so the whole-file blind spot is gone. The remaining legitimate file-wide pragmas (`MA0004`/`MA0006`/`S108` in the Avalonia view files, `MA0051` in the argument/mount builders) now carry why-comments. The centralized `NoWarn` set is unchanged.
-- Dependency maintenance: the build-time analyzers Meziantou.Analyzer (3.0.117 to 3.0.121) and SonarAnalyzer.CSharp (10.27 to 10.28) are updated; the SHA-pinned CI actions (`setup-qemu-action`, `setup-buildx-action`, `build-push-action`, `github/codeql-action`) are bumped to current releases; and the `oss-cad-suite` image's Ubuntu base is refreshed to the current digest. The pinned toolchain release and every OneWare host-shared runtime dependency (Avalonia, OneWare.Essentials 1.0.19, System.IO.Pipelines 10.0.0) are unchanged.
+- Dependency maintenance: the build-time analyzers Meziantou.Analyzer (3.0.117 to 3.0.122) and SonarAnalyzer.CSharp (10.27 to 10.28) are updated; the SHA-pinned CI actions (`setup-qemu-action`, `setup-buildx-action`, `build-push-action`, `github/codeql-action`) are bumped to current releases; and the `oss-cad-suite` image's Ubuntu base is refreshed to the current digest. The pinned toolchain release and every OneWare host-shared runtime dependency (Avalonia, OneWare.Essentials 1.0.19, System.IO.Pipelines 10.0.0) are unchanged.
 
 ### Tests
 
