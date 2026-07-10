@@ -1738,7 +1738,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         {
             // Synchronous block is intentional: the reaper runs from Dispose and the ProcessExit handler,
             // neither of which has an async context to await into. Scope the suppression to this one site
-            // rather than blanketing the whole file (which formerly hid finding B.3).
+            // rather than blanketing the whole file, which formerly hid a real teardown fault.
 #pragma warning disable VSTHRD002
             Task.WhenAll(tasks).GetAwaiter().GetResult();
 #pragma warning restore VSTHRD002

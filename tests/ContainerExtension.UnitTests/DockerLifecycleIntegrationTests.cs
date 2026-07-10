@@ -13,8 +13,8 @@ namespace ContainerExtension.UnitTests;
 /// Live-daemon integration exercise of the real container lifecycle against a trivial public image
 /// (busybox — no FPGA fixtures required). These drive DockerExecutionStrategy through
 /// create -> start -> attach/stream -> wait -> exit-code -> auto-remove, covering the paths the unit
-/// tests only mock: teardown (B.1/B.2/B.3), the (success,output) contract, log streaming + UTF-8 decode
-/// (H.2/H.3), and single-entry telemetry. [FactIfNoCI] skips them in CI (they need a daemon + Docker Hub).
+/// tests only mock: teardown, the (success,output) contract, log streaming + UTF-8 decode, and
+/// single-entry telemetry. [FactIfNoCI] skips them in CI (they need a daemon + Docker Hub).
 /// </summary>
 [Collection("TelemetryTests")]
 public sealed class DockerLifecycleIntegrationTests : IDisposable

@@ -8,8 +8,7 @@ namespace ContainerExtension.UnitTests;
 
 /// <summary>
 /// Regression suite for external-command hardening: strict SHA-256 digest validation before a build-arg
-/// reaches the terminal (A.2) and absolute-path resolution of system utilities to defeat PATH hijacking
-/// (A.3/A.4).
+/// reaches the terminal, and absolute-path resolution of system utilities to defeat PATH hijacking.
 /// </summary>
 public sealed class ExternalCommandHardeningTests
 {

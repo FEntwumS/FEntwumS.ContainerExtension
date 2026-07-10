@@ -103,7 +103,7 @@ public partial class DockerDiagnosticsView : UserControl
     private int _refreshIntervalSeconds;
     private int _secondsUntilRefresh;
     private bool _hasAttached; // Guard against duplicate AttachedToVisualTree handlers
-    private bool _hasFocusedOnce; // First-appearance focus flag; set once, never reset on detach (D.5)
+    private bool _hasFocusedOnce; // First-appearance focus flag; set once, never reset on detach
     private IDisposable? _isVisibleSubscription;
 
     // Cached Data (for re-sorting without re-querying the daemon)
@@ -115,7 +115,7 @@ public partial class DockerDiagnosticsView : UserControl
     private IList<Docker.DotNet.Models.ImagesListResponse> _cachedImages = Array.Empty<Docker.DotNet.Models.ImagesListResponse>();
     private bool _showAllImages;
     private (int imageCount, long totalSizeBytes, long reclaimableBytes) _cachedDiskUsage;
-    private Docker.DotNet.Models.SystemInfoResponse? _cachedSystemInfo; // last non-null snapshot, for theme repaints (D.3)
+    private Docker.DotNet.Models.SystemInfoResponse? _cachedSystemInfo; // last non-null snapshot, for theme repaints
 
     // Search/Filter State
     private string _searchFilter = "";
@@ -1097,7 +1097,7 @@ public partial class DockerDiagnosticsView : UserControl
         // KPI metrics (online state). The daemon is reachable here even when info is null (degraded:
         // /info failed but the liveness ping in RefreshAllAsync succeeded), so the card stays green.
         // Cache the last non-null system info so a theme repaint (RepaintSectionsFromCache) can render it
-        // without a daemon round-trip, instead of falsely reporting it temporarily unavailable (D.3).
+        // without a daemon round-trip, instead of falsely reporting it temporarily unavailable.
         if (info != null)
         {
             _cachedSystemInfo = info;

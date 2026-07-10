@@ -7,7 +7,7 @@ using Xunit;
 namespace ContainerExtension.UnitTests;
 
 /// <summary>
-/// Regression suite for the telemetry opt-out invariant hardening (findings C.1/C.2): a purge is only
+/// Regression suite for the telemetry opt-out invariant hardening: a purge is only
 /// latched as done once truncation is confirmed, and a write in flight when opt-out flips is suppressed
 /// under the write lock rather than appended into the just-purged file.
 /// </summary>
@@ -39,7 +39,7 @@ public sealed class TelemetryOptOutInvariantTests : IDisposable
     [Fact]
     public void ClearEntries_ReturnsTrueOnConfirmedTruncation()
     {
-        // C.1: the opt-out purge latches its "done" flag on this return value, so a real clear must
+        // The opt-out purge latches its "done" flag on this return value, so a real clear must
         // report success (and a no-op clear of empty state is also success).
         ContainerTelemetry.LogExecution("img:latest", "ghdl", 1.0, exitCode: 0);
         Assert.NotEmpty(ContainerTelemetry.GetRecentEntries());
@@ -52,7 +52,7 @@ public sealed class TelemetryOptOutInvariantTests : IDisposable
     [Fact]
     public void OptOut_FlippingMidWrite_SuppressesTheAppendUnderLock()
     {
-        // C.2: the checker reports opted-in on the first observation (LogExecution's entry gate) and
+        // The checker reports opted-in on the first observation (LogExecution's entry gate) and
         // opted-out on the second (the under-lock re-check), reproducing opt-out flipping after a write
         // began. The under-lock re-check must suppress the append.
         int observations = 0;

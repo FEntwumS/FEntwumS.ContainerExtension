@@ -6,7 +6,7 @@ using Xunit;
 namespace ContainerExtension.UnitTests;
 
 /// <summary>
-/// Regression suite for finding D.2: the "unused images" KPI counted images whose Containers field
+/// Regression suite for the unused-image count: the "unused images" KPI counted images whose Containers field
 /// equals zero, but the /images/json list endpoint leaves that field unpopulated (-1), so the count was
 /// always zero. The count now uses the tag-based reclaimable test shared with the reclaimable-size metric.
 /// </summary>

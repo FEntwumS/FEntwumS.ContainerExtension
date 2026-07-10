@@ -7,7 +7,7 @@ using Xunit;
 namespace ContainerExtension.UnitTests;
 
 /// <summary>
-/// Regression suite for finding B.1: DockerContainerManager.Dispose previously disposed its semaphores
+/// Regression suite for idempotent disposal: DockerContainerManager.Dispose previously disposed its semaphores
 /// unconditionally, faulting in-flight operations (and a second Dispose) with ObjectDisposedException.
 /// Dispose is now idempotent and new operations fail fast with a clean ObjectDisposedException.
 /// </summary>

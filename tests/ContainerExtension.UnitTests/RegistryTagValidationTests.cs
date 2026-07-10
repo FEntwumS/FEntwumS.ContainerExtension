@@ -5,7 +5,7 @@ using Xunit;
 namespace ContainerExtension.UnitTests;
 
 /// <summary>
-/// Regression suite for the registry-tag injection fix (finding A.1). A registry-supplied tag is
+/// Regression suite for the registry-tag injection fix. A registry-supplied tag is
 /// interpolated into a command typed at OneWare's interactive terminal, which is a real shell. The
 /// defense is two-layered: <see cref="RegistryClient.IsValidDockerTag"/> drops non-conforming tags at
 /// the source, and <see cref="DockerImageFormatValidation.IsValidReference"/> re-checks the composed

@@ -6,7 +6,7 @@ using Xunit;
 namespace ContainerExtension.UnitTests;
 
 /// <summary>
-/// Regression suite for finding C.4: TrackError must apply the KEY=value secret scrub (as LogExecution
+/// Regression suite for error-log secret scrubbing: TrackError must apply the KEY=value secret scrub (as LogExecution
 /// does), not merely the path/host scrub, so a secret embedded in an exception message never reaches the
 /// error log in the clear.
 /// </summary>

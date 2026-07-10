@@ -5,7 +5,7 @@ using Xunit;
 namespace ContainerExtension.UnitTests;
 
 /// <summary>
-/// Regression suite for the registry SSRF address gate (finding F.2). Asserts that internal ranges are
+/// Regression suite for the registry SSRF address gate. Asserts that internal ranges are
 /// refused across IPv4, IPv4-mapped, NAT64 (64:ff9b::/96), and deprecated IPv4-compatible (::a.b.c.d)
 /// encodings, while genuinely public addresses are allowed.
 /// </summary>
