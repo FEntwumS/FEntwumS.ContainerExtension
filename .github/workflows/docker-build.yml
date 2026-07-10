@@ -76,8 +76,8 @@ jobs:
         ignore-unfixed: true
         exit-code: '0'
 
-    # Surface every finding in the job log (visible without Advanced Security, which this private repo
-    # lacks), then fail closed only on a fixable CRITICAL. The fixable-HIGH surface is inherited from
+    # Surface every finding in the job log, readable without opening the Security tab, then fail closed
+    # only on a fixable CRITICAL. The fixable-HIGH surface is inherited from
     # the vendored upstream toolchain (base OS, bundled Python, the `pebble` Go binary), which this
     # extension does not own (tool distribution is a documented non-goal); it is surfaced, not gated.
     - name: Report findings and gate on fixable CRITICAL
