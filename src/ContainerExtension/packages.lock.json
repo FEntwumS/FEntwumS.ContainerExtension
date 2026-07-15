@@ -31,9 +31,9 @@
       },
       "OneWare.Essentials": {
         "type": "Direct",
-        "requested": "[1.0.19, )",
-        "resolved": "1.0.19",
-        "contentHash": "utnf85w1m5nPPgSa4xIXBPl9z0bYfwqK5RhXWZL3hCdhTfgn27eFPZwTeg73uQ0tRVWVI/VwvUVKZfmju8gjkQ==",
+        "requested": "[1.0.22, )",
+        "resolved": "1.0.22",
+        "contentHash": "sOM1vii/EZmJv18GBfZWFI59AcqanO5VkOwuEIVwqKUrfa8IgPKqVcPllDTSSclOlCze80stDbWKO9lXa7d5Og==",
         "dependencies": {
           "Asmichi.ChildProcess": "0.18.0",
           "Avalonia": "11.3.17",

@@ -17,7 +17,12 @@
     </PackageVersion>
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.9" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
-    <PackageVersion Include="OneWare.Essentials" Version="1.0.19" />
+    <!-- Compile-time only (ExcludeAssets=runtime;Native): the OneWare host supplies the runtime
+         assembly. Pin to the newest Essentials on NuGet that does not exceed the targeted host, or the
+         plugin loader rejects the plugin. 1.0.20/1.0.21/1.0.23 are host git tags only (absent from
+         NuGet), so 1.0.22 is the newest publishable pin for the 1.0.23 host. Dependabot-ignored;
+         bump manually and re-run the OneWare side-load load test (a clean build does not prove it loads). -->
+    <PackageVersion Include="OneWare.Essentials" Version="1.0.22" />
     <PackageVersion Include="SonarAnalyzer.CSharp" Version="10.28.0.143324">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
