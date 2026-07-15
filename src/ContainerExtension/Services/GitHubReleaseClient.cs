@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -41,6 +42,12 @@ internal static class GitHubReleaseClient
         var handler = new SocketsHttpHandler
         {
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            // Do not follow redirects: the release endpoints answer 200 with JSON directly, so a 3xx would
+            // signal an unexpected (possibly host-substituting) response and should fail via
+            // EnsureSuccessStatusCode rather than be chased. Disable proxy use so a configured HTTP(S)_PROXY
+            // cannot tunnel the request to an unintended target. Mirrors the RegistryClient hardening.
+            AllowAutoRedirect = false,
+            UseProxy = false,
             AutomaticDecompression = System.Net.DecompressionMethods.Brotli | System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate
         };
         var client = new HttpClient(handler, disposeHandler: true) { Timeout = TimeSpan.FromSeconds(10) };
@@ -83,6 +90,35 @@ internal static class GitHubReleaseClient
         }
     }
 
+    // A release JSON is a few hundred KB even for the list endpoint; cap the buffered body well above that
+    // so a hostile or misbehaving endpoint cannot force unbounded allocation during deserialization (a
+    // small compressed payload that decompresses huge is bounded here too, since the loop caps the
+    // decompressed byte count). Mirrors RegistryClient.ReadCappedAsync.
+    private const long MaxResponseBytes = 8 * 1024 * 1024;
+
+    private static async Task<Stream> ReadCappedAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        if (response.Content.Headers.ContentLength is > MaxResponseBytes)
+        {
+            throw new InvalidOperationException("GitHub response exceeds the maximum allowed size.");
+        }
+        using var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await source.ReadAsync(chunk, ct).ConfigureAwait(false)) > 0)
+        {
+            if (buffer.Length + read > MaxResponseBytes)
+            {
+                await buffer.DisposeAsync().ConfigureAwait(false);
+                throw new InvalidOperationException("GitHub response exceeds the maximum allowed size.");
+            }
+            await buffer.WriteAsync(chunk.AsMemory(0, read), ct).ConfigureAwait(false);
+        }
+        buffer.Position = 0;
+        return buffer;
+    }
+
     public static async Task<string?> GetLatestReleaseTagAsync(CancellationToken ct)
     {
         var client = HttpClientLazy.Value;
@@ -101,7 +137,7 @@ internal static class GitHubReleaseClient
             }
             response.EnsureSuccessStatusCode();
 
-            using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var stream = await ReadCappedAsync(response, ct).ConfigureAwait(false);
             var res = await JsonSerializer.DeserializeAsync(stream, GitHubJsonContext.Default.GitHubReleaseResponse, ct).ConfigureAwait(false);
             var tag = res?.TagName?.Trim();
             if (string.IsNullOrEmpty(tag))
@@ -137,7 +173,7 @@ internal static class GitHubReleaseClient
             ThrowIfRateLimited(response);
             response.EnsureSuccessStatusCode();
 
-            using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var stream = await ReadCappedAsync(response, ct).ConfigureAwait(false);
             var releases = await JsonSerializer.DeserializeAsync(stream, GitHubJsonContext.Default.GitHubReleaseResponseArray, ct).ConfigureAwait(false);
             if (releases == null) return Array.Empty<string>();
 
@@ -180,7 +216,7 @@ internal static class GitHubReleaseClient
             ThrowIfRateLimited(response);
             response.EnsureSuccessStatusCode();
 
-            using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var stream = await ReadCappedAsync(response, ct).ConfigureAwait(false);
             var release = await JsonSerializer.DeserializeAsync(stream, GitHubJsonContext.Default.GitHubReleaseResponse, ct).ConfigureAwait(false);
             if (release?.Assets == null) return null;
 
