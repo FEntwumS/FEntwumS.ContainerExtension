@@ -23,7 +23,7 @@
          NuGet), so 1.0.22 is the newest publishable pin for the 1.0.23 host. Dependabot-ignored;
          bump manually and re-run the OneWare side-load load test (a clean build does not prove it loads). -->
     <PackageVersion Include="OneWare.Essentials" Version="1.0.22" />
-    <PackageVersion Include="SonarAnalyzer.CSharp" Version="10.28.0.143324">
+    <PackageVersion Include="SonarAnalyzer.CSharp" Version="10.29.0.143774">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageVersion>
