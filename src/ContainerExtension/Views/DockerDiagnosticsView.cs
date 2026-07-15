@@ -2354,7 +2354,7 @@ public partial class DockerDiagnosticsView : UserControl
     private const string PinnedBuildLabel = "Pinned (recommended)";
 
     // Reads the repository-pinned oss-cad-suite release tag (ARG RELEASE_TAG=) from the bundled Dockerfile so
-    // the Build dialog can show the concrete version (e.g. "Pinned 2026-06-30") instead of a bare "Pinned".
+    // the Build dialog can show the concrete version (e.g. "Pinned 2026-07-15") instead of a bare "Pinned".
     // Returns false if the Dockerfile cannot be located or parsed; the dialog then uses the generic label.
     // The version is NOT duplicated into C# — the Dockerfile remains the single source of truth.
     [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("SingleFile", "IL3000",

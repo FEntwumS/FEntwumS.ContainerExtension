@@ -55,7 +55,7 @@ jobs:
         platforms: linux/amd64
         tags: |
           fentwums/oss-cad-suite:latest
-          fentwums/oss-cad-suite:2026-06-30
+          fentwums/oss-cad-suite:2026-07-15
         # Release tag/date/arch and the tarball SHA-256 are pinned once, as ARG defaults in the
         # Dockerfile, which is the single source of truth for the toolchain provenance. Do not
         # duplicate them here.

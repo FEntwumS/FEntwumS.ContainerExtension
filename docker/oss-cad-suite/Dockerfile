@@ -11,12 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tar \
     && rm -rf /var/lib/apt/lists/*
 
-ARG RELEASE_TAG=2026-06-30
-ARG RELEASE_DATE=20260630
+ARG RELEASE_TAG=2026-07-15
+ARG RELEASE_DATE=20260715
 ARG ARCH=linux-x64
 # SHA-256 of the release asset for the pinned tag/date/arch (oss-cad-suite-build does not publish
 # per-asset checksums; computed from the tarball). The build fails closed on a mismatch.
-ARG OSS_CAD_SUITE_SHA256=28f1018973618732dd35c0f95550ff85ee7687fc3b87860608eeffb86ad7909e
+ARG OSS_CAD_SUITE_SHA256=fd29b8067dc2ff5ef21cd9dd0e97e6d7b6f4e3f0a93a0fa5b3e0ecb7326a9507
 
 # Download and verify integrity before extraction
 RUN wget --progress=dot:giga --retry-connrefused --read-timeout=60 --timeout=30 -O /tmp/oss-cad-suite.tgz \
