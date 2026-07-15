@@ -480,9 +480,19 @@ public static partial class ContainerTelemetry
             return SecretScrubRegex().Replace(commandLine,
                 m => $"{m.Groups["key"].Value}={m.Groups["quote"].Value}***{m.Groups["quote"].Value}");
         }
+        catch (RegexMatchTimeoutException)
+        {
+            // Fail closed: a scrub timeout means we could not prove this text is free of KEY=value secrets
+            // (SecretScrubRegex carries a lookbehind and a backreference, so it is not backtracking-free and
+            // can time out on a pathological input). Returning the raw text would leak "password=..."-style
+            // credentials into the telemetry log, so redact the whole field. Privacy is preferred over
+            // telemetry completeness here.
+            return "[REDACTED: secret scrub timed out]";
+        }
         catch (Exception)
         {
-            return commandLine;
+            // Any other scrub failure is likewise non-verifiable; never surface the unscrubbed input.
+            return "[REDACTED: secret scrub failed]";
         }
     }
 
