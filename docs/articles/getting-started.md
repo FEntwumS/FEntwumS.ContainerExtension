@@ -50,7 +50,7 @@ cp -r src/ContainerExtension/bin/Release/net10.0/* \
    - Mount your project directory into the container
    - Execute the tool inside the container
    - Stream output back to the IDE
-4. View execution details in the Container Dashboard's **Recent Executions** section
+4. View execution details in the Container Dashboard's **Execution History** section
 
 ## Dashboard Features
 
@@ -63,7 +63,7 @@ The Container Dashboard provides:
 | **Containers** | Live container list with stop/remove/view-logs buttons |
 | **Images & Disk** | Cached images with sizes, reclaimable space indicator |
 | **Configuration** | Snapshot of all active Container Engine settings |
-| **Recent Executions** | Up to 50 telemetry entries with timing and exit codes |
+| **Execution History** | Up to 50 telemetry entries with timing and exit codes |
 
 ## Next Steps
 

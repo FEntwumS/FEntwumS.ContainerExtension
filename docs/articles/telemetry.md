@@ -37,7 +37,7 @@ Every containerized tool execution is recorded as a JSON Lines entry in `~/.onew
 
 ### Dashboard Telemetry
 
-The Container Dashboard's **Recent Executions** section shows up to 50 entries with:
+The Container Dashboard's **Execution History** section shows up to 50 entries with:
 
 - Color-coded exit status (green = success, red = failure, yellow = cancelled)
 - Execution timing
@@ -106,7 +106,7 @@ The Container Dashboard's **Recent Executions** section shows up to 50 entries w
 Use the **Copy Docker Run** feature:
 
 1. Open the Container Dashboard
-2. Find the failed execution in **Recent Executions**
+2. Find the failed execution in **Execution History**
 3. Click the copy button to get the exact `docker run` command
 4. Paste and run in your terminal for debugging
 
