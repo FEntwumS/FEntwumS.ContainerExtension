@@ -4,6 +4,36 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.13] - 2026-07-15
+
+A follow-up hardening and maintenance pass over 1.0.12: the remaining low-severity items from the
+post-release audit, dependency pin advances, and dashboard and telemetry polish. The container
+execution and evaluation-path semantics are unchanged.
+
+### Security
+
+- The symlink-following path canonicalizer that backs the mount-blocking, telemetry-directory, and host-to-container mount-mapping containment gates existed as three byte-identical private copies; it is consolidated into a single authoritative helper so a future change to the containment logic cannot leave one gate behind.
+- The asynchronous error-channel writer now re-checks the telemetry opt-out under the write lock, closing a window in which an error entry queued before opt-out could be written into a log the purge had already truncated.
+- The `KEY=value` secret scrub now fails closed — the affected field is redacted — when its match times out rather than returning the unscrubbed input; the pattern carries a lookbehind and a backreference and so can time out on a pathological input.
+- The GitHub release client is hardened to match the registry client: automatic redirects and proxy use are disabled, every JSON response is read through an 8 MB cap, and the negotiated protocol is floored at TLS 1.2/1.3.
+
+### Fixed
+
+- The OOM-killed flag was overwritten to false by the late resource-statistics merge (the sampler never observes the kill), so a container terminated by the OOM killer was reported and logged as a clean exit; the post-inspect correction is now preserved.
+- The dashboard's Active Configuration panel omitted the privileged-mode toggle, hiding the only setting that permits `--privileged` and leaving its warning branch unreachable; it is now listed.
+- A floating SDK against the pinned SDK-injected linker package caused the locked restore to fail in CI; the SDK is now pinned exactly so locked restore cannot drift.
+
+### Changed
+
+- The pinned `oss-cad-suite` toolchain image is advanced to the 2026-07-15 release (Dockerfile build arguments, the fail-closed SHA-256, the CI image tag, the build-dialog label, and the submodule pointer), and the in-app build-local-image dialog recommends it.
+- The OneWare host-shared `OneWare.Essentials` pin is advanced 1.0.19 to 1.0.22 for the current OneWare Studio 1.0.23 host — the newest published version that does not exceed the host, so the plugin loader accepts it. It still targets Avalonia 11.3.17, so no host-shared transitive dependency changes.
+- The build-time analyzer SonarAnalyzer.CSharp is updated 10.28 to 10.29.
+- The Extra Container Labels help text is corrected to the space-separated format the parser accepts (it had advertised a comma-separated form that mis-parses); the over-75% resource-allocation advisory is now surfaced on save with a confirm step rather than computed and discarded; the telemetry export and clear file I/O is moved off the UI thread; and the documented dashboard section name is aligned with the UI ("Execution History").
+
+### Tests
+
+- A deterministic regression test covers the error-channel opt-out re-check, and the quality-verification tests join the telemetry serialization collection to remove a latent parallel-run flake.
+
 ## [1.0.12] - 2026-07-09
 
 A post-release security and correctness hardening pass over the 1.0.11 baseline. The changes

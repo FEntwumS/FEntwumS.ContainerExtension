@@ -12,8 +12,8 @@ authors:
     email: info@mtorun0x7cd.com
     website: "https://mtorun0x7cd.com"
     affiliation: TH Köln – University of Applied Sciences
-date-released: "2026-07-09"
-version: "1.0.12"
+date-released: "2026-07-15"
+version: "1.0.13"
 license: MIT
 repository-code: "https://github.com/FEntwumS/FEntwumS.ContainerExtension"
 keywords:
