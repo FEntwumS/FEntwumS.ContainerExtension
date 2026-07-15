@@ -357,8 +357,18 @@ public partial class DockerDiagnosticsView
             errorText.IsVisible = false;
         });
 
+        // Surface the >75% resource-allocation advisory (ResourceThresholdValidation returns valid-with-
+        // warning in that band) before committing, and require an explicit second Save to confirm. The
+        // acknowledgement resets whenever the memory or CPU value changes, so a fresh over-allocation is
+        // always re-flagged rather than silently carried over.
+        bool resourceWarningAcknowledged = false;
+        memSlider.ValueChanged += (_, _) => resourceWarningAcknowledged = false;
+        cpuSlider.ValueChanged += (_, _) => resourceWarningAcknowledged = false;
+
         saveBtn.Command = new RelayCommand(() =>
         {
+            // Hard-validation failures are red; reset here so a prior amber advisory does not tint them.
+            errorText.Foreground = RedColor;
             var imageVal = new ContainerExtension.Validations.DockerImageFormatValidation(allowEmpty: false);
             var prefixVal = new ContainerExtension.Validations.ContainerNameValidation();
             var socketVal = new ContainerExtension.Validations.DaemonSocketValidation();
@@ -384,17 +394,35 @@ public partial class DockerDiagnosticsView
                 errorText.IsVisible = true;
                 return;
             }
-            if (!memVal.Validate(memSlider.Value, out warn))
+            if (!memVal.Validate(memSlider.Value, out var memWarn))
             {
-                errorText.Text = $"Memory Limit Error: {warn}";
+                errorText.Text = $"Memory Limit Error: {memWarn}";
                 errorText.IsVisible = true;
                 return;
             }
-            if (!cpuVal.Validate(cpuSlider.Value, out warn))
+            if (!cpuVal.Validate(cpuSlider.Value, out var cpuWarn))
             {
-                errorText.Text = $"CPU limit Error: {warn}";
+                errorText.Text = $"CPU limit Error: {cpuWarn}";
                 errorText.IsVisible = true;
                 return;
+            }
+
+            // Both values are within host capacity, but the validator may still have returned a valid-with-
+            // warning advisory for the >75% band. Surface it (amber) and require a second Save to confirm,
+            // rather than silently persisting a host-starving allocation.
+            if (!resourceWarningAcknowledged)
+            {
+                var advisories = new List<string>(2);
+                if (!string.IsNullOrEmpty(memWarn)) advisories.Add(memWarn);
+                if (!string.IsNullOrEmpty(cpuWarn)) advisories.Add(cpuWarn);
+                if (advisories.Count > 0)
+                {
+                    resourceWarningAcknowledged = true;
+                    errorText.Foreground = YellowColor;
+                    errorText.Text = string.Join("  ", advisories) + "  Click Save again to confirm.";
+                    errorText.IsVisible = true;
+                    return;
+                }
             }
 
             // Apply the settings transactionally: snapshot each current value, apply the new ones in
