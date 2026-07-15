@@ -179,7 +179,7 @@ public partial class DockerDiagnosticsView
 
         var extraFlags = _settingsService.SafeGetSetting(ContainerExtensionModule.ExtraFlagsSetting, "");
         var extraFlagsTextBox = new TextBox { Text = extraFlags, FontSize = 12, MinHeight = 28, VerticalContentAlignment = VerticalAlignment.Center };
-        formPanel.Children.Add(CreateFormItem("Extra Container Labels", "Additional labels applied to containers (format: key=value,key2=value2).", extraFlagsTextBox));
+        formPanel.Children.Add(CreateFormItem("Extra Container Labels", "Additional labels applied to containers (space-separated key=value pairs, e.g. env=prod team=fpga).", extraFlagsTextBox));
 
         formPanel.Children.Add(CreateFormSectionHeader("LOGGING & DASHBOARD"));
 
