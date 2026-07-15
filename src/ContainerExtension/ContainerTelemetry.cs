@@ -1101,6 +1101,15 @@ public static partial class ContainerTelemetry
                 localLock.EnterWriteLock();
                 try
                 {
+                    // Re-check opt-out under the write lock, mirroring the execution-log path: TrackError vets
+                    // opt-out at its entry point, but the entry is written asynchronously by the channel
+                    // consumer, so an opt-out purge (ClearEntries, which takes this same lock) can land between
+                    // enqueue and this write. Without the re-check the consumer would append into a file the
+                    // purge just truncated, resurrecting the error records the user opted to erase.
+                    if (IsOptedOut())
+                    {
+                        return;
+                    }
                     // Trim under the same mutex+write-lock as the append (matching the execution-log path),
                     // so the trim's File.Replace cannot resurrect lines a concurrent opt-out purge just
                     // removed, nor race a cross-process append.

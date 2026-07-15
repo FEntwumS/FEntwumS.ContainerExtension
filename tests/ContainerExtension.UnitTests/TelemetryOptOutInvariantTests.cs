@@ -65,4 +65,34 @@ public sealed class TelemetryOptOutInvariantTests : IDisposable
         ContainerTelemetry.TelemetryOptedOutChecker = () => false;
         Assert.Empty(ContainerTelemetry.GetRecentEntries());
     }
+
+    [Fact]
+    public void OptOut_FlippingMidErrorWrite_SuppressesTheChannelAppendUnderLock()
+    {
+        // The error channel writes asynchronously: TrackError vets opt-out at enqueue time, then a
+        // background consumer performs the disk write. The checker reports opted-in on the first
+        // observation (TrackError's entry gate) and opted-out on every later one (the consumer's
+        // under-lock re-check), reproducing opt-out flipping after the entry was already queued. The
+        // under-lock re-check must suppress the append rather than write into the just-purged file.
+        int observations = 0;
+        ContainerTelemetry.TelemetryOptedOutChecker = () => Interlocked.Increment(ref observations) >= 2;
+
+        ContainerTelemetry.TrackError("DockerExecutionStrategy", "OptOutRaceProbe",
+            new InvalidOperationException("boom"));
+
+        // The re-check is the second checker observation; by construction it returns opted-out and must
+        // return before writing. Wait for it to run rather than sleeping a fixed interval.
+        var deadline = Environment.TickCount64 + 5000;
+        while (Volatile.Read(ref observations) < 2 && Environment.TickCount64 < deadline)
+        {
+            Thread.Sleep(20);
+        }
+        Assert.True(Volatile.Read(ref observations) >= 2, "the error-channel consumer never re-checked opt-out");
+
+        ContainerTelemetry.TelemetryOptedOutChecker = () => false;
+        var errorLog = Path.Combine(_dir, "container_errors.jsonl");
+        Assert.True(
+            !File.Exists(errorLog) || !File.ReadAllText(errorLog).Contains("OptOutRaceProbe", StringComparison.Ordinal),
+            "the opt-out re-check should have suppressed the error-channel append");
+    }
 }
