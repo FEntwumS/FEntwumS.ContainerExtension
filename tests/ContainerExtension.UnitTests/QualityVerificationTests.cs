@@ -9,6 +9,10 @@ using Xunit;
 
 namespace ContainerExtension.UnitTests;
 
+// Constructing DockerExecutionStrategy (in several tests below) triggers background telemetry init that
+// touches the process-global sink, so this class must share the telemetry serialization collection or it
+// can flake when run in parallel with the telemetry suite.
+[Collection("TelemetryTests")]
 public sealed class QualityVerificationTests
 {
     private List<ICommandArgument> BuildArgs(params string[] args)
