@@ -120,4 +120,34 @@ public sealed class QualityVerificationTests
 
         Assert.Null(ex);
     }
+
+    // A late-arriving resource-stats profile (the sampler always reports OomKilled=false) must never
+    // overwrite the OOM correction RunContainerAsync applies after inspecting an OOM-killed container.
+    [Fact]
+    public void MergeLateResourceProfile_RetainsOomCorrection_OverLateStatsProfile()
+    {
+        var corrected = new DockerExecutionStrategy.ResourceProfile(0, 0, 0, OomKilled: true);
+        var lateStats = new DockerExecutionStrategy.ResourceProfile(1024, 42.0, 5, OomKilled: false);
+
+        var merged = DockerExecutionStrategy.MergeLateResourceProfile(corrected, lateStats);
+
+        Assert.Same(corrected, merged);
+        Assert.True(merged is { OomKilled: true });
+    }
+
+    [Fact]
+    public void MergeLateResourceProfile_AdoptsLateProfile_WhenNothingCapturedYet()
+    {
+        var lateStats = new DockerExecutionStrategy.ResourceProfile(2048, 12.5, 3, OomKilled: false);
+
+        Assert.Same(lateStats, DockerExecutionStrategy.MergeLateResourceProfile(null, lateStats));
+    }
+
+    [Fact]
+    public void MergeLateResourceProfile_RetainsCapture_WhenLateProfileMissing()
+    {
+        var captured = new DockerExecutionStrategy.ResourceProfile(4096, 7.5, 9, OomKilled: false);
+
+        Assert.Same(captured, DockerExecutionStrategy.MergeLateResourceProfile(captured, null));
+    }
 }

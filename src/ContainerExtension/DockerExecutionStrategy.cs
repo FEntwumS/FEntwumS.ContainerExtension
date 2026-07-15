@@ -2049,6 +2049,12 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
 
     internal record ResourceProfile(long PeakMemoryBytes, double MaxCpuPercent, int SampleCount, bool OomKilled);
 
+    // Merge a late-arriving stats profile into whatever the run already captured. An earlier capture always
+    // wins, so the OOM correction applied after container inspect is never overwritten by the stats sampler
+    // (which reports OomKilled=false); the late profile is adopted only when nothing was captured yet.
+    internal static ResourceProfile? MergeLateResourceProfile(ResourceProfile? captured, ResourceProfile? late)
+        => captured ?? late;
+
     // Hard cap on the in-memory output string returned to the host. The live stream is still
     // forwarded to the tool console in full via the output/error handlers; only the aggregated
     // return value is bounded, so a runaway or hostile container cannot exhaust IDE memory.
@@ -2446,8 +2452,19 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             // have disposed it as the try-scope unwound, before this finally awaited readTask).
             try { stream?.Dispose(); } catch { /* Ignore */ }
 
+            // Observe statsTask so a late-completing collection cannot fault unobserved. MergeLateResourceProfile
+            // keeps any earlier capture — in particular the OOM correction the inspect block applied above — and
+            // adopts the late profile only when nothing was captured yet, so the OOM flag is never clobbered by
+            // re-awaiting the (already-completed, OomKilled=false) stats task.
             if (statsTask != null)
-                try { profile = await statsTask.WaitAsync(TimeSpan.FromSeconds(1), CancellationToken.None).ConfigureAwait(false); } catch { /* Ignore */ }
+            {
+                try
+                {
+                    var lateProfile = await statsTask.WaitAsync(TimeSpan.FromSeconds(1), CancellationToken.None).ConfigureAwait(false);
+                    profile = MergeLateResourceProfile(profile, lateProfile);
+                }
+                catch { /* Best-effort late capture; ignore. */ }
+            }
 
             ActiveContainers.TryRemove(containerId, out _);
 
