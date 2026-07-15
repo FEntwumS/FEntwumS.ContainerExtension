@@ -504,31 +504,39 @@ public partial class DockerDiagnosticsView
     {
         var actionsRow = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
 
-        actionsRow.Children.Add(CreateActionButton("Clear Recents", () =>
+        actionsRow.Children.Add(CreateActionButton("Clear Recents", async () =>
         {
-            ContainerTelemetry.ClearEntries();
-            _ = PopulateTelemetryAsync();
-            return Task.CompletedTask;
+            // ClearEntries truncates the on-disk log under a cross-process mutex; run it off the UI thread.
+            await Task.Run(() => ContainerTelemetry.ClearEntries()).ConfigureAwait(false);
+            await PopulateTelemetryAsync().ConfigureAwait(false);
         }, "Delete all recorded execution entries from the telemetry log"));
 
-        actionsRow.Children.Add(CreateActionButton("Export Telemetry", () =>
+        actionsRow.Children.Add(CreateActionButton("Export Telemetry", async () =>
         {
-            var destPath = Path.Combine(
-          ResolveExportDirectory(),
-          $"container_telemetry_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
-            var success = ContainerTelemetry.ExportTo(destPath);
-            _telemetryContent.Children.Add(new TextBlock
+            // ResolveExportDirectory may create the fallback directory and ExportTo copies the whole log,
+            // so keep both off the UI thread, then marshal the status line back for the control update.
+            var (destPath, success) = await Task.Run(() =>
             {
-                Text = success
-                    ? $"Exported to {destPath}"
-                    : $"Export failed — could not write to {destPath}",
-                FontSize = 10,
-                Foreground = success ? GreenColor : RedColor,
-                FontStyle = FontStyle.Italic,
-                Margin = new Thickness(0, 2, 0, 0),
-                TextWrapping = TextWrapping.Wrap
+                var path = Path.Combine(
+                    ResolveExportDirectory(),
+                    $"container_telemetry_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
+                return (path, ContainerTelemetry.ExportTo(path));
+            }).ConfigureAwait(false);
+
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                _telemetryContent.Children.Add(new TextBlock
+                {
+                    Text = success
+                        ? $"Exported to {destPath}"
+                        : $"Export failed — could not write to {destPath}",
+                    FontSize = 10,
+                    Foreground = success ? GreenColor : RedColor,
+                    FontStyle = FontStyle.Italic,
+                    Margin = new Thickness(0, 2, 0, 0),
+                    TextWrapping = TextWrapping.Wrap
+                });
             });
-            return Task.CompletedTask;
         }, "Export the full telemetry log as a .jsonl file"));
 
         return actionsRow;
