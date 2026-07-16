@@ -28,4 +28,8 @@ Security-relevant areas in-scope include:
 - **Path traversal** - Workspace mount injection that accesses files outside the active project directory.
 - **Zombie Process Exhaustion** - Unhandled PIDs overloading host PID limits.
 
+Two settings deliberately relax the isolation boundary. Both default to disabled, and a bypass reached through either is not a vulnerability:
+- **Allow Native Fallback** - Runs the tool directly on the host when no container engine is reachable, bypassing container isolation by design.
+- **Allow Privileged Containers** - Permits `--privileged`, forfeiting the `--cap-drop=ALL` and `no-new-privileges` posture of the default path.
+
 Issues related to host-side Docker daemon misconfiguration (e.g., exposing unauthenticated TCP sockets) or inherent zero-days in the EDA tools themselves (e.g., buffer overflows in `yosys`) are outside the scope of this project, provided they do not facilitate a container escape.
