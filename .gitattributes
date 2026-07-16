@@ -50,7 +50,7 @@ docs/       export-ignore
 *.jpeg      binary
 *.gif       binary
 *.ico       binary
-*.svg       binary
+*.svg       text diff
 *.dll       binary
 *.exe       binary
 *.pdb       binary
