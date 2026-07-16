@@ -79,7 +79,7 @@ pull() {
     printf "\033[1;32m     OK\033[0m (Digest: %s)\n" "${digest#*@}"
     SUCCEEDED=$((SUCCEEDED + 1))
   else
-    printf "\033[1;31m     FAILED (After $retries retries)\033[0m\n"
+    printf "\033[1;31m     FAILED (After %d retries)\033[0m\n" "$retries"
     FAILED=$((FAILED + 1))
   fi
 }
