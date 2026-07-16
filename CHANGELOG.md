@@ -26,8 +26,8 @@ execution and evaluation-path semantics are unchanged.
 ### Changed
 
 - The pinned `oss-cad-suite` toolchain image is advanced to the 2026-07-15 release (Dockerfile build arguments, the fail-closed SHA-256, the CI image tag, the build-dialog label, and the submodule pointer), and the in-app build-local-image dialog recommends it.
-- The OneWare host-shared `OneWare.Essentials` pin is advanced 1.0.19 to 1.0.22 for the current OneWare Studio 1.0.23 host — the newest published version that does not exceed the host, so the plugin loader accepts it. It still targets Avalonia 11.3.17, so no host-shared transitive dependency changes.
-- The build-time analyzer SonarAnalyzer.CSharp is updated 10.28 to 10.29.
+- The OneWare host-shared `OneWare.Essentials` pin is advanced from 1.0.19 to 1.0.22 for the current OneWare Studio 1.0.23 host — the newest published version that does not exceed the host, so the plugin loader accepts it. It still targets Avalonia 11.3.17, so no host-shared transitive dependency changes.
+- The build-time analyzer SonarAnalyzer.CSharp is updated from 10.28 to 10.29.
 - The Extra Container Labels help text is corrected to the space-separated format the parser accepts (it had advertised a comma-separated form that mis-parses); the over-75% resource-allocation advisory is now surfaced on save with a confirm step rather than computed and discarded; the telemetry export and clear file I/O is moved off the UI thread; and the documented dashboard section name is aligned with the UI ("Execution History").
 
 ### Tests
