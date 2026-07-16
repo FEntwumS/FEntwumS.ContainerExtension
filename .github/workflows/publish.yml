@@ -6,6 +6,9 @@ on:
     types:
       - published
 
+permissions:
+  contents: read
+
 concurrency:
   group: publish
   cancel-in-progress: false
