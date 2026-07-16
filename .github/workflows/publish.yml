@@ -64,12 +64,14 @@ jobs:
           format: spdx-json
           output-file: publish/sbom.spdx.json
 
+      # zip ships on the runner. Shelling out keeps a third-party action out of the release job,
+      # which is the one holding contents, id-token and attestations write. The version travels via
+      # env rather than ${{ }} interpolation so a tag can never be substituted into the command.
       - name: Compress Release Artifacts
-        uses: thedoctor0/zip-release@b57d897cb5d60cb78b51a507f63fa184cfe35554 # 0.7.6
-        with:
-          type: "zip"
-          filename: ../ContainerExtension_${{steps.version.outputs.version}}_all.zip
-          directory: ./publish
+        working-directory: ./publish
+        run: zip -r "../ContainerExtension_${VERSION}_all.zip" .
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
 
       - name: Generate SLSA Build Provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
