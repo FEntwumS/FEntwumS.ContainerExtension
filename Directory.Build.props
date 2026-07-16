@@ -54,7 +54,10 @@
         <RepositoryType>git</RepositoryType>
     </PropertyGroup>
     
-    <Target Name="FormatVerify" BeforeTargets="BeforeBuild">
-        <Message Importance="high" Text="[MSBuild] Deterministic build properties verified." />
+    <!-- Deterministic builds are asserted, not announced: the property is required rather than
+         reported, so a misconfigured build fails closed instead of printing that it was verified.
+         Source formatting is gated separately, by the dotnet format step in the CI workflow. -->
+    <Target Name="DeterministicVerify" BeforeTargets="BeforeBuild">
+        <Error Condition="'$(Deterministic)' != 'true'" Text="Deterministic builds are required." />
     </Target>
 </Project>
