@@ -29,7 +29,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
         with:
           global-json-file: global.json
 
@@ -58,7 +58,7 @@ jobs:
           GITHUB_ACTIONS: true
 
       - name: Generate SBOM
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           path: ./publish
           format: spdx-json
@@ -74,7 +74,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
 
       - name: Generate SLSA Build Provenance
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: ContainerExtension_${{steps.version.outputs.version}}_all.zip
 
