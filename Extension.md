@@ -17,7 +17,7 @@ or requiring a host toolchain install.
   per-execution "copy docker run" command.
 - **Docker dashboard:** live container, image, and daemon status.
 - **Orphan cleanup:** dangling containers are removed on IDE shutdown or crash.
-- **Supply chain:** reproducible image build, SBOM and OIDC build attestations on releases, CodeQL and
+- **Supply chain:** digest-pinned base image and a checksum-verified toolchain archive, SBOM and OIDC build attestations on releases, CodeQL and
   Trivy scans in CI.
 
 ## Getting started
