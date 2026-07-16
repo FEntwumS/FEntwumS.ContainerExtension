@@ -63,5 +63,3 @@ docs/       export-ignore
 
 # -- GitHub Linguist Overrides ------------------------------------------------
 docker/oss-cad-suite/oss-cad-suite-build/**  linguist-vendored
-**/api/**                                    linguist-generated
-**/_site/**                                  linguist-generated
