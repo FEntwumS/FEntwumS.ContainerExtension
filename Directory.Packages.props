@@ -7,16 +7,16 @@
     <PackageVersion Include="Avalonia" Version="11.3.17" />
     <PackageVersion Include="Avalonia.Themes.Fluent" Version="11.3.17" />
     <PackageVersion Include="Docker.DotNet" Version="3.125.15" />
-    <PackageVersion Include="Meziantou.Analyzer" Version="3.0.122">
+    <PackageVersion Include="Meziantou.Analyzer" Version="3.0.123">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageVersion>
-    <PackageVersion Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="10.0.301">
+    <PackageVersion Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="10.0.302">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageVersion>
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.9" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <!-- Compile-time only (ExcludeAssets=runtime;Native): the OneWare host supplies the runtime
          assembly. Pin to the newest Essentials on NuGet that does not exceed the targeted host, or the
          plugin loader rejects the plugin. 1.0.20/1.0.21/1.0.23 are host git tags only (absent from
