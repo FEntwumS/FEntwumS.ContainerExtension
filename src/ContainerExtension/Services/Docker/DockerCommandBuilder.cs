@@ -160,6 +160,15 @@ internal static class DockerCommandBuilder
         var executablePath = NormalizeSeparators(rawExePath);
         var executable = Path.GetFileName(executablePath);
 
+        // OneWare hands us the host tool path, which on Windows carries sometimes contains ".exe" suffix
+        // (e.g. ".../ghdl/bin/ghdl.exe"). The container is always Linux, where the binary is
+        // named without that suffix, so execve("ghdl.exe", ...) fails with ENOENT (exit 127).
+        // Strip the Windows executable extension so the container command matches the Linux binary.
+        if (executable.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            executable = executable[..^4];
+        }
+
         // The caller must supply an absolute working directory (the project root). Resolving a relative
         // or empty value against the process directory would silently mount the plugin's own bin folder
         // (e.g. "<bin>/Debug/net10.0/C:/Users/.../Project:/workspace"), producing a broken bind. Reject it
