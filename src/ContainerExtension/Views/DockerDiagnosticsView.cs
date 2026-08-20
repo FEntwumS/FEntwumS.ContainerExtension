@@ -51,7 +51,10 @@ public partial class DockerDiagnosticsView : UserControl
     // Prepended to every command injected into the interactive terminal so a non-empty input line (e.g. a
     // half-typed "v") cannot corrupt it into "vdocker ...". Ctrl-E moves the cursor to the end of the line
     // and Ctrl-U discards the whole line, leaving a clean prompt before the command is typed.
-    private const string TerminalLineReset = "\u0005\u0015";
+    // These are readline (bash/zsh) line-editing keys: PowerShell and cmd on Windows do not interpret them
+    // and would echo them literally, turning "docker ..." into "^E^Udocker ..." (command not found), so the
+    // reset is suppressed on Windows.
+    private static readonly string TerminalLineReset = OperatingSystem.IsWindows() ? string.Empty : "\u0005\u0015";
 
     // The project's toolchain image is produced locally (Build Local Image / build_oss_cad_suite.sh) and is
     // NOT published to a registry, so Pull / Check-for-Updates cannot fetch it. Used to redirect those
