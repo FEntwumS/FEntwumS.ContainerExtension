@@ -4,6 +4,20 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.14] - 2026-08-20
+
+An internal maintainability pass over 1.0.13. The monolithic `DockerExecutionStrategy` is decomposed
+into focused, independently-testable collaborators. Container execution, telemetry, and security-gate
+behavior are unchanged: method bodies were preserved and only their dependencies re-targeted.
+
+### Changed
+
+- `DockerExecutionStrategy` is refactored from a single ~3,300-line class into a coordinator that composes dedicated collaborators, each owning one concern: bind-mount validation and canonicalization (`BindValidator`), `docker run` command rendering with environment-value masking (`DockerRunCommandFormatter`), daemon endpoint verification — named-pipe trust and Unix socket probing (`DaemonEndpointValidator`), dangling-container reaping on exit/Ctrl-C/dispose (`ContainerReaper`), daemon bootstrap and API-version negotiation (`DockerConnectionFactory`), the container run loop (`ContainerRunner`), host-native fallback execution (`NativeFallbackExecutor`), and level-gated tool-console logging/output handling (`DockerToolConsole`). The public surface, container-execution semantics, and all security gates are unchanged.
+
+### Tests
+
+- Per-collaborator unit tests accompany the extracted `BindValidator`, `DockerRunCommandFormatter`, and `DaemonEndpointValidator`, moved from reflection-based access to direct calls; `DockerRunCommandFormatter` gains explicit coverage of environment-value masking. A new daemon-backed smoke test runs a real container end-to-end through `ExecuteAsync` using a small cached image and no toolchain fixtures, providing a fast regression anchor for the execution engine.
+
 ## [1.0.13] - 2026-07-15
 
 A follow-up hardening and maintenance pass over 1.0.12: the remaining low-severity items from the
