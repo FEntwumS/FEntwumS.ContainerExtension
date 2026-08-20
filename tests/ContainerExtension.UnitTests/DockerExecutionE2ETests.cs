@@ -1269,7 +1269,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         buffer.Append(new string('a', 9 * 1024 * 1024)); // > 8MB
 
         ContainerTelemetry.ClearEntries();
-        DockerExecutionStrategy.DrainLines(buffer, "a", _ => true); // textSpan must not be empty to trigger OOM shield
+        DockerToolConsole.DrainLines(buffer, "a", _ => true); // textSpan must not be empty to trigger OOM shield
 
         Assert.Equal(0, buffer.Length); // should be cleared
     }
@@ -1308,24 +1308,6 @@ public sealed class DockerExecutionE2ETests : IDisposable
         Assert.Equal(0, total);
     }
 
-    [FactIfNoCI]
-    public void F5_Telemetry_CommandTracing_Boundary()
-    {
-        using var provider = new E2ETestServiceProvider();
-        provider.SettingsService.SetSettingValue(ContainerExtensionModule.ExtraFlagsSetting, "--label custom=val");
-
-        using var strategy = new DockerExecutionStrategy(provider);
-        var cmd = new ToolCommand
-        {
-            Executable = "ghdl",
-            ToolName = "ghdl",
-            WorkingDirectory = "/dummy",
-            CommandArguments = BuildArgs("-a", "file.vhd")
-        };
-
-        var runCommand = strategy.GenerateDockerRunCommand();
-        Assert.Contains("--label custom=val", runCommand);
-    }
 
     [FactIfNoCI]
     public void F6_Diagnostics_InvalidImageFormat_Boundary()

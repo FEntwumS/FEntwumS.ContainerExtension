@@ -10,11 +10,11 @@
         <SelfContained>false</SelfContained>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <NoWarn>$(NoWarn);CS1591;MA0051;S3358;MA0048;MA0016;MA0011;MA0009;S1075;S3903;S3267;S3010;S2696;S125;S1244;S1118;MA0134;MA0047;S1905;S3168;S6966</NoWarn>
+        <UseLocalEssentials>false</UseLocalEssentials>
     </PropertyGroup>
 
     <ItemGroup>
         <InternalsVisibleTo Include="ContainerExtension.UnitTests" />
-        <InternalsVisibleTo Include="ContainerBenchmarkHarness" />
     </ItemGroup>
 
     <ItemGroup>
@@ -36,13 +36,20 @@
           <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
           <PrivateAssets>all</PrivateAssets>
         </PackageReference>
-        <PackageReference Include="OneWare.Essentials" Private="false" ExcludeAssets="runtime;Native" />
         <PackageReference Include="Docker.DotNet" Private="true" />
         <PackageReference Include="System.IO.Pipelines" />
         <PackageReference Include="SonarAnalyzer.CSharp">
           <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
           <PrivateAssets>all</PrivateAssets>
         </PackageReference>
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(UseLocalEssentials)' == 'true'">
+      <ProjectReference Include="..\..\..\OneWare\src\OneWare.Essentials\OneWare.Essentials.csproj" Private="false" ExcludeAssets="runtime;Native" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(UseLocalEssentials)' != 'true'">
+      <PackageReference Include="OneWare.Essentials" Private="false" ExcludeAssets="runtime;Native" />
     </ItemGroup>
 
     <ItemGroup>

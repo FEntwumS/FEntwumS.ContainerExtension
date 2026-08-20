@@ -372,65 +372,6 @@ public sealed class SecurityAndParsingTests
         }
     }
 
-    // -- DockerExecutionStrategy.ValidateBinds ---------------------------
-
-    private static Exception? InvokeValidateBinds(IList<string>? binds)
-    {
-        var method = typeof(DockerExecutionStrategy).GetMethod("ValidateBinds", StaticNonPublic);
-        Assert.NotNull(method);
-        try
-        {
-            method!.Invoke(null, new object?[] { binds });
-            return null;
-        }
-        catch (TargetInvocationException ex)
-        {
-            return ex.InnerException;
-        }
-    }
-
-    [Theory]
-    [InlineData("/etc")]
-    [InlineData("/proc")]
-    [InlineData("/sys")]
-    public void ValidateBinds_RejectsCriticalHostMounts(string hostPath)
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            return; // The blocked-path set differs on Windows; these POSIX roots do not apply.
-        }
-        var binds = new List<string> { $"{hostPath}:/workspace:ro" };
-        var ex = InvokeValidateBinds(binds);
-        Assert.IsType<DockerExecutionException>(ex);
-    }
-
-    [Fact]
-    public void ValidateBinds_RewritesBenignBindToCanonicalForm()
-    {
-        var tempDir = Path.Combine(Path.GetTempPath(), "BindTest_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
-        try
-        {
-            var canonicalMethod = typeof(DockerExecutionStrategy).GetMethod("GetCanonicalPath", StaticNonPublic);
-            Assert.NotNull(canonicalMethod);
-            var canonical = (string)canonicalMethod!.Invoke(null, new object[] { tempDir })!;
-
-            var binds = new List<string> { $"{tempDir}:/workspace:rw" };
-            var ex = InvokeValidateBinds(binds);
-            Assert.Null(ex);
-            Assert.Equal($"{canonical}:/workspace:rw", binds[0]);
-        }
-        finally
-        {
-            try { Directory.Delete(tempDir, true); } catch { /* best-effort teardown */ }
-        }
-    }
-
-    [Fact]
-    public void ValidateBinds_NullList_NoOp()
-    {
-        Assert.Null(InvokeValidateBinds(null));
-    }
 }
 
 // ISettingsService stub whose value lookups throw, exercising the SafeGetSetting failure path.

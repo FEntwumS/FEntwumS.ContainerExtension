@@ -15,11 +15,7 @@ namespace ContainerExtension.UnitTests;
 public sealed class HardeningChallengeTests
 {
     private static string InvokeGetCanonicalPath(string path)
-    {
-        var method = typeof(DockerExecutionStrategy).GetMethod("GetCanonicalPath", BindingFlags.NonPublic | BindingFlags.Static);
-        if (method == null) throw new InvalidOperationException("GetCanonicalPath method not found");
-        return (string)method.Invoke(null, new object[] { path })!;
-    }
+        => PathCanonicalizer.GetCanonicalPath(path);
 
     [Fact]
     public void GetCanonicalPath_NestedSymlinks_ResolvesCorrectly()
@@ -67,9 +63,8 @@ public sealed class HardeningChallengeTests
             File.CreateSymbolicLink(linkB, linkC);
             File.CreateSymbolicLink(linkC, linkA);
 
-            var ex = Assert.Throws<TargetInvocationException>(() => InvokeGetCanonicalPath(linkA));
-            Assert.IsType<DockerExecutionException>(ex.InnerException);
-            Assert.Contains("Circular", ex.InnerException.Message, StringComparison.OrdinalIgnoreCase);
+            var ex = Assert.Throws<DockerExecutionException>(() => InvokeGetCanonicalPath(linkA));
+            Assert.Contains("Circular", ex.Message, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
