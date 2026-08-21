@@ -10,7 +10,9 @@
         <SelfContained>false</SelfContained>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <NoWarn>$(NoWarn);CS1591;MA0051;S3358;MA0048;MA0016;MA0011;MA0009;S1075;S3903;S3267;S3010;S2696;S125;S1244;S1118;MA0134;MA0047;S1905;S3168;S6966</NoWarn>
-        <UseLocalEssentials>false</UseLocalEssentials>
+        <!-- UseLocalEssentials is defined in Directory.Build.props so that Directory.Build.props and
+             Directory.Packages.props (imported before this file) can see it and relax the lock file /
+             transitive pinning for local mode. Toggle it there, not here. -->
     </PropertyGroup>
 
     <ItemGroup>

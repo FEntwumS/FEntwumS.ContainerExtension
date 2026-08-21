@@ -1,4 +1,22 @@
 <Project>
+    <!-- Local development toggle: reference a local OneWare.Essentials source checkout
+         (..\..\..\OneWare\src\OneWare.Essentials) instead of the NuGet package. Off by default.
+         Defined here (not in the .csproj) so the lock-file and transitive-pinning relaxations below,
+         and in Directory.Packages.props, can observe it — both files import before any .csproj body.
+         Override on the command line with -p:UseLocalEssentials=true or by editing the default here. -->
+    <PropertyGroup>
+        <UseLocalEssentials Condition="'$(UseLocalEssentials)' == ''">false</UseLocalEssentials>
+    </PropertyGroup>
+
+    <!-- Local mode does not use the committed packages.lock.json (that lock pins OneWare.Essentials as a
+         NuGet package; keeping it in local mode would pull a second OneWare.Essentials into the graph and
+         produce "Ambiguous reference" errors). Redirect the lock to an obj\ scratch file and unlock it so
+         the local project's own transitive versions (e.g. Avalonia 11.3.18) float instead of downgrading. -->
+    <PropertyGroup Condition="'$(UseLocalEssentials)' == 'true'">
+        <RestoreLockedMode>false</RestoreLockedMode>
+        <NuGetLockFilePath>$(MSBuildProjectDirectory)\obj\packages.local.lock.json</NuGetLockFilePath>
+    </PropertyGroup>
+
     <!-- Core Compiler Settings -->
     <PropertyGroup>
         <LangVersion>13.0</LangVersion>

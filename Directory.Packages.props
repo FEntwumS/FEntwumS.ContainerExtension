@@ -1,7 +1,10 @@
 <Project>
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
-    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+    <!-- Transitive pinning is disabled in local mode (UseLocalEssentials=true): the local
+         OneWare.Essentials checkout pulls newer transitive versions (e.g. Avalonia 11.3.18) than the
+         central pins here, and pinning would downgrade them to a conflict (NU1109). -->
+    <CentralPackageTransitivePinningEnabled Condition="'$(UseLocalEssentials)' != 'true'">true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="Avalonia" Version="11.3.17" />
