@@ -365,7 +365,7 @@ public sealed class ContainerExtensionTests : IDisposable
     {
         var buffer = new StringBuilder();
         var lines = new List<string>();
-        DockerExecutionStrategy.DrainLines(buffer, "hello\n", s => { lines.Add(s); return true; });
+        DockerToolConsole.DrainLines(buffer, "hello\n", s => { lines.Add(s); return true; });
         Assert.Single(lines);
         Assert.Equal("hello", lines[0]);
         Assert.Equal(0, buffer.Length);
@@ -376,7 +376,7 @@ public sealed class ContainerExtensionTests : IDisposable
     {
         var buffer = new StringBuilder();
         var lines = new List<string>();
-        DockerExecutionStrategy.DrainLines(buffer, "line1\nline2\nline3\n", s => { lines.Add(s); return true; });
+        DockerToolConsole.DrainLines(buffer, "line1\nline2\nline3\n", s => { lines.Add(s); return true; });
         Assert.Equal(3, lines.Count);
         Assert.Equal("line1", lines[0]);
         Assert.Equal("line2", lines[1]);
@@ -389,11 +389,11 @@ public sealed class ContainerExtensionTests : IDisposable
         var buffer = new StringBuilder();
         var lines = new List<string>();
 
-        DockerExecutionStrategy.DrainLines(buffer, "partial", s => { lines.Add(s); return true; });
+        DockerToolConsole.DrainLines(buffer, "partial", s => { lines.Add(s); return true; });
         Assert.Empty(lines);
         Assert.Equal("partial", buffer.ToString());
 
-        DockerExecutionStrategy.DrainLines(buffer, " line\n", s => { lines.Add(s); return true; });
+        DockerToolConsole.DrainLines(buffer, " line\n", s => { lines.Add(s); return true; });
         Assert.Single(lines);
         Assert.Equal("partial line", lines[0]);
     }
@@ -403,7 +403,7 @@ public sealed class ContainerExtensionTests : IDisposable
     {
         var buffer = new StringBuilder();
         var lines = new List<string>();
-        DockerExecutionStrategy.DrainLines(buffer, "windows\r\n", s => { lines.Add(s); return true; });
+        DockerToolConsole.DrainLines(buffer, "windows\r\n", s => { lines.Add(s); return true; });
         Assert.Single(lines);
         Assert.Equal("windows", lines[0]);
     }
@@ -412,7 +412,7 @@ public sealed class ContainerExtensionTests : IDisposable
     public void DrainLines_NullHandler_DoesNotThrow()
     {
         var buffer = new StringBuilder();
-        var ex = Record.Exception(() => DockerExecutionStrategy.DrainLines(buffer, "text\n", null));
+        var ex = Record.Exception(() => DockerToolConsole.DrainLines(buffer, "text\n", null));
         Assert.Null(ex);
     }
 
@@ -421,7 +421,7 @@ public sealed class ContainerExtensionTests : IDisposable
     {
         var buffer = new StringBuilder();
         var lines = new List<string>();
-        DockerExecutionStrategy.DrainLines(buffer, "", s => { lines.Add(s); return true; });
+        DockerToolConsole.DrainLines(buffer, "", s => { lines.Add(s); return true; });
         Assert.Empty(lines);
     }
 
@@ -430,7 +430,7 @@ public sealed class ContainerExtensionTests : IDisposable
     {
         var buffer = new StringBuilder();
         var lines = new List<string>();
-        DockerExecutionStrategy.DrainLines(buffer, "no newline", s => { lines.Add(s); return true; });
+        DockerToolConsole.DrainLines(buffer, "no newline", s => { lines.Add(s); return true; });
         Assert.Empty(lines);
         Assert.Equal("no newline", buffer.ToString());
     }
@@ -2581,7 +2581,7 @@ public sealed class ContainerExtensionTests : IDisposable
     [Fact]
     public void FindExecutableInPath_ResolvesGitOnSystem()
     {
-        var gitPath = DockerExecutionStrategy.FindExecutableInPath("git");
+        var gitPath = NativeFallbackExecutor.FindExecutableInPath("git");
         Assert.NotNull(gitPath);
         Assert.True(File.Exists(gitPath));
     }
@@ -2717,12 +2717,8 @@ public sealed class ContainerExtensionTests : IDisposable
                 File.CreateSymbolicLink(pathA, pathB);
                 File.CreateSymbolicLink(pathB, pathA);
 
-                var method = typeof(DockerExecutionStrategy).GetMethod("GetCanonicalPath", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-                Assert.NotNull(method);
-
-                var ex = Assert.Throws<System.Reflection.TargetInvocationException>(() => method.Invoke(null, new object[] { pathA }));
-                Assert.IsType<DockerExecutionException>(ex.InnerException);
-                Assert.Contains("Circular", ex.InnerException.Message, StringComparison.OrdinalIgnoreCase);
+                var ex = Assert.Throws<DockerExecutionException>(() => PathCanonicalizer.GetCanonicalPath(pathA));
+                Assert.Contains("Circular", ex.Message, StringComparison.OrdinalIgnoreCase);
             }
         }
         finally
@@ -2738,15 +2734,12 @@ public sealed class ContainerExtensionTests : IDisposable
         Directory.CreateDirectory(tempDir);
         try
         {
-            var method = typeof(DockerExecutionStrategy).GetMethod("GetCanonicalPath", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-            Assert.NotNull(method);
-
-            var canonicalTempDir = (string)method.Invoke(null, new object[] { tempDir })!;
+            var canonicalTempDir = PathCanonicalizer.GetCanonicalPath(tempDir);
 
             var testPath = Path.Combine(tempDir, "nonexistent", "subdir");
             var expectedPath = Path.Combine(canonicalTempDir, "nonexistent", "subdir");
 
-            var result = (string)method.Invoke(null, new object[] { testPath })!;
+            var result = PathCanonicalizer.GetCanonicalPath(testPath);
             Assert.Equal(expectedPath, result);
         }
         finally
@@ -2767,11 +2760,8 @@ public sealed class ContainerExtensionTests : IDisposable
             {
                 File.CreateSymbolicLink(symlinkPath, "/private");
 
-                var method = typeof(DockerExecutionStrategy).GetMethod("GetCanonicalPath", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-                Assert.NotNull(method);
-
                 var inputPath = Path.Combine(tempDir, "symlink_to_private", "..", "etc");
-                var result = (string)method.Invoke(null, new object[] { inputPath })!;
+                var result = PathCanonicalizer.GetCanonicalPath(inputPath);
 
                 // The actual OS path of inputPath is /private/etc (because symlink_to_private points to /private, and its parent is /)
                 // But if the resolver resolves it textually first, it returns tempDir/etc.

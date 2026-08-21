@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using ContainerExtension;
+using ContainerExtension.Services.Docker;
 using OneWare.Essentials.ToolEngine;
 using Xunit;
 
@@ -130,10 +131,10 @@ public sealed class QualityVerificationTests
     [Fact]
     public void MergeLateResourceProfile_RetainsOomCorrection_OverLateStatsProfile()
     {
-        var corrected = new DockerExecutionStrategy.ResourceProfile(0, 0, 0, OomKilled: true);
-        var lateStats = new DockerExecutionStrategy.ResourceProfile(1024, 42.0, 5, OomKilled: false);
+        var corrected = new ContainerRunner.ResourceProfile(0, 0, 0, OomKilled: true);
+        var lateStats = new ContainerRunner.ResourceProfile(1024, 42.0, 5, OomKilled: false);
 
-        var merged = DockerExecutionStrategy.MergeLateResourceProfile(corrected, lateStats);
+        var merged = ContainerRunner.MergeLateResourceProfile(corrected, lateStats);
 
         Assert.Same(corrected, merged);
         Assert.True(merged is { OomKilled: true });
@@ -142,16 +143,16 @@ public sealed class QualityVerificationTests
     [Fact]
     public void MergeLateResourceProfile_AdoptsLateProfile_WhenNothingCapturedYet()
     {
-        var lateStats = new DockerExecutionStrategy.ResourceProfile(2048, 12.5, 3, OomKilled: false);
+        var lateStats = new ContainerRunner.ResourceProfile(2048, 12.5, 3, OomKilled: false);
 
-        Assert.Same(lateStats, DockerExecutionStrategy.MergeLateResourceProfile(null, lateStats));
+        Assert.Same(lateStats, ContainerRunner.MergeLateResourceProfile(null, lateStats));
     }
 
     [Fact]
     public void MergeLateResourceProfile_RetainsCapture_WhenLateProfileMissing()
     {
-        var captured = new DockerExecutionStrategy.ResourceProfile(4096, 7.5, 9, OomKilled: false);
+        var captured = new ContainerRunner.ResourceProfile(4096, 7.5, 9, OomKilled: false);
 
-        Assert.Same(captured, DockerExecutionStrategy.MergeLateResourceProfile(captured, null));
+        Assert.Same(captured, ContainerRunner.MergeLateResourceProfile(captured, null));
     }
 }

