@@ -558,11 +558,13 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         var allTools = toolService.GetAllTools();
         if (allTools == null) return;
 
+        // Strategy-side opt-in: register the Docker strategy once with a predicate matching every tool —
+        // including tools registered later, which the tool service re-evaluates on demand.
+        toolService.RegisterStrategy(dockerStrategy, static _ => true);
+
         foreach (var globalTool in allTools)
         {
             if (globalTool == null || string.IsNullOrEmpty(globalTool.Key)) continue;
-
-            toolService.RegisterStrategy(globalTool.Key, dockerStrategy);
 
             var settingKey = $"{PerToolImagePrefix}{globalTool.Key.ToLowerInvariant()}";
             if (!settingsService.HasSetting(settingKey))

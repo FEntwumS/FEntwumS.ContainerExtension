@@ -20,9 +20,13 @@
       <ProjectReference Include="..\..\src\ContainerExtension\ContainerExtension.csproj" />
     </ItemGroup>
 
-    <ItemGroup>
-      <!-- OneWare.Essentials is excluded from runtime in the main project (host provides it),
-           but the test runner needs it to resolve ISettingValidation for validator tests. -->
+    <!-- OneWare.Essentials is excluded from runtime in the main project (the host provides it), but the
+         test runner has no host, so it needs the real runtime assembly (e.g. to resolve ISettingValidation
+         for validator tests). Mirror the main project's local/NuGet toggle, but keep runtime assets. -->
+    <ItemGroup Condition="'$(UseLocalEssentials)' == 'true'">
+      <ProjectReference Include="..\..\..\OneWare\src\OneWare.Essentials\OneWare.Essentials.csproj" />
+    </ItemGroup>
+    <ItemGroup Condition="'$(UseLocalEssentials)' != 'true'">
       <PackageReference Include="OneWare.Essentials" />
     </ItemGroup>
 
