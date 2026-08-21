@@ -280,29 +280,20 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
             try
             {
-                var strategyKey = dockerStrategy.GetStrategyKey();
                 while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
                 {
                     if (ct.IsCancellationRequested) break;
 
                     // Isolate each tick: a transient fault in one scan must not tear down the
-                    // poller, otherwise late-registered tools would silently never receive the
-                    // strategy until the next IDE restart.
+                    // poller, otherwise late-registered tools would silently never receive their
+                    // per-tool image setting until the next IDE restart.
                     try
                     {
-                        var currentTools = toolService.GetAllTools();
-                        var needsInjection = false;
-                        foreach (var tool in currentTools)
-                        {
-                            if (settingsService.HasSetting(tool.Key) && settingsService.GetSetting(tool.Key) is ComboBoxSetting comboSetting && (comboSetting.Options == null || comboSetting.Options.Length == 0 || !OptionsContains(comboSetting.Options, strategyKey)))
-                            {
-                                needsInjection = true;
-                                break;
-                            }
-                        }
-
-                        var currentToolCount = currentTools.Count;
-                        if (currentToolCount != knownToolCount || needsInjection)
+                        // The Docker strategy is registered once for all tools — current and future — via the
+                        // predicate registration, so late tools need no strategy re-injection, only their
+                        // per-tool image setting, which InjectStrategyIntoAllTools creates when the count grows.
+                        var currentToolCount = toolService.GetAllTools().Count;
+                        if (currentToolCount != knownToolCount)
                         {
                             knownToolCount = currentToolCount;
                             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -579,32 +570,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                   }
                 );
             }
-
-            if (settingsService.HasSetting(globalTool.Key) && settingsService.GetSetting(globalTool.Key) is ComboBoxSetting comboSetting)
-            {
-                var strategyKey = dockerStrategy.GetStrategyKey();
-                if (!OptionsContains(comboSetting.Options, strategyKey))
-                {
-                    var newOptions = new object[comboSetting.Options.Length + 1];
-                    Array.Copy(comboSetting.Options, newOptions, comboSetting.Options.Length);
-                    newOptions[^1] = strategyKey;
-                    comboSetting.Options = newOptions;
-                }
-            }
         }
-    }
-
-    private static bool OptionsContains(object[] options, string value)
-    {
-        if (options == null || options.Length == 0) return false;
-        for (int idx = 0; idx < options.Length; idx++)
-        {
-            if (options[idx] is string str && string.Equals(str, value, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-        return false;
     }
 
     /// <summary>
