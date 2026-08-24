@@ -24,12 +24,12 @@ jobs:
     steps:
       # No submodules: this job builds src/ContainerExtension only, and the one path it takes from
       # docker/ is the Dockerfile, which is tracked here rather than in the toolchain submodule.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
 
@@ -74,7 +74,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
 
       - name: Generate SLSA Build Provenance
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: ContainerExtension_${{steps.version.outputs.version}}_all.zip
 
