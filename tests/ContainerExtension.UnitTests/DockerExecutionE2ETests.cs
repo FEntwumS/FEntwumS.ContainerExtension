@@ -1024,6 +1024,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
     public async Task F2_Verilog_ExecuteMissingVvp_Boundary()
     {
         using var provider = new E2ETestServiceProvider();
+        provider.SettingsService.SetSettingValue("ContainerImage_vvp", "hdlc/iverilog:latest");
         using var strategy = new DockerExecutionStrategy(provider);
 
         var command = new ToolCommand
@@ -1033,8 +1034,9 @@ public sealed class DockerExecutionE2ETests : IDisposable
             WorkingDirectory = Directory.GetCurrentDirectory(),
             CommandArguments = BuildArgs("missing_file.vvp")
         };
-        var (success, _) = await strategy.ExecuteAsync(command);
+        var (success, output) = await strategy.ExecuteAsync(command);
         Assert.False(success);
+        Assert.Contains("Unable to open input file", output, StringComparison.Ordinal);
     }
 
     [FactIfNoCI]
