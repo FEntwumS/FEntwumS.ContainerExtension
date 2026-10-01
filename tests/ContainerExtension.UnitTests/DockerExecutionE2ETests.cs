@@ -292,6 +292,48 @@ public sealed class DockerExecutionE2ETests : IDisposable
     }
 
     [FactIfNoCI]
+    public async Task F2_Verilog_ExecuteWritesWaveform_HappyPath()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "F2_VWaveform_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "wave_tb.v"),
+                "module wave_tb; reg clk = 0; always #5 clk = ~clk; initial begin $dumpfile(\"wave_tb.vcd\"); $dumpvars(0, wave_tb); #50 $finish; end endmodule\n");
+
+            using var provider = new E2ETestServiceProvider();
+            provider.SettingsService.SetSettingValue("ContainerImage_iverilog", "hdlc/iverilog:latest");
+            provider.SettingsService.SetSettingValue("ContainerImage_vvp", "hdlc/iverilog:latest");
+            using var strategy = new DockerExecutionStrategy(provider);
+
+            var cmdCompile = new ToolCommand
+            {
+                Executable = "iverilog",
+                ToolName = "iverilog",
+                WorkingDirectory = tempDir,
+                CommandArguments = BuildArgs("-o", "wave_tb.vvp", "wave_tb.v")
+            };
+            var (compiled, _) = await strategy.ExecuteAsync(cmdCompile);
+            Assert.True(compiled);
+
+            // Called as OneWare's Icarus simulator calls it: the tool name as executable, the compiled file as the only argument
+            var cmdExec = new ToolCommand
+            {
+                Executable = "vvp",
+                ToolName = "vvp",
+                WorkingDirectory = tempDir,
+                CommandArguments = BuildArgs("wave_tb.vvp")
+            };
+            var (success, output) = await strategy.ExecuteAsync(cmdExec);
+            Assert.True(success, output);
+            var waveform = Path.Combine(tempDir, "wave_tb.vcd");
+            Assert.True(File.Exists(waveform));
+            Assert.True(new FileInfo(waveform).Length > 0);
+        }
+        finally { try { Directory.Delete(tempDir, true); } catch { } }
+    }
+
+    [FactIfNoCI]
     public async Task F2_Verilator_Compile_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F2_Verilator_" + Guid.NewGuid().ToString("N"));
