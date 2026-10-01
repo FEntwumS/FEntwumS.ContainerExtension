@@ -306,7 +306,8 @@ internal static partial class DaemonEndpointValidator
             }
             return (false, errorMessage);
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        // A cancellation of the caller's token is no connection failure: it reaches the caller as a cancellation.
+        catch (Exception ex) when (ex is not OutOfMemoryException && !(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             return (false, $"Unknown connection failure for socket '{path}': {ex.Message}");
         }

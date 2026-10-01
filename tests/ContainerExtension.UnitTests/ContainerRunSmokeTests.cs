@@ -237,6 +237,34 @@ public sealed class ContainerRunSmokeTests : IDisposable
         Assert.Empty(errors);
     }
 
+    // Cancelled before the run even checks the daemon's socket, where the cancellation used to come back
+    // as a connection failure.
+    [FactIfNoCI]
+    public async Task Busybox_RunCancelledBeforeItStarts_ReportsTheCancellationOnce()
+    {
+        using var provider = CreateBusyboxProvider();
+        using var strategy = new DockerExecutionStrategy(provider);
+        var feedback = new RecordingRunFeedback();
+        strategy.HostFeedback = feedback;
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+        var errors = new ConcurrentQueue<string>();
+        var command = CreateShellCommand("echo to-stdout",
+            outputHandler: _ => true,
+            errorHandler: line =>
+            {
+                errors.Enqueue(line);
+                return true;
+            },
+            workingDirectory: _workDir);
+
+        var (success, _) = await strategy.ExecuteAsync(command, cancellation.Token);
+
+        Assert.False(success);
+        Assert.Contains(($"[{Path.GetFileName(_workDir)}]: sh cancelled!", (Color?)Colors.DarkOrange), feedback.Notices);
+        Assert.Empty(errors);
+    }
+
     [FactIfNoCI]
     public async Task Busybox_EveryRun_ShowsAStatusEntryUntilItEnds()
     {
