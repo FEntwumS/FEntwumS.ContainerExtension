@@ -107,8 +107,8 @@ dotnet build  OneWare.ContainerExtension.slnx -warnaserror -c Release
 dotnet test   OneWare.ContainerExtension.slnx -c Release
 ```
 
-The container E2E tests are skipped in CI (Docker Hub rate limits and image-pull flakiness); they run
-locally when a daemon and the toolchain image are present.
+The container E2E tests are skipped in CI (Docker Hub rate limits and image-pull flakiness). What they
+need to run locally is listed under [Running the container tests](CONTRIBUTING.md#running-the-container-tests).
 
 ## Documentation
 
