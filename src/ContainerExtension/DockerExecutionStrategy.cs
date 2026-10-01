@@ -470,6 +470,35 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         }
     }
 
+    /// <summary>
+    /// The hint lines a failed run adds below its error line, chosen by the failure's message and type.
+    /// </summary>
+    internal static string FailureHints(Exception ex, string image)
+    {
+        var hints = "";
+        if (ex.Message.Contains("No such image", StringComparison.OrdinalIgnoreCase))
+        {
+            hints += $"\n  Hint: Run 'docker pull {image}' to cache the image locally.";
+        }
+        if (ex.Message.Contains("pull access denied", StringComparison.OrdinalIgnoreCase))
+        {
+            hints += $"\n  Hint: The image '{image}' does not exist on Docker Hub or requires authentication.";
+        }
+        if (ex.Message.Contains("permission denied", StringComparison.OrdinalIgnoreCase) ||
+            ex.Message.Contains("access denied", StringComparison.OrdinalIgnoreCase) ||
+            ex is UnauthorizedAccessException ||
+            (ex is System.Net.Sockets.SocketException sex && (sex.SocketErrorCode == System.Net.Sockets.SocketError.AccessDenied || sex.NativeErrorCode == 13)))
+        {
+            hints += $"\n  Hint: A permission error was encountered. Ensure the current user has read/write permissions to the Docker socket, or add the user to the 'docker' group.";
+        }
+        if (ex.Message.Contains("port is already allocated", StringComparison.OrdinalIgnoreCase) ||
+            ex.Message.Contains("address already in use", StringComparison.OrdinalIgnoreCase))
+        {
+            hints += $"\n  Hint: A host port conflict was detected. Please check if another container or service is using the same port, or configure a different host port mapping.";
+        }
+        return hints;
+    }
+
     private static string ScrubUserPaths(string? input)
     {
         if (string.IsNullOrEmpty(input))
@@ -1159,27 +1188,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         catch (Exception ex)
         {
             errorMessage = ScrubUserPaths(ex.Message);
-            var err = ScrubUserPaths($"[Docker SDK Error] {ex.GetType().Name}: {ex.Message}");
-            if (ex.Message.Contains("No such image", StringComparison.OrdinalIgnoreCase))
-            {
-                err += $"\n  Hint: Run 'docker pull {image}' to cache the image locally.";
-            }
-            if (ex.Message.Contains("pull access denied", StringComparison.OrdinalIgnoreCase))
-            {
-                err += $"\n  Hint: The image '{image}' does not exist on Docker Hub or requires authentication.";
-            }
-            if (ex.Message.Contains("permission denied", StringComparison.OrdinalIgnoreCase) ||
-                ex.Message.Contains("access denied", StringComparison.OrdinalIgnoreCase) ||
-                ex is UnauthorizedAccessException ||
-                (ex is System.Net.Sockets.SocketException sex && (sex.SocketErrorCode == System.Net.Sockets.SocketError.AccessDenied || sex.NativeErrorCode == 13)))
-            {
-                err += $"\n  Hint: A permission error was encountered. Ensure the current user has read/write permissions to the Docker socket, or add the user to the 'docker' group.";
-            }
-            if (ex.Message.Contains("port is already allocated", StringComparison.OrdinalIgnoreCase) ||
-                ex.Message.Contains("address already in use", StringComparison.OrdinalIgnoreCase))
-            {
-                err += $"\n  Hint: A host port conflict was detected. Please check if another container or service is using the same port, or configure a different host port mapping.";
-            }
+            var err = ScrubUserPaths($"[Docker SDK Error] {ex.GetType().Name}: {ex.Message}") + FailureHints(ex, image);
             SafeInvoke(() => command.ErrorHandler?.Invoke(err));
             var friendlyEx = new DockerExecutionException(errorMessage, ex);
             ContainerTelemetry.TrackError("DockerExecutionStrategy", $"ExecuteAsync failed for '{executable}'", friendlyEx);
