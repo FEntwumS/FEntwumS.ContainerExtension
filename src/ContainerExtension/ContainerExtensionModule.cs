@@ -42,6 +42,8 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
 
     public const string DockerRuntimePathSetting = "ContainerExtension_DockerRuntimePath";
     public const string DefaultImageSetting = "ContainerExtension_DefaultImage";
+    // Also the placeholder of every per-tool image field, since an empty field falls back to this setting.
+    public const string DefaultImageSettingTitle = "Default Toolchain Image";
     public const string MemoryLimitSetting = "ContainerExtension_MemoryLimit";
 
     public const string PlatformSetting = "ContainerExtension_Platform";
@@ -200,7 +202,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         ContainerTelemetry.LogLevelChecker = () => settingsService.SafeGetSetting<string>(ContainerExtensionModule.LogLevelSetting, "Errors Only");
 
         settingsService.RegisterSettingSubCategory(SettingsCategoryBinary, SettingsSubCategoryEngine);
-        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DefaultImageSetting, new TextBoxSetting("Default Toolchain Image", OssCadSuiteImage, "The default container image for all tools — the project's full-flow oss-cad-suite image. It is build-only (not on Docker Hub): produce it via Build Local Image, not Pull.") { Validator = ImageFormatValidatorNoEmpty });
+        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DefaultImageSetting, new TextBoxSetting(DefaultImageSettingTitle, OssCadSuiteImage, "The default container image for all tools — the project's full-flow oss-cad-suite image. It is build-only (not on Docker Hub): produce it via Build Local Image, not Pull.") { Validator = ImageFormatValidatorNoEmpty });
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, PullPolicySetting, new ComboBoxSetting("Image Pull Policy", "if-not-present", ["always", "if-not-present", "never"]));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, PlatformSetting, new ComboBoxSetting("Image Platform", "auto", ["auto", "linux/amd64", "linux/arm64", "linux/arm/v7"]));
 
@@ -563,7 +565,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                 settingsService.RegisterSetting(
                   SettingsCategoryBinary, SettingsSubCategoryStrategy,
                   settingKey,
-                  new TextBoxSetting($"Container Image for {globalTool.Name}", "", DefaultToolImages.TryGetValue(globalTool.Key, out var defaultHint) ? defaultHint : FallbackImage)
+                  new TextBoxSetting($"Container Image for {globalTool.Name}", "", DefaultImageSettingTitle)
                   {
                       HoverDescription = $"Overrides the Default Toolchain Image when '{globalTool.Name}' is executed via Docker.",
                       Validator = ImageFormatValidatorAllowEmpty
