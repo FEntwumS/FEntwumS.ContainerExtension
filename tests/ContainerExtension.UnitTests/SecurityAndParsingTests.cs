@@ -350,6 +350,162 @@ public sealed class SecurityAndParsingTests
         }
     }
 
+    // -- docker.image of a call and of a tool's plugin -------------------
+
+    private const string CallImage = "call/image:tag";
+    private const string PluginImage = "plugin/image:tag";
+
+    private static ToolCommand CommandFor(string toolName, string? callImage = null) => new()
+    {
+        ToolName = toolName,
+        CommandArguments = [],
+        StrategyConfigurationOverrides = callImage == null
+            ? new Dictionary<string, string>(StringComparer.Ordinal)
+            : new Dictionary<string, string>(StringComparer.Ordinal) { [ContainerExtensionModule.StrategyConfigurationImageKey] = callImage }
+    };
+
+    // The plugin of "ghdl" declares pluginImage, when given; no other tool has a declared image.
+    private static TestServiceProvider ProviderWith(string? perToolImage = null, string? pluginImage = null)
+    {
+        var provider = new TestServiceProvider
+        {
+            ToolService = pluginImage == null
+                ? null
+                : new StrategyConfigurationToolService().WithConfiguration("ghdl", ContainerExtensionModule.StrategyConfigurationImageKey, pluginImage)
+        };
+        var settings = (MockSettingsService)provider.GetService(typeof(ISettingsService))!;
+        if (perToolImage != null)
+        {
+            settings.SetSettingValue("ContainerImage_ghdl", perToolImage);
+        }
+        settings.SetSettingValue(ContainerExtensionModule.DefaultImageSetting, "from/default:tag");
+        return provider;
+    }
+
+    // Without ONEWARE_DOCKER_IMAGE, so a value set on the machine running the tests cannot decide.
+    private static (string Image, string Source) ResolveWithoutEnvironmentImage(TestServiceProvider provider, ToolCommand command)
+    {
+        var original = Environment.GetEnvironmentVariable(EnvImageKey);
+        try
+        {
+            Environment.SetEnvironmentVariable(EnvImageKey, null);
+            using var strategy = new DockerExecutionStrategy(provider);
+            return strategy.ResolveImage(command);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(EnvImageKey, original);
+        }
+    }
+
+    [Fact]
+    public void ResolveImage_CallImage_OverridesPerToolAndPluginImage()
+    {
+        using var provider = ProviderWith(perToolImage: "pertool/image:tag", pluginImage: PluginImage);
+
+        var (image, source) = ResolveWithoutEnvironmentImage(provider, CommandFor("ghdl", CallImage));
+
+        Assert.Equal(CallImage, image);
+        Assert.Equal("docker.image of this call", source);
+    }
+
+    [Fact]
+    public void ResolveImage_EnvironmentVariable_OverridesCallImage()
+    {
+        var original = Environment.GetEnvironmentVariable(EnvImageKey);
+        try
+        {
+            Environment.SetEnvironmentVariable(EnvImageKey, "env/image:tag");
+            using var provider = ProviderWith();
+            using var strategy = new DockerExecutionStrategy(provider);
+
+            Assert.Equal(("env/image:tag", "ONEWARE_DOCKER_IMAGE"), strategy.ResolveImage(CommandFor("ghdl", CallImage)));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(EnvImageKey, original);
+        }
+    }
+
+    [Fact]
+    public void ResolveImage_PerToolSetting_OverridesPluginImage()
+    {
+        using var provider = ProviderWith(perToolImage: "pertool/image:tag", pluginImage: PluginImage);
+
+        var (image, source) = ResolveWithoutEnvironmentImage(provider, CommandFor("ghdl"));
+
+        Assert.Equal("pertool/image:tag", image);
+        Assert.Equal("ContainerImage_ghdl", source);
+    }
+
+    [Fact]
+    public void ResolveImage_PluginImage_OverridesDefaultSettingAndIsTrimmed()
+    {
+        using var provider = ProviderWith(pluginImage: " " + PluginImage + "\r");
+
+        var (image, source) = ResolveWithoutEnvironmentImage(provider, CommandFor("ghdl"));
+
+        Assert.Equal(PluginImage, image);
+        Assert.Equal("docker.image of tool 'ghdl'", source);
+    }
+
+    [Fact]
+    public void ResolveImage_ToolWithoutPluginImage_UsesDefaultSetting()
+    {
+        using var provider = ProviderWith(pluginImage: PluginImage);
+
+        var (image, source) = ResolveWithoutEnvironmentImage(provider, CommandFor("yosys"));
+
+        Assert.Equal("from/default:tag", image);
+        Assert.Equal(ContainerExtensionModule.DefaultImageSettingTitle, source);
+    }
+
+    [Theory]
+    [InlineData("image; rm -rf /")]
+    [InlineData("image:tag\nnext")]
+    [InlineData("-entrypoint=sh")]
+    public void ResolveImage_InvalidCallImage_FailsNamingTheCallButNotTheValue(string callImage)
+    {
+        using var provider = ProviderWith(pluginImage: PluginImage);
+
+        var ex = Assert.Throws<DockerExecutionException>(() => { _ = ResolveWithoutEnvironmentImage(provider, CommandFor("ghdl", callImage)); });
+
+        Assert.Contains("docker.image of this call", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(callImage, ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResolveImage_InvalidPluginImage_FailsNamingTheTool()
+    {
+        using var provider = ProviderWith(pluginImage: "plugin image");
+
+        var ex = Assert.Throws<DockerExecutionException>(() => { _ = ResolveWithoutEnvironmentImage(provider, CommandFor("ghdl")); });
+
+        Assert.Contains("docker.image of tool 'ghdl'", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PerToolImageFallback_NamesThePluginImage()
+    {
+        var configuration = new Dictionary<string, string>(StringComparer.Ordinal) { [ContainerExtensionModule.StrategyConfigurationImageKey] = PluginImage };
+
+        Assert.Equal(PluginImage, ContainerExtensionModule.PerToolImageFallback(configuration));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(" ")]
+    public void PerToolImageFallback_NamesTheDefaultSettingWithoutAPluginImage(string? pluginImage)
+    {
+        var configuration = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (pluginImage != null)
+        {
+            configuration[ContainerExtensionModule.StrategyConfigurationImageKey] = pluginImage;
+        }
+
+        Assert.Equal(ContainerExtensionModule.DefaultImageSettingTitle, ContainerExtensionModule.PerToolImageFallback(configuration));
+    }
+
 }
 
 // ISettingsService stub whose value lookups throw, exercising the SafeGetSetting failure path.
