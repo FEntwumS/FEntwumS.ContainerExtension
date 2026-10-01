@@ -199,7 +199,7 @@ public partial class DockerDiagnosticsView
                     try
                     {
                         removeBtn.Content = "Removing...";
-                        await _strategy.RemoveImageAsync(imageId);
+                        await _strategy.RemoveImageAsync(imageId, CancellationToken.None);
                         await RefreshAllAsync();
                     }
                     catch (Exception ex)
@@ -208,7 +208,7 @@ public partial class DockerDiagnosticsView
                         if (!_hasAttached) return;
                         removeBtn.Content = "Error";
                         ToolTip.SetTip(removeBtn, $"Failed to remove: {ex.Message}");
-                        await Task.Delay(3000);
+                        await Task.Delay(3000, CancellationToken.None);
                         if (!_hasAttached) return;
                         removeBtn.Content = "Remove";
                         ToolTip.SetTip(removeBtn, prevTip);

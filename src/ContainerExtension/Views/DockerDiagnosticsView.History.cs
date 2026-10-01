@@ -34,7 +34,7 @@ public partial class DockerDiagnosticsView
         var last = Volatile.Read(ref _lastTelemetryPopulationTime);
         if (now - last < 250)
         {
-            await Task.Delay(250).ConfigureAwait(false);
+            await Task.Delay(250, CancellationToken.None).ConfigureAwait(false);
             if (Environment.TickCount64 - Volatile.Read(ref _lastTelemetryPopulationTime) < 250)
             {
                 return;
@@ -43,7 +43,7 @@ public partial class DockerDiagnosticsView
         Volatile.Write(ref _lastTelemetryPopulationTime, Environment.TickCount64);
 
         var localToken = System.Threading.Interlocked.Increment(ref _currentTelemetryToken);
-        await _telemetrySemaphore.WaitAsync().ConfigureAwait(false);
+        await _telemetrySemaphore.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
             if (System.Threading.Volatile.Read(ref _currentTelemetryToken) != localToken)
@@ -60,7 +60,7 @@ public partial class DockerDiagnosticsView
             {
                 var stats = ContainerTelemetry.GetRecentEntriesWithStats(50);
                 return (stats.entries, stats.totalRuns, stats.successRate, stats.avgDuration, File.Exists(ContainerTelemetry.TelemetryFilePath));
-            }).ConfigureAwait(false);
+            }, CancellationToken.None).ConfigureAwait(false);
 
             if (System.Threading.Volatile.Read(ref _currentTelemetryToken) != localToken)
             {
@@ -507,7 +507,7 @@ public partial class DockerDiagnosticsView
         actionsRow.Children.Add(CreateActionButton("Clear Recents", async () =>
         {
             // ClearEntries truncates the on-disk log under a cross-process mutex; run it off the UI thread.
-            await Task.Run(() => ContainerTelemetry.ClearEntries()).ConfigureAwait(false);
+            await Task.Run(() => ContainerTelemetry.ClearEntries(), CancellationToken.None).ConfigureAwait(false);
             await PopulateTelemetryAsync().ConfigureAwait(false);
         }, "Delete all recorded execution entries from the telemetry log"));
 
@@ -521,7 +521,7 @@ public partial class DockerDiagnosticsView
                     ResolveExportDirectory(),
                     $"container_telemetry_{DateTime.Now:yyyyMMdd_HHmmss}.jsonl");
                 return (path, ContainerTelemetry.ExportTo(path));
-            }).ConfigureAwait(false);
+            }, CancellationToken.None).ConfigureAwait(false);
 
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
