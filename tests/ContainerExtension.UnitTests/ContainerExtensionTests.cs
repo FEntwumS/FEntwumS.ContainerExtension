@@ -611,6 +611,22 @@ public sealed class ContainerExtensionTests : IDisposable
     }
 
     [Fact]
+    public void BuildContainerParameters_BindsWorkspaceWritableForVvp()
+    {
+        // OneWare passes vvp only the compiled file, so no output flag tells that a testbench dumping a
+        // waveform writes into the project.
+        var command = new ToolCommand
+        {
+            Executable = "vvp",
+            ToolName = "vvp",
+            WorkingDirectory = "/workspace/dir",
+            CommandArguments = new List<ICommandArgument> { new TestCommandArgument("Verilog_Blink_tb.vvp") }
+        };
+        var param = DockerCommandBuilder.BuildContainerParameters("img", command, null!, null, null, (c, l) => { });
+        Assert.Contains(param.HostConfig.Binds, b => b.EndsWith(":/workspace", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void BuildContainerParameters_CommandWithSpecialCharacters_ArePassedAsArgvTokensUnquoted()
     {
         var command = new ToolCommand

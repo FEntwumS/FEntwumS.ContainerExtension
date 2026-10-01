@@ -47,6 +47,7 @@ internal static class DockerCommandBuilder
             exe.Contains("ghdl", StringComparison.OrdinalIgnoreCase) ||
             exe.Contains("nvc", StringComparison.OrdinalIgnoreCase) ||
             exe.Contains("iverilog", StringComparison.OrdinalIgnoreCase) ||
+            exe.Contains("vvp", StringComparison.OrdinalIgnoreCase) ||
             exe.Contains("verilator", StringComparison.OrdinalIgnoreCase) ||
             exe.Contains("apicula", StringComparison.OrdinalIgnoreCase) ||
             exe.Contains("nextpnr", StringComparison.OrdinalIgnoreCase) ||

@@ -265,6 +265,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         {
             using var provider = new E2ETestServiceProvider();
             provider.SettingsService.SetSettingValue("ContainerImage_iverilog", "hdlc/iverilog:latest");
+            provider.SettingsService.SetSettingValue("ContainerImage_vvp", "hdlc/iverilog:latest");
             using var strategy = new DockerExecutionStrategy(provider);
 
             // Compile first
@@ -280,13 +281,55 @@ public sealed class DockerExecutionE2ETests : IDisposable
             // Execute using vvp
             var cmdExec = new ToolCommand
             {
-                Executable = "iverilog/vvp", // force read-write mount via path trick
-                ToolName = "iverilog",
+                Executable = "vvp",
+                ToolName = "vvp",
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("Blink.vvp")
             };
             var (success, _) = await strategy.ExecuteAsync(cmdExec);
             Assert.True(success);
+        }
+        finally { try { Directory.Delete(tempDir, true); } catch { } }
+    }
+
+    [FactIfNoCI]
+    public async Task F2_Verilog_ExecuteWritesWaveform_HappyPath()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "F2_VWaveform_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "wave_tb.v"),
+                "module wave_tb; reg clk = 0; always #5 clk = ~clk; initial begin $dumpfile(\"wave_tb.vcd\"); $dumpvars(0, wave_tb); #50 $finish; end endmodule\n");
+
+            using var provider = new E2ETestServiceProvider();
+            provider.SettingsService.SetSettingValue("ContainerImage_iverilog", "hdlc/iverilog:latest");
+            provider.SettingsService.SetSettingValue("ContainerImage_vvp", "hdlc/iverilog:latest");
+            using var strategy = new DockerExecutionStrategy(provider);
+
+            var cmdCompile = new ToolCommand
+            {
+                Executable = "iverilog",
+                ToolName = "iverilog",
+                WorkingDirectory = tempDir,
+                CommandArguments = BuildArgs("-o", "wave_tb.vvp", "wave_tb.v")
+            };
+            var (compiled, _) = await strategy.ExecuteAsync(cmdCompile);
+            Assert.True(compiled);
+
+            // Called as OneWare's Icarus simulator calls it: the tool name as executable, the compiled file as the only argument
+            var cmdExec = new ToolCommand
+            {
+                Executable = "vvp",
+                ToolName = "vvp",
+                WorkingDirectory = tempDir,
+                CommandArguments = BuildArgs("wave_tb.vvp")
+            };
+            var (success, output) = await strategy.ExecuteAsync(cmdExec);
+            Assert.True(success, output);
+            var waveform = Path.Combine(tempDir, "wave_tb.vcd");
+            Assert.True(File.Exists(waveform));
+            Assert.True(new FileInfo(waveform).Length > 0);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -981,17 +1024,19 @@ public sealed class DockerExecutionE2ETests : IDisposable
     public async Task F2_Verilog_ExecuteMissingVvp_Boundary()
     {
         using var provider = new E2ETestServiceProvider();
+        provider.SettingsService.SetSettingValue("ContainerImage_vvp", "hdlc/iverilog:latest");
         using var strategy = new DockerExecutionStrategy(provider);
 
         var command = new ToolCommand
         {
-            Executable = "iverilog/vvp", // force read-write mount via path trick
+            Executable = "vvp",
             ToolName = "vvp",
             WorkingDirectory = Directory.GetCurrentDirectory(),
             CommandArguments = BuildArgs("missing_file.vvp")
         };
-        var (success, _) = await strategy.ExecuteAsync(command);
+        var (success, output) = await strategy.ExecuteAsync(command);
         Assert.False(success);
+        Assert.Contains("Unable to open input file", output, StringComparison.Ordinal);
     }
 
     [FactIfNoCI]
@@ -1593,6 +1638,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         {
             using var provider = new E2ETestServiceProvider();
             provider.SettingsService.SetSettingValue("ContainerImage_iverilog", "hdlc/iverilog:latest");
+            provider.SettingsService.SetSettingValue("ContainerImage_vvp", "hdlc/iverilog:latest");
             using var strategy = new DockerExecutionStrategy(provider);
 
             var cmdCompile = new ToolCommand
@@ -1608,8 +1654,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
             var cmdExec = new ToolCommand
             {
-                Executable = "iverilog/vvp", // force read-write mount via path trick
-                ToolName = "iverilog",
+                Executable = "vvp",
+                ToolName = "vvp",
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("Blink.vvp")
             };
