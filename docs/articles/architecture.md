@@ -61,11 +61,14 @@ graph TD
 
 ```text
 1. ONEWARE_DOCKER_IMAGE env var        (highest - CI/CD override)
-2. ContainerImage_{tool} per-tool      (settings UI)
-3. ContainerExtension_DefaultImage     (global setting; defaults to fentwums/oss-cad-suite:latest)
-4. DefaultToolImages[tool]             (built-in per-tool map)
-5. hdlc/ghdl:yosys                     (hardcoded fallback)
+2. docker.image of the call            (ToolCommand.StrategyConfigurationOverrides)
+3. ContainerImage_{tool} per-tool      (settings UI)
+4. docker.image of the tool            (IToolService.GetStrategyConfiguration)
+5. ContainerExtension_DefaultImage     (global setting; defaults to fentwums/oss-cad-suite:latest)
+6. hdlc/ghdl:yosys                     (hardcoded fallback when no default image is set)
 ```
+
+Values from steps 2 and 4 are checked against the image grammar before use; see [Configuration](configuration.md#image-resolution-hierarchy).
 
 ## Container Lifecycle
 

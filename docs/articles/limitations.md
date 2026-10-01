@@ -79,9 +79,9 @@ transparently in a container, mediating connection, image resolution, volume mou
 resource limits, I/O streaming, and telemetry. The following are explicit non-goals:
 
 - **Tool distribution.** The extension does not build, version, or vendor the FPGA toolchain. It
-  consumes whatever image is resolved through the hierarchy (`ONEWARE_DOCKER_IMAGE`, per-tool
-  override, default image, hardcoded fallback `hdlc/ghdl:yosys`). The capabilities of a given run are
-  the capabilities of the resolved image.
+  consumes whatever image is resolved through the hierarchy (`ONEWARE_DOCKER_IMAGE`, the call's
+  `docker.image`, per-tool override, the plugin's `docker.image`, default image, hardcoded fallback
+  `hdlc/ghdl:yosys`). The capabilities of a given run are the capabilities of the resolved image.
 - **A formal security proof of the host daemon.** The implementation hardens the *client* boundary —
   named-pipe server-process trust verification on Windows, socket-owner checks on Unix, critical-path
   bind blocking, workspace path containment that remaps out-of-tree paths to an in-workspace sentinel,

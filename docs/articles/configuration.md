@@ -69,17 +69,22 @@ ContainerImage_yosys         -> fentwums/oss-cad-suite:latest
 ContainerImage_nextpnr-ecp5  -> hdlc/impl/prjtrellis   (key is ContainerImage_ + tool name, lowercased)
 ```
 
+An empty field falls back to the image its placeholder names: the `docker.image` the tool's plugin declares, or else the Default Toolchain Image.
+
 ## Image Resolution Hierarchy
 
 When the extension needs to determine which image to use, it checks (in order):
 
 ```text
 1. ONEWARE_DOCKER_IMAGE env var        (highest - CI/CD override)
-2. ContainerImage_{tool} per-tool      (settings UI)
-3. ContainerExtension_DefaultImage     (global setting; defaults to fentwums/oss-cad-suite:latest)
-4. DefaultToolImages[tool]             (built-in per-tool map)
-5. hdlc/ghdl:yosys                     (hardcoded fallback)
+2. docker.image of the call            (per-run override from the caller)
+3. ContainerImage_{tool} per-tool      (settings UI)
+4. docker.image of the tool            (declared by the tool's plugin)
+5. ContainerExtension_DefaultImage     (global setting; defaults to fentwums/oss-cad-suite:latest)
+6. hdlc/ghdl:yosys                     (hardcoded fallback when no default image is set)
 ```
+
+Steps 2 and 4 come from OneWare's tool engine. A plugin declares `docker.image` for its tool in the strategy configuration of its `ToolContext`, and OneWare applies its own stored override of that value on top. A caller can override it for a single run with `WithStrategyConfiguration("docker.image", ...)`, which reaches the extension as `ToolCommand.StrategyConfigurationOverrides`. Both values pass the same format check as the image settings, and a value that fails it fails the run with a message naming its source. At the `Info` log level the run log shows the resolved image and where it came from.
 
 ## Environment Variables
 
