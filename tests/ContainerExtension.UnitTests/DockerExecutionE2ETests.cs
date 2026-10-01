@@ -265,6 +265,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         {
             using var provider = new E2ETestServiceProvider();
             provider.SettingsService.SetSettingValue("ContainerImage_iverilog", "hdlc/iverilog:latest");
+            provider.SettingsService.SetSettingValue("ContainerImage_vvp", "hdlc/iverilog:latest");
             using var strategy = new DockerExecutionStrategy(provider);
 
             // Compile first
@@ -280,8 +281,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
             // Execute using vvp
             var cmdExec = new ToolCommand
             {
-                Executable = "iverilog/vvp", // force read-write mount via path trick
-                ToolName = "iverilog",
+                Executable = "vvp",
+                ToolName = "vvp",
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("Blink.vvp")
             };
@@ -1027,7 +1028,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
         var command = new ToolCommand
         {
-            Executable = "iverilog/vvp", // force read-write mount via path trick
+            Executable = "vvp",
             ToolName = "vvp",
             WorkingDirectory = Directory.GetCurrentDirectory(),
             CommandArguments = BuildArgs("missing_file.vvp")
@@ -1635,6 +1636,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
         {
             using var provider = new E2ETestServiceProvider();
             provider.SettingsService.SetSettingValue("ContainerImage_iverilog", "hdlc/iverilog:latest");
+            provider.SettingsService.SetSettingValue("ContainerImage_vvp", "hdlc/iverilog:latest");
             using var strategy = new DockerExecutionStrategy(provider);
 
             var cmdCompile = new ToolCommand
@@ -1650,8 +1652,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
             var cmdExec = new ToolCommand
             {
-                Executable = "iverilog/vvp", // force read-write mount via path trick
-                ToolName = "iverilog",
+                Executable = "vvp",
+                ToolName = "vvp",
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("Blink.vvp")
             };
