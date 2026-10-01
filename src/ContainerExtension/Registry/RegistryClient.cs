@@ -415,6 +415,9 @@ public static partial class RegistryClient
             else
             {
                 string key = imageReference;
+                // Task.Run gets CancellationToken.None on purpose: a token cancelled before the delegate
+                // starts would skip the finally below and leave a cancelled task in ActiveFetches for every
+                // later caller. The delegate observes the caller's token through its linked source instead.
                 task = Task.Run(async () =>
                 {
                     using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -528,7 +531,7 @@ public static partial class RegistryClient
                             ActiveFetches.Remove(key);
                         }
                     }
-                });
+                }, CancellationToken.None);
 
                 ActiveFetches[imageReference] = task;
             }

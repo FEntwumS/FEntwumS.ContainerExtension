@@ -330,7 +330,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                         "Late-tool strategy wiring has stopped. Newly registered FPGA tools will not run in containers until OneWare is restarted.",
                         Avalonia.Controls.Notifications.NotificationType.Warning));
             }
-        });
+        }, ct);
 
         try
         {
@@ -550,7 +550,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                         $"{dockerStrategy.DetectedRuntime} daemon is not reachable. FPGA tools will run natively or fail until it is started.",
                         Avalonia.Controls.Notifications.NotificationType.Warning));
             }
-        });
+        }, ct);
     }
 
     private static void InjectStrategyIntoAllTools(IToolService toolService, DockerExecutionStrategy dockerStrategy, ISettingsService settingsService)
