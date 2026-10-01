@@ -30,6 +30,26 @@ public sealed class FailureHintsTests
     }
 
     [Fact]
+    public void FailureHints_RefusedPull_PointsToTheRegistryButNotToPermissions()
+    {
+        var refused = new InvalidOperationException(
+            "Docker API responded with status code=NotFound, response={\"message\":\"pull access denied for hdlc/absent, repository does not exist or may require 'docker login'\"}");
+
+        var hints = DockerExecutionStrategy.FailureHints(refused, "hdlc/absent:latest");
+
+        Assert.Contains("does not exist on Docker Hub or requires authentication", hints, StringComparison.Ordinal);
+        Assert.DoesNotContain("permission", hints, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FailureHints_AccessDeniedOtherThanAPull_SuggestsCheckingPermissions()
+    {
+        var hints = DockerExecutionStrategy.FailureHints(new InvalidOperationException("connect: access denied"), RegistryImage);
+
+        Assert.Contains("A permission error was encountered", hints, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FailureHints_PortInUse_SuggestsAPortConflict()
     {
         var hints = DockerExecutionStrategy.FailureHints(new InvalidOperationException("Bind for 0.0.0.0:8080 failed: port is already allocated"), RegistryImage);

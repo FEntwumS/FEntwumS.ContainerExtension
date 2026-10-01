@@ -476,16 +476,18 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     internal static string FailureHints(Exception ex, string image)
     {
         var hints = "";
+        // A registry that refuses a pull says "pull access denied", which says nothing about local permissions.
+        var refusedPull = ex.Message.Contains("pull access denied", StringComparison.OrdinalIgnoreCase);
         if (ex.Message.Contains("No such image", StringComparison.OrdinalIgnoreCase))
         {
             hints += $"\n  Hint: Run 'docker pull {image}' to cache the image locally.";
         }
-        if (ex.Message.Contains("pull access denied", StringComparison.OrdinalIgnoreCase))
+        if (refusedPull)
         {
             hints += $"\n  Hint: The image '{image}' does not exist on Docker Hub or requires authentication.";
         }
         if (ex.Message.Contains("permission denied", StringComparison.OrdinalIgnoreCase) ||
-            ex.Message.Contains("access denied", StringComparison.OrdinalIgnoreCase) ||
+            (!refusedPull && ex.Message.Contains("access denied", StringComparison.OrdinalIgnoreCase)) ||
             ex is UnauthorizedAccessException ||
             (ex is System.Net.Sockets.SocketException sex && (sex.SocketErrorCode == System.Net.Sockets.SocketError.AccessDenied || sex.NativeErrorCode == 13)))
         {
