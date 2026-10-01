@@ -75,6 +75,11 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     // hdlc/* equivalent.
     public const string OssCadSuiteImage = "fentwums/oss-cad-suite:latest";
 
+    // Since the toolchain image is on no registry, Pull, Check-for-Updates and a run's own pull cannot
+    // fetch it. Used to point to Build Local Image instead of attempting a doomed registry pull (which 404s).
+    internal static bool IsBuildOnlyImage(string image) =>
+        !string.IsNullOrEmpty(image) && image.StartsWith("fentwums/oss-cad-suite", StringComparison.OrdinalIgnoreCase);
+
     // Summary keys constants
     public const string SettingsKeyImage = "Image";
     public const string SettingsKeyPullPolicy = "Pull Policy";

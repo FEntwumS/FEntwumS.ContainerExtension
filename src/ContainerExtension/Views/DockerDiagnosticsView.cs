@@ -55,12 +55,6 @@ public partial class DockerDiagnosticsView : UserControl
     // and would echo them literally, turning "docker ..." into "^E^Udocker ..." (command not found), so the
     // reset is suppressed on Windows.
     private static readonly string TerminalLineReset = OperatingSystem.IsWindows() ? string.Empty : "\u0005\u0015";
-
-    // The project's toolchain image is produced locally (Build Local Image / build_oss_cad_suite.sh) and is
-    // NOT published to a registry, so Pull / Check-for-Updates cannot fetch it. Used to redirect those
-    // actions to Build Local Image instead of attempting a doomed registry pull (which 404s).
-    private static bool IsBuildOnlyImage(string image) =>
-        !string.IsNullOrEmpty(image) && image.StartsWith("fentwums/oss-cad-suite", StringComparison.OrdinalIgnoreCase);
     private readonly StackPanel _statusContent;
     private readonly StackPanel _configContent;
     private readonly StackPanel _containersContent;
@@ -1337,7 +1331,7 @@ public partial class DockerDiagnosticsView : UserControl
 
                 row.Children.Add(new TextBlock
                 {
-                    Text = IsBuildOnlyImage(currentImage)
+                    Text = ContainerExtensionModule.IsBuildOnlyImage(currentImage)
                         ? "(local-only image — build via Build Local Image; not on a registry)"
                         : "(No registry tags — local-only image or registry unavailable)",
                     Foreground = MutedColor,
@@ -1359,7 +1353,7 @@ public partial class DockerDiagnosticsView : UserControl
             btn.Command = new AsyncRelayCommand(async () =>
         {
             var activeImg = tags.Count > 0 && row.Children[1] is ComboBox cb && cb.SelectedItem is string sel ? sel : currentImage;
-            if (IsBuildOnlyImage(activeImg))
+            if (ContainerExtensionModule.IsBuildOnlyImage(activeImg))
             {
                 ShowTemporaryStatus($"'{activeImg}' is built locally, not pulled — use Build Local Image to produce or update it.", isError: false, isTemporary: false);
                 return;
@@ -1918,7 +1912,7 @@ public partial class DockerDiagnosticsView : UserControl
                 var runtimePath = _strategy.GetRuntimePath();
                 var settings = _strategy.GetActiveSettingsSummary();
                 var img = settings.GetValueOrDefault("Image", ContainerExtensionModule.FallbackImage);
-                if (IsBuildOnlyImage(img))
+                if (ContainerExtensionModule.IsBuildOnlyImage(img))
                 {
                     ShowTemporaryStatus($"'{img}' is built locally, not pulled — use Build Local Image to produce or update it.", isError: false, isTemporary: false);
                     return;
