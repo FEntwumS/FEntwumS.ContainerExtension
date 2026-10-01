@@ -194,12 +194,17 @@ internal sealed class NativeFallbackExecutor
         }
         catch (Exception ex)
         {
+            var errMsg = $"[Docker SDK Fallback Error] Native execution failed for '{resolvedExecutable}': {ex.Message}";
             if (ex is OperationCanceledException)
             {
                 outcome?.RecordCancellation();
+                // The strategy reports the cancellation to the host; this notice is a diagnostic, not output of the tool.
+                _console.SdkLog(command, errMsg, RankInfo);
             }
-            var errMsg = $"[Docker SDK Fallback Error] Native execution failed for '{resolvedExecutable}': {ex.Message}";
-            SafeInvoke(() => command.ErrorHandler?.Invoke(errMsg));
+            else
+            {
+                SafeInvoke(() => command.ErrorHandler?.Invoke(errMsg));
+            }
             ContainerTelemetry.TrackError("DockerExecutionStrategy", $"Native fallback execution failed for '{resolvedExecutable}'", ex);
             return (false, errMsg);
         }

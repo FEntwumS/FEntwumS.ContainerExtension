@@ -125,12 +125,12 @@ public sealed class ChallengerVerificationTests : IDisposable
         // Wait a short delay to allow background cancellation task to run and propagate the cancellation
         await Task.Delay(2000, TestContext.Current.CancellationToken);
 
-        // Verify that the container was cancelled
-        lock (stderrList)
-        {
-            Assert.NotEmpty(stderrList);
-            Assert.Contains(stderrList, line => line.Contains("cancel", StringComparison.OrdinalIgnoreCase));
-        }
+        // Verify that the container was cancelled. At this log level the extension's notice reaches the output
+        // handler; a kill during the daemon check still surfaces on the error handler.
+        List<string> lines;
+        lock (stdoutList) lines = [.. stdoutList];
+        lock (stderrList) lines.AddRange(stderrList);
+        Assert.Contains(lines, line => line.Contains("cancel", StringComparison.OrdinalIgnoreCase));
     }
 
     // Property getters must return on the calling thread without joining the background _initTask.

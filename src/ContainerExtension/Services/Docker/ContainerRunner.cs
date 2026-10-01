@@ -463,7 +463,6 @@ internal sealed class ContainerRunner
             statsCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             statsTask = CollectResourceStatsAsync(containerId, command, statsCts.Token);
 
-            var logRank = _console.CurrentLevelRank;
             try
             {
                 var wait = await _client.Containers.WaitContainerAsync(containerId, ct).ConfigureAwait(false);
@@ -472,8 +471,8 @@ internal sealed class ContainerRunner
             catch (OperationCanceledException)
             {
                 Volatile.Write(ref wasCancelledFlag, 1);
-                if (logRank >= RankErrors)
-                    SafeInvoke(() => command.ErrorHandler?.Invoke("[Docker SDK] Container execution was cancelled."));
+                // The strategy reports the cancellation to the host; this notice is a diagnostic, not output of the tool.
+                _console.SdkLog(command, "[Docker SDK] Container execution was cancelled.", RankInfo);
             }
 
             if (statsCts != null) await statsCts.CancelAsync().ConfigureAwait(false);

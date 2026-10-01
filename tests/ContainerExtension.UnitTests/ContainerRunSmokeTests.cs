@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -200,7 +201,40 @@ public sealed class ContainerRunSmokeTests : IDisposable
 
         Assert.False(success);
         Assert.Contains(($"[{Path.GetFileName(_workDir)}]: sh cancelled!", (Color?)Colors.DarkOrange), feedback.Notices);
-        Assert.DoesNotContain(feedback.Errors, e => e.Contains("exited with code", StringComparison.Ordinal));
+        // Once, like the native strategy: neither an exit code nor a cancellation notice in the error log.
+        Assert.Empty(feedback.Errors);
+    }
+
+    [FactIfNoCI]
+    public async Task Busybox_RunCancelledBeforeTheContainerStarts_ReportsTheCancellationOnce()
+    {
+        using var provider = CreateBusyboxProvider();
+        // From the Info level on, the extension's own diagnostics reach the output handler; the one about the
+        // image marks a point after the daemon check and before the container starts.
+        provider.SettingsService.SetSettingValue(ContainerExtensionModule.LogLevelSetting, "Info");
+        using var strategy = new DockerExecutionStrategy(provider);
+        var feedback = new RecordingRunFeedback();
+        strategy.HostFeedback = feedback;
+        using var cancellation = new CancellationTokenSource();
+        var errors = new ConcurrentQueue<string>();
+        var command = CreateShellCommand("echo to-stdout",
+            outputHandler: line =>
+            {
+                if (line.Contains("[Docker SDK] Resolving image", StringComparison.Ordinal)) cancellation.Cancel();
+                return true;
+            },
+            errorHandler: line =>
+            {
+                errors.Enqueue(line);
+                return true;
+            },
+            workingDirectory: _workDir);
+
+        var (success, _) = await strategy.ExecuteAsync(command, cancellation.Token);
+
+        Assert.False(success);
+        Assert.Contains(($"[{Path.GetFileName(_workDir)}]: sh cancelled!", (Color?)Colors.DarkOrange), feedback.Notices);
+        Assert.Empty(errors);
     }
 
     [FactIfNoCI]

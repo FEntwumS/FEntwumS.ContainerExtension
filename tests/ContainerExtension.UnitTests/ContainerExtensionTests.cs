@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using Avalonia.Media;
 using ContainerExtension;
 using ContainerExtension.Validations;
 using ContainerExtension.Services.Docker;
@@ -2716,6 +2718,40 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.True(success);
         Assert.NotEmpty(outputLines);
         Assert.Contains(outputLines, line => line.Contains("git version", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task DockerExecutionStrategy_CancelledNativeFallback_ReportsTheCancellationOnce()
+    {
+        if (OperatingSystem.IsWindows()) return; // Needs sh and sleep on the PATH
+
+        using var provider = new TestServiceProvider();
+        var settings = (MockSettingsService)provider.GetService(typeof(ISettingsService))!;
+
+        settings.SetSettingValue(ContainerExtensionModule.AllowNativeFallbackSetting, true);
+        settings.SetSettingValue(ContainerExtensionModule.DaemonSocketSetting, "unix:///invalid/offline/socket.sock");
+
+        using var strategy = new DockerExecutionStrategy(provider);
+        var feedback = new RecordingRunFeedback();
+        strategy.HostFeedback = feedback;
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
+        var errorLines = new ConcurrentQueue<string>();
+        var command = new ToolCommand
+        {
+            Executable = "sh",
+            ToolName = "sh",
+            WorkingDirectory = Directory.GetCurrentDirectory(),
+            CommandArguments = new List<ICommandArgument> { new TestCommandArgument("-c"), new TestCommandArgument("sleep 30") },
+            OutputHandler = _ => true,
+            ErrorHandler = line => { errorLines.Enqueue(line); return true; }
+        };
+
+        var (success, _) = await strategy.ExecuteAsync(command, cancellation.Token);
+
+        Assert.False(success);
+        Assert.Contains(($"[{Path.GetFileName(Directory.GetCurrentDirectory())}]: sh cancelled!", (Color?)Colors.DarkOrange), feedback.Notices);
+        Assert.Empty(errorLines);
     }
 
     [Fact]
