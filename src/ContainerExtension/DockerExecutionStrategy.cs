@@ -743,8 +743,6 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         var image = envImage ?? "";
         if (string.IsNullOrWhiteSpace(image)) image = specificImage;
         if (string.IsNullOrWhiteSpace(image)) image = configuredImage;
-        if (string.IsNullOrWhiteSpace(image) && ContainerExtensionModule.DefaultToolImages.TryGetValue(toolName, out var toolDefault))
-            image = toolDefault;
         if (string.IsNullOrWhiteSpace(image)) image = ContainerExtensionModule.FallbackImage;
 
         image = image.Trim();

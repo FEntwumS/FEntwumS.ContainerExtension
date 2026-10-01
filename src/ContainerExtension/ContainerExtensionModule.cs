@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -99,30 +98,6 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     /// </summary>
     public const string SettingsKeyAllowNativeFallback = "Allow Native Fallback";
     public const string SettingsKeyAllowPrivileged = "Privileged Mode";
-
-    public static readonly FrozenDictionary<string, string> DefaultToolImages =
-      new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-      {
-          ["ghdl"] = FallbackImage,
-          ["nvc"] = "hdlc/nvc",
-          ["iverilog"] = "hdlc/iverilog",
-          ["verilator"] = "hdlc/verilator",
-          ["yosys"] = FallbackImage,
-          ["apicula"] = "hdlc/apicula",
-          ["nextpnr-ecp5"] = "hdlc/impl/prjtrellis",
-          ["nextpnr-generic"] = "hdlc/impl/generic",
-          ["nextpnr-ice40"] = "hdlc/impl/icestorm",
-          ["nextpnr-nexus"] = "hdlc/impl/prjoxide",
-          ["nextpnr-himbaechel"] = OssCadSuiteImage,
-          ["nextpnr-machxo2"] = OssCadSuiteImage,
-          ["openFPGALoader"] = "hdlc/prog",
-          ["iceprog"] = "hdlc/impl/icestorm",
-          ["icepack"] = "hdlc/impl/icestorm",
-          ["gowin_pack"] = OssCadSuiteImage,
-          ["gmpack"] = OssCadSuiteImage,
-          ["gmupack"] = OssCadSuiteImage,
-          ["gtkwave"] = "hdlc/gtkwave",
-      }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     public const string DashboardTitle = "Container Dashboard";
 

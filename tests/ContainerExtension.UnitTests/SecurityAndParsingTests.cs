@@ -331,8 +331,11 @@ public sealed class SecurityAndParsingTests
         }
     }
 
-    [Fact]
-    public void ResolveImage_DefaultToolImageMap_UsedWhenSettingsEmpty()
+    // A tool OneWare knows gets the same fallback as one it does not.
+    [Theory]
+    [InlineData("unknown-tool")]
+    [InlineData("nvc")]
+    public void ResolveImage_FallbackImage_UsedWhenNothingResolves(string toolName)
     {
         var original = Environment.GetEnvironmentVariable(EnvImageKey);
         try
@@ -343,28 +346,7 @@ public sealed class SecurityAndParsingTests
             settings.SetSettingValue(ContainerExtensionModule.DefaultImageSetting, "");
             using var strategy = new DockerExecutionStrategy(provider);
 
-            // "nvc" maps to a value distinct from FallbackImage, isolating the map branch.
-            Assert.Equal(ContainerExtensionModule.DefaultToolImages["nvc"], InvokeResolveImage(strategy, "nvc"));
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(EnvImageKey, original);
-        }
-    }
-
-    [Fact]
-    public void ResolveImage_FallbackImage_UsedWhenNothingResolves()
-    {
-        var original = Environment.GetEnvironmentVariable(EnvImageKey);
-        try
-        {
-            Environment.SetEnvironmentVariable(EnvImageKey, null);
-            using var provider = new TestServiceProvider();
-            var settings = (MockSettingsService)provider.GetService(typeof(ISettingsService))!;
-            settings.SetSettingValue(ContainerExtensionModule.DefaultImageSetting, "");
-            using var strategy = new DockerExecutionStrategy(provider);
-
-            Assert.Equal(ContainerExtensionModule.FallbackImage, InvokeResolveImage(strategy, "unknown-tool"));
+            Assert.Equal(ContainerExtensionModule.FallbackImage, InvokeResolveImage(strategy, toolName));
         }
         finally
         {
