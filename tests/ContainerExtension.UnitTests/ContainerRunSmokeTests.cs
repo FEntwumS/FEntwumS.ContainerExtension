@@ -237,6 +237,67 @@ public sealed class ContainerRunSmokeTests : IDisposable
         Assert.Empty(errors);
     }
 
+    [FactIfNoCI]
+    public async Task Busybox_RunCancelledWithATimeoutSet_IsNotReportedAsTimedOut()
+    {
+        using var provider = CreateBusyboxProvider();
+        provider.SettingsService.SetSettingValue(ContainerExtensionModule.LogLevelSetting, "Info");
+        provider.SettingsService.SetSettingValue(ContainerExtensionModule.TimeoutSetting, 5.0);
+        using var strategy = new DockerExecutionStrategy(provider);
+        var feedback = new RecordingRunFeedback();
+        strategy.HostFeedback = feedback;
+        using var cancellation = new CancellationTokenSource();
+        var errors = new ConcurrentQueue<string>();
+        var command = CreateShellCommand("echo to-stdout",
+            outputHandler: line =>
+            {
+                if (line.Contains("[Docker SDK] Resolving image", StringComparison.Ordinal)) cancellation.Cancel();
+                return true;
+            },
+            errorHandler: line =>
+            {
+                errors.Enqueue(line);
+                return true;
+            },
+            workingDirectory: _workDir);
+
+        var (success, _) = await strategy.ExecuteAsync(command, cancellation.Token);
+
+        Assert.False(success);
+        Assert.Contains(($"[{Path.GetFileName(_workDir)}]: sh cancelled!", (Color?)Colors.DarkOrange), feedback.Notices);
+        Assert.Empty(errors);
+    }
+
+    // A timeout that expires before the container starts lands in the cancellation handling and still says so.
+    [FactIfNoCI]
+    public async Task Busybox_RunTimingOutBeforeItStarts_ReportsTheTimeout()
+    {
+        using var provider = CreateBusyboxProvider();
+        provider.SettingsService.SetSettingValue(ContainerExtensionModule.LogLevelSetting, "Info");
+        provider.SettingsService.SetSettingValue(ContainerExtensionModule.TimeoutSetting, 0.0001); // 6 ms
+        using var strategy = new DockerExecutionStrategy(provider);
+        strategy.HostFeedback = new RecordingRunFeedback();
+        var errors = new ConcurrentQueue<string>();
+        var command = CreateShellCommand("echo to-stdout",
+            outputHandler: line =>
+            {
+                // Holds the run before its container starts until the timeout has surely expired.
+                if (line.Contains("[Docker SDK] Resolving image", StringComparison.Ordinal)) Thread.Sleep(100);
+                return true;
+            },
+            errorHandler: line =>
+            {
+                errors.Enqueue(line);
+                return true;
+            },
+            workingDirectory: _workDir);
+
+        var (success, _) = await strategy.ExecuteAsync(command);
+
+        Assert.False(success);
+        Assert.Contains(errors, line => line.Contains("timed out", StringComparison.Ordinal));
+    }
+
     // Cancelled before the run even checks the daemon's socket, where the cancellation used to come back
     // as a connection failure.
     [FactIfNoCI]
