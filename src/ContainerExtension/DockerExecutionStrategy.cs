@@ -478,13 +478,23 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         var hints = "";
         // A registry that refuses a pull says "pull access denied", which says nothing about local permissions.
         var refusedPull = ex.Message.Contains("pull access denied", StringComparison.OrdinalIgnoreCase);
-        if (ex.Message.Contains("No such image", StringComparison.OrdinalIgnoreCase))
+        var noSuchImage = ex.Message.Contains("No such image", StringComparison.OrdinalIgnoreCase);
+        var notFoundLocally = ex.Message.Contains("not found locally", StringComparison.OrdinalIgnoreCase);
+        if ((refusedPull || noSuchImage || notFoundLocally) && ContainerExtensionModule.IsBuildOnlyImage(image))
         {
-            hints += $"\n  Hint: Run 'docker pull {image}' to cache the image locally.";
+            // No registry has this image, so neither a pull nor a login can bring it.
+            hints += $"\n  Hint: The image '{image}' is built locally and is on no registry. Build it with Build Local Image in the Container Dashboard.";
         }
-        if (refusedPull)
+        else
         {
-            hints += $"\n  Hint: The image '{image}' does not exist on Docker Hub or requires authentication.";
+            if (noSuchImage)
+            {
+                hints += $"\n  Hint: Run 'docker pull {image}' to cache the image locally.";
+            }
+            if (refusedPull)
+            {
+                hints += $"\n  Hint: The image '{image}' does not exist on Docker Hub or requires authentication.";
+            }
         }
         if (ex.Message.Contains("permission denied", StringComparison.OrdinalIgnoreCase) ||
             (!refusedPull && ex.Message.Contains("access denied", StringComparison.OrdinalIgnoreCase)) ||

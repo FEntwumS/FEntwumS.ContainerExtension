@@ -39,6 +39,22 @@ public sealed class FailureHintsTests
 
         Assert.Contains("does not exist on Docker Hub or requires authentication", hints, StringComparison.Ordinal);
         Assert.DoesNotContain("permission", hints, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Build Local Image", hints, StringComparison.Ordinal);
+    }
+
+    // The project's toolchain image is on no registry, so a pull is the wrong advice for it.
+    [Theory]
+    [InlineData("Docker API responded with status code=NotFound, response={\"message\":\"pull access denied for fentwums/oss-cad-suite, repository does not exist or may require 'docker login'\"}")]
+    [InlineData("Image 'fentwums/oss-cad-suite:latest' not found locally and pull policy is 'never'.")]
+    [InlineData("No such image: fentwums/oss-cad-suite:latest")]
+    public void FailureHints_MissingToolchainImage_PointsToBuildLocalImage(string message)
+    {
+        var hints = DockerExecutionStrategy.FailureHints(new InvalidOperationException(message), ContainerExtensionModule.OssCadSuiteImage);
+
+        Assert.Contains("Build it with Build Local Image in the Container Dashboard", hints, StringComparison.Ordinal);
+        Assert.DoesNotContain("Docker Hub", hints, StringComparison.Ordinal);
+        Assert.DoesNotContain("docker pull", hints, StringComparison.Ordinal);
+        Assert.DoesNotContain("permission", hints, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
