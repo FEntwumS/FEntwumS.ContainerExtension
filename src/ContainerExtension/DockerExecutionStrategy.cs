@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using Avalonia.Media;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
@@ -800,16 +801,27 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     /// </summary>
     internal async Task<(bool success, string output)> ExecuteAsync(ToolCommand command, CancellationToken cancellationToken)
     {
+        HostFeedback.WriteNotice(RunReport.CommandLine(command), Brushes.CornflowerBlue);
         var verdict = new HandlerVerdict();
-        var (success, output) = await ExecuteCoreAsync(command.WithDefaultHandlers(HostFeedback), cancellationToken, verdict).ConfigureAwait(false);
+        var outcome = new RunOutcome();
+        var (success, output) = await ExecuteCoreAsync(command.WithDefaultHandlers(HostFeedback), cancellationToken, verdict, outcome).ConfigureAwait(false);
         // The handlers run on the UI thread; their verdict is complete once every posted call has run.
         await WhenPostedActionsRanAsync().ConfigureAwait(false);
+        if (outcome.Cancelled)
+        {
+            HostFeedback.WriteNotice(RunReport.Cancelled(command), Brushes.DarkOrange);
+        }
+        else if (outcome.ExitCode is { } exitCode && exitCode != 0)
+        {
+            HostFeedback.WriteError(RunReport.ExitedWith(command, exitCode));
+        }
         return (success && !verdict.Rejected, output);
     }
 
     // The container run itself. Background runs call it directly: like the native strategy's background
     // processes, they write nothing to the host on their own, and no handler verdict decides their result.
-    private async Task<(bool success, string output)> ExecuteCoreAsync(ToolCommand command, CancellationToken cancellationToken, HandlerVerdict? verdict = null)
+    private async Task<(bool success, string output)> ExecuteCoreAsync(ToolCommand command, CancellationToken cancellationToken,
+        HandlerVerdict? verdict = null, RunOutcome? outcome = null)
     {
         using var activity = DockerActivitySource.StartActivity("DockerExecutionStrategy.Execute");
         // Only emit telemetry tags when the user has not opted out, and never record the raw host
@@ -1024,7 +1036,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                         // the finally does not also log a phantom container entry (exit -1) for a run that
                         // never happened, nor wipe the real one under retention=None.
                         nativeFallbackUsed = true;
-                        return await _nativeFallback.ExecuteNativelyAsync(command, resolvedPath, stopwatch, ct, verdict).ConfigureAwait(false);
+                        return await _nativeFallback.ExecuteNativelyAsync(command, resolvedPath, stopwatch, ct, verdict, outcome).ConfigureAwait(false);
                     }
                     else
                     {
@@ -1106,15 +1118,18 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                     errorMessage = $"Execution timed out after {timeoutMinutes:N0} minute(s).";
                     SafeInvoke(() => command.ErrorHandler?.Invoke($"[Docker SDK] {errorMessage}"));
                 }
+                outcome?.RecordCancellation();
                 return (false, result.output);
             }
 
             _console.SdkLog(command, $"[Docker SDK] Container finished. Exit code: {exitCode}", RankInfo);
+            outcome?.RecordExit(exitCode);
             return (exitCode == 0, result.output);
         }
         catch (OperationCanceledException)
         {
             wasCancelled = true;
+            outcome?.RecordCancellation();
             errorMessage = timeoutMinutes > 0
               ? $"Execution timed out after {timeoutMinutes:N0} minute(s)."
               : "Operation cancelled.";

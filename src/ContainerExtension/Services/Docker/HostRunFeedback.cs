@@ -1,4 +1,7 @@
 using System;
+using System.IO;
+using System.Linq;
+using Avalonia.Media;
 using Microsoft.Extensions.Logging;
 using OneWare.Essentials.Services;
 using OneWare.Essentials.ToolEngine;
@@ -17,6 +20,9 @@ internal interface IHostRunFeedback
 
     /// <summary>Logs one line as an error, which the host also shows in red in the output window.</summary>
     void WriteError(string line);
+
+    /// <summary>Logs one line as information and shows it in the output window in the given color.</summary>
+    void WriteNotice(string line, IBrush brush);
 }
 
 /// <summary>
@@ -46,6 +52,45 @@ internal sealed class OneWareRunFeedback : IHostRunFeedback
     {
         _logger?.Error(line);
     }
+
+    public void WriteNotice(string line, IBrush brush)
+    {
+        _logger?.Log(line, true, brush);
+    }
+}
+
+/// <summary>
+/// The lines OneWare's native strategy writes around every foreground run, whatever handlers the caller
+/// set: the command line before the run, and a cancellation or a non-zero exit code after it.
+/// </summary>
+internal static class RunReport
+{
+    internal static string CommandLine(ToolCommand command)
+    {
+        var arguments = string.Join(' ', command.Arguments.Select(x => x.Contains(' ') ? $"\"{x}\"" : x));
+        return $"{Prefix(command)} {arguments}";
+    }
+
+    internal static string Cancelled(ToolCommand command) => $"{Prefix(command)} cancelled!";
+
+    internal static string ExitedWith(ToolCommand command, long exitCode) => $"{Prefix(command)} exited with code {exitCode}";
+
+    private static string Prefix(ToolCommand command) =>
+        $"[{Path.GetFileName(command.WorkingDirectory)}]: {Path.GetFileNameWithoutExtension(command.Executable ?? command.ToolName)}";
+}
+
+/// <summary>How a foreground run ended, as far as the lines after it need to know.</summary>
+internal sealed class RunOutcome
+{
+    /// <summary>The tool's exit code, once the tool ran to its end.</summary>
+    internal long? ExitCode { get; private set; }
+
+    /// <summary>Whether the run was cancelled or timed out.</summary>
+    internal bool Cancelled { get; private set; }
+
+    internal void RecordExit(long exitCode) => ExitCode = exitCode;
+
+    internal void RecordCancellation() => Cancelled = true;
 }
 
 internal static class ToolCommandHandlerDefaults

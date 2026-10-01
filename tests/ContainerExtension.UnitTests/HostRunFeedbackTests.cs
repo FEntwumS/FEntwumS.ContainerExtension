@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using Avalonia.Media;
 using ContainerExtension.Services.Docker;
 using OneWare.Essentials.Enums;
 using OneWare.Essentials.ToolEngine;
@@ -111,6 +113,42 @@ public sealed class HostRunFeedbackTests
     }
 }
 
+public sealed class RunReportTests
+{
+    private static ToolCommand Command(string executable, string workingDirectory, params string[] arguments) => new()
+    {
+        ToolName = Path.GetFileNameWithoutExtension(executable),
+        Executable = executable,
+        WorkingDirectory = workingDirectory,
+        CommandArguments = arguments.Select(a => (ICommandArgument)new TestCommandArgument(a)).ToList()
+    };
+
+    [Fact]
+    public void CommandLine_ReadsAsTheNativeStrategyWritesIt()
+    {
+        var command = Command("iverilog", "/home/user/VerilogBlink", "-o", "build/blink tb.vvp", "-g2012");
+
+        Assert.Equal("[VerilogBlink]: iverilog -o \"build/blink tb.vvp\" -g2012", RunReport.CommandLine(command));
+    }
+
+    [Fact]
+    public void CommandLine_NamesAnExecutablePathByItsFileName()
+    {
+        var command = Command("/opt/oss-cad-suite/bin/vvp", "/home/user/VerilogBlink", "Verilog_Blink_tb.vvp");
+
+        Assert.Equal("[VerilogBlink]: vvp Verilog_Blink_tb.vvp", RunReport.CommandLine(command));
+    }
+
+    [Fact]
+    public void CancelledAndExitedWith_ReadAsTheNativeStrategyWritesThem()
+    {
+        var command = Command("vvp", "/home/user/VerilogBlink", "Verilog_Blink_tb.vvp");
+
+        Assert.Equal("[VerilogBlink]: vvp cancelled!", RunReport.Cancelled(command));
+        Assert.Equal("[VerilogBlink]: vvp exited with code 2", RunReport.ExitedWith(command, 2));
+    }
+}
+
 /// <summary>
 /// Records what a run hands to the host, in place of OneWare's output window and logger. Thread-safe, since
 /// a container's stdout and stderr are read on separate threads.
@@ -119,8 +157,11 @@ internal sealed class RecordingRunFeedback : IHostRunFeedback
 {
     public ConcurrentQueue<string> Output { get; } = new();
     public ConcurrentQueue<string> Errors { get; } = new();
+    public ConcurrentQueue<(string Line, Color? Color)> Notices { get; } = new();
 
     public void WriteOutput(string line) => Output.Enqueue(line);
 
     public void WriteError(string line) => Errors.Enqueue(line);
+
+    public void WriteNotice(string line, IBrush brush) => Notices.Enqueue((line, (brush as ISolidColorBrush)?.Color));
 }

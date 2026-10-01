@@ -73,8 +73,10 @@ internal sealed class NativeFallbackExecutor
     /// <param name="stopwatch">The stopwatch tracking elapsed execution duration.</param>
     /// <param name="ct">The token used to signal operation cancellation.</param>
     /// <param name="verdict">Records a line of the tool's output that a handler rejects; without it, the exit code alone decides.</param>
+    /// <param name="outcome">Receives the exit code or the cancellation, for the lines written after the run.</param>
     /// <returns>A tuple indicating success status and accumulated terminal output.</returns>
-    internal async Task<(bool success, string output)> ExecuteNativelyAsync(ToolCommand command, string resolvedExecutable, Stopwatch stopwatch, CancellationToken ct, HandlerVerdict? verdict = null)
+    internal async Task<(bool success, string output)> ExecuteNativelyAsync(ToolCommand command, string resolvedExecutable, Stopwatch stopwatch, CancellationToken ct,
+        HandlerVerdict? verdict = null, RunOutcome? outcome = null)
     {
         var outputHandler = verdict is null ? command.OutputHandler : verdict.Track(command.OutputHandler);
         var errorHandler = verdict is null ? command.ErrorHandler : verdict.Track(command.ErrorHandler);
@@ -153,6 +155,7 @@ internal sealed class NativeFallbackExecutor
                 await process.WaitForExitAsync(ct).ConfigureAwait(false);
             }
 
+            outcome?.RecordExit(process.ExitCode);
             var success = process.ExitCode == 0;
             var elapsedSeconds = stopwatch.Elapsed.TotalSeconds;
             _console.SdkLog(command, $"[Docker SDK Fallback] Native execution finished. Exit code: {process.ExitCode} (ran {elapsedSeconds:F2}s)", RankInfo);
@@ -191,6 +194,10 @@ internal sealed class NativeFallbackExecutor
         }
         catch (Exception ex)
         {
+            if (ex is OperationCanceledException)
+            {
+                outcome?.RecordCancellation();
+            }
             var errMsg = $"[Docker SDK Fallback Error] Native execution failed for '{resolvedExecutable}': {ex.Message}";
             SafeInvoke(() => command.ErrorHandler?.Invoke(errMsg));
             ContainerTelemetry.TrackError("DockerExecutionStrategy", $"Native fallback execution failed for '{resolvedExecutable}'", ex);
