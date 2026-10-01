@@ -80,7 +80,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     {
         _settingsService = serviceProvider.Resolve<ISettingsService>();
         _nativeFallback = new NativeFallbackExecutor(_settingsService, _console);
-        _initTask = Task.Run(InitializeInternalAsync);
+        _initTask = Task.Run(InitializeInternalAsync, _strategyCts.Token);
     }
 
     // Delegates the daemon bootstrap to DockerConnectionFactory, then adopts the resulting client + managers
