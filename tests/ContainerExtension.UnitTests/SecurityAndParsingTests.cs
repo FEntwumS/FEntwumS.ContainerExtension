@@ -8,6 +8,7 @@ using ContainerExtension.Services.Docker;
 using ContainerExtension.Validations;
 using Docker.DotNet.Models;
 using OneWare.Essentials.Services;
+using OneWare.Essentials.ToolEngine;
 using Xunit;
 
 namespace ContainerExtension.UnitTests;
@@ -19,7 +20,6 @@ namespace ContainerExtension.UnitTests;
 public sealed class SecurityAndParsingTests
 {
     private const BindingFlags StaticNonPublic = BindingFlags.NonPublic | BindingFlags.Static;
-    private const BindingFlags InstanceNonPublic = BindingFlags.NonPublic | BindingFlags.Instance;
 
     private static readonly Type RegistryClientType =
         typeof(ContainerExtension.Registry.RegistryClient);
@@ -263,11 +263,7 @@ public sealed class SecurityAndParsingTests
     private const string EnvImageKey = "ONEWARE_DOCKER_IMAGE";
 
     private static string InvokeResolveImage(DockerExecutionStrategy strategy, string toolName)
-    {
-        var method = typeof(DockerExecutionStrategy).GetMethod("ResolveImage", InstanceNonPublic);
-        Assert.NotNull(method);
-        return (string)method!.Invoke(strategy, new object[] { toolName })!;
-    }
+        => strategy.ResolveImage(new ToolCommand { ToolName = toolName, CommandArguments = [] }).Image;
 
     [Fact]
     public void ResolveImage_EnvironmentVariable_TakesPrecedenceAndTrimsCarriageReturn()

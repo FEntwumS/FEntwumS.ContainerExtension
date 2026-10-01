@@ -67,6 +67,9 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     /// </summary>
     public const string AllowNativeFallbackSetting = "ContainerExtension_AllowNativeFallback";
     public const string PerToolImagePrefix = "ContainerImage_";
+    // The key OneWare's tool engine uses by convention for a container image in a tool's strategy
+    // configuration or in the overrides of a single call.
+    public const string StrategyConfigurationImageKey = "docker.image";
     public const string FallbackImage = "hdlc/ghdl:yosys";
 
     // The project's own full-flow toolchain image (built locally via "Build Local Image" or
