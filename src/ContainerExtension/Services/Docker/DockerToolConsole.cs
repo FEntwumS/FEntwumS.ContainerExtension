@@ -69,6 +69,17 @@ internal sealed class DockerToolConsole
         }
     }
 
+    // Completes once every action SafeInvoke posted before the call has run: the dispatcher runs posts of
+    // the same priority in order. Without a UI thread, SafeInvoke runs actions inline and nothing is pending.
+    internal static Task WhenPostedActionsRanAsync()
+    {
+        if (Avalonia.Application.Current == null)
+        {
+            return Task.CompletedTask;
+        }
+        return Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(static () => { }).GetTask();
+    }
+
     // Appends to the captured-output buffer up to the cap, then stops after a one-time marker.
     // The caller must hold the lock on <paramref name="sb"/>.
     internal static void AppendCapped(StringBuilder sb, ReadOnlySpan<char> text)

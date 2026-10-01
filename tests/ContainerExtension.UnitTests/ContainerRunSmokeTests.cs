@@ -93,6 +93,35 @@ public sealed class ContainerRunSmokeTests : IDisposable
         Assert.Contains("to-stderr", output, StringComparison.Ordinal);
     }
 
+    [FactIfNoCI]
+    public async Task Busybox_HandlerRejectingALine_FailsTheRun()
+    {
+        using var provider = CreateBusyboxProvider();
+        using var strategy = new DockerExecutionStrategy(provider);
+        // Like OneWare's Yosys service, which rejects the lines it recognizes as errors.
+        var command = CreateShellCommand("echo ERROR: synthesis failed",
+            outputHandler: line => !line.StartsWith("ERROR", StringComparison.Ordinal),
+            errorHandler: _ => true);
+
+        var (success, output) = await strategy.ExecuteAsync(command);
+
+        Assert.False(success, $"expected the rejected line to fail the run; output was: {output}");
+    }
+
+    [FactIfNoCI]
+    public async Task Busybox_HandlerAcceptingEveryLine_KeepsTheRunSuccessful()
+    {
+        using var provider = CreateBusyboxProvider();
+        using var strategy = new DockerExecutionStrategy(provider);
+        var command = CreateShellCommand("echo Info: synthesis done",
+            outputHandler: line => !line.StartsWith("ERROR", StringComparison.Ordinal),
+            errorHandler: _ => true);
+
+        var (success, output) = await strategy.ExecuteAsync(command);
+
+        Assert.True(success, $"expected container run to succeed; output was: {output}");
+    }
+
     private static E2ETestServiceProvider CreateBusyboxProvider()
     {
         var provider = new E2ETestServiceProvider();
@@ -102,12 +131,15 @@ public sealed class ContainerRunSmokeTests : IDisposable
         return provider;
     }
 
-    // A caller that sets neither handler, as OneWare's Icarus Verilog and Verilator simulators do.
-    private static ToolCommand CreateShellCommand(string script) => new()
-    {
-        Executable = "sh",
-        ToolName = "sh",
-        WorkingDirectory = Path.GetTempPath(),
-        CommandArguments = new List<ICommandArgument> { new E2ETestCommandArgument("-c"), new E2ETestCommandArgument(script) }
-    };
+    // Without handlers, the command is called the way OneWare's Icarus Verilog and Verilator simulators call.
+    private static ToolCommand CreateShellCommand(string script,
+        Func<string, bool>? outputHandler = null, Func<string, bool>? errorHandler = null) => new()
+        {
+            Executable = "sh",
+            ToolName = "sh",
+            WorkingDirectory = Path.GetTempPath(),
+            CommandArguments = new List<ICommandArgument> { new E2ETestCommandArgument("-c"), new E2ETestCommandArgument(script) },
+            OutputHandler = outputHandler,
+            ErrorHandler = errorHandler
+        };
 }

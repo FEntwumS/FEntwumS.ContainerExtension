@@ -72,9 +72,12 @@ internal sealed class NativeFallbackExecutor
     /// <param name="resolvedExecutable">The absolute host file path of the executable binary.</param>
     /// <param name="stopwatch">The stopwatch tracking elapsed execution duration.</param>
     /// <param name="ct">The token used to signal operation cancellation.</param>
+    /// <param name="verdict">Records a line of the tool's output that a handler rejects; without it, the exit code alone decides.</param>
     /// <returns>A tuple indicating success status and accumulated terminal output.</returns>
-    internal async Task<(bool success, string output)> ExecuteNativelyAsync(ToolCommand command, string resolvedExecutable, Stopwatch stopwatch, CancellationToken ct)
+    internal async Task<(bool success, string output)> ExecuteNativelyAsync(ToolCommand command, string resolvedExecutable, Stopwatch stopwatch, CancellationToken ct, HandlerVerdict? verdict = null)
     {
+        var outputHandler = verdict is null ? command.OutputHandler : verdict.Track(command.OutputHandler);
+        var errorHandler = verdict is null ? command.ErrorHandler : verdict.Track(command.ErrorHandler);
         var executableName = Path.GetFileNameWithoutExtension(resolvedExecutable);
         var args = command.Arguments != null ? string.Join(" ", command.Arguments) : string.Empty;
         // Unlike the container path (which rejects a non-absolute working directory because it becomes a
@@ -113,7 +116,7 @@ internal sealed class NativeFallbackExecutor
             if (e.Data != null)
             {
                 lock (outputBuilder) { AppendCapped(outputBuilder, e.Data); AppendCapped(outputBuilder, "\n"); }
-                SafeInvoke(() => command.OutputHandler?.Invoke(e.Data));
+                SafeInvoke(() => outputHandler?.Invoke(e.Data));
             }
         };
 
@@ -122,7 +125,7 @@ internal sealed class NativeFallbackExecutor
             if (e.Data != null)
             {
                 lock (outputBuilder) { AppendCapped(outputBuilder, e.Data); AppendCapped(outputBuilder, "\n"); }
-                SafeInvoke(() => command.ErrorHandler?.Invoke(e.Data));
+                SafeInvoke(() => errorHandler?.Invoke(e.Data));
             }
         };
 

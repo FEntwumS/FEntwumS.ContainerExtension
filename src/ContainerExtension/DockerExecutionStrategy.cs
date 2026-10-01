@@ -798,14 +798,18 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     /// Runs <paramref name="command"/> as a foreground tool call. Handlers the caller left unset fall back to
     /// the host's output window and log, as they do under OneWare's native strategy.
     /// </summary>
-    internal Task<(bool success, string output)> ExecuteAsync(ToolCommand command, CancellationToken cancellationToken)
+    internal async Task<(bool success, string output)> ExecuteAsync(ToolCommand command, CancellationToken cancellationToken)
     {
-        return ExecuteCoreAsync(command.WithDefaultHandlers(HostFeedback), cancellationToken);
+        var verdict = new HandlerVerdict();
+        var (success, output) = await ExecuteCoreAsync(command.WithDefaultHandlers(HostFeedback), cancellationToken, verdict).ConfigureAwait(false);
+        // The handlers run on the UI thread; their verdict is complete once every posted call has run.
+        await WhenPostedActionsRanAsync().ConfigureAwait(false);
+        return (success && !verdict.Rejected, output);
     }
 
     // The container run itself. Background runs call it directly: like the native strategy's background
-    // processes, they write nothing to the host on their own.
-    private async Task<(bool success, string output)> ExecuteCoreAsync(ToolCommand command, CancellationToken cancellationToken)
+    // processes, they write nothing to the host on their own, and no handler verdict decides their result.
+    private async Task<(bool success, string output)> ExecuteCoreAsync(ToolCommand command, CancellationToken cancellationToken, HandlerVerdict? verdict = null)
     {
         using var activity = DockerActivitySource.StartActivity("DockerExecutionStrategy.Execute");
         // Only emit telemetry tags when the user has not opted out, and never record the raw host
@@ -1020,7 +1024,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                         // the finally does not also log a phantom container entry (exit -1) for a run that
                         // never happened, nor wipe the real one under retention=None.
                         nativeFallbackUsed = true;
-                        return await _nativeFallback.ExecuteNativelyAsync(command, resolvedPath, stopwatch, ct).ConfigureAwait(false);
+                        return await _nativeFallback.ExecuteNativelyAsync(command, resolvedPath, stopwatch, ct, verdict).ConfigureAwait(false);
                     }
                     else
                     {
@@ -1085,7 +1089,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             _console.SdkLog(command, $"[Docker SDK] Equivalent CLI: {reconstructedDockerRun}", RankInfo);
 
             _console.SdkLog(command, $"[Docker SDK] Creating and starting container...", RankInfo);
-            var result = await _runner.RunContainerAsync(createParams, command, ct).ConfigureAwait(false);
+            var result = await _runner.RunContainerAsync(createParams, command, ct, verdict).ConfigureAwait(false);
             exitCode = result.exitCode;
             wasCancelled = result.wasCancelled;
             resourceProfile = result.profile;
