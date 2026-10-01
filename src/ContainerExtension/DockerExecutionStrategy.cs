@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using Avalonia.Media;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
@@ -77,6 +78,12 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     private ContainerRunner? _runner;
     private readonly NativeFallbackExecutor _nativeFallback;
 
+    /// <summary>
+    /// Where a foreground run's output and errors go when the caller passes no handler for them.
+    /// Replaceable so tests can observe it without a running host.
+    /// </summary>
+    internal IHostRunFeedback HostFeedback { get; set; }
+
     internal async Task EnsureInitializedAsync(CancellationToken ct = default)
     {
         await _initTask.WaitAsync(ct).ConfigureAwait(false);
@@ -86,6 +93,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     {
         _settingsService = serviceProvider.Resolve<ISettingsService>();
         _nativeFallback = new NativeFallbackExecutor(_settingsService, _console);
+        HostFeedback = new OneWareRunFeedback(serviceProvider);
         _initTask = Task.Run(InitializeInternalAsync, _strategyCts.Token);
     }
 
@@ -270,7 +278,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             {
                 try
                 {
-                    await ExecuteAsync(command, runCts.Token).ConfigureAwait(false);
+                    await ExecuteCoreAsync(command, runCts.Token).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -336,7 +344,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         {
             try
             {
-                await ExecuteAsync(command, runCts.Token).ConfigureAwait(false);
+                await ExecuteCoreAsync(command, runCts.Token).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -787,7 +795,49 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         return ExecuteAsync(command, CancellationToken.None);
     }
 
+    /// <summary>
+    /// Runs <paramref name="command"/> as a foreground tool call. Handlers the caller left unset fall back to
+    /// the host's output window and log, as they do under OneWare's native strategy.
+    /// </summary>
     internal async Task<(bool success, string output)> ExecuteAsync(ToolCommand command, CancellationToken cancellationToken)
+    {
+        HostFeedback.WriteNotice(RunReport.CommandLine(command), Brushes.CornflowerBlue);
+        using var statusCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var status = await HostFeedback.BeginStatusAsync(command.StatusMessage, command.State, command.ShowTimer,
+            () => CancelQuietly(statusCancellation)).ConfigureAwait(false);
+        var verdict = new HandlerVerdict();
+        var outcome = new RunOutcome();
+        var (success, output) = await ExecuteCoreAsync(command.WithDefaultHandlers(HostFeedback), statusCancellation.Token, verdict, outcome).ConfigureAwait(false);
+        // The handlers run on the UI thread; their verdict is complete once every posted call has run.
+        await WhenPostedActionsRanAsync().ConfigureAwait(false);
+        if (outcome.Cancelled)
+        {
+            HostFeedback.WriteNotice(RunReport.Cancelled(command), Brushes.DarkOrange);
+        }
+        else if (outcome.ExitCode is { } exitCode && exitCode != 0)
+        {
+            HostFeedback.WriteError(RunReport.ExitedWith(command, exitCode));
+        }
+        return (success && !verdict.Rejected && !status.Terminated, output);
+    }
+
+    // The status entry can outlive the run by a moment, so a late cancel may meet a disposed source.
+    private static void CancelQuietly(CancellationTokenSource source)
+    {
+        try
+        {
+            source.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The run has already ended.
+        }
+    }
+
+    // The container run itself. Background runs call it directly: like the native strategy's background
+    // processes, they write nothing to the host on their own, and no handler verdict decides their result.
+    private async Task<(bool success, string output)> ExecuteCoreAsync(ToolCommand command, CancellationToken cancellationToken,
+        HandlerVerdict? verdict = null, RunOutcome? outcome = null)
     {
         using var activity = DockerActivitySource.StartActivity("DockerExecutionStrategy.Execute");
         // Only emit telemetry tags when the user has not opted out, and never record the raw host
@@ -1002,7 +1052,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                         // the finally does not also log a phantom container entry (exit -1) for a run that
                         // never happened, nor wipe the real one under retention=None.
                         nativeFallbackUsed = true;
-                        return await _nativeFallback.ExecuteNativelyAsync(command, resolvedPath, stopwatch, ct).ConfigureAwait(false);
+                        return await _nativeFallback.ExecuteNativelyAsync(command, resolvedPath, stopwatch, ct, verdict, outcome).ConfigureAwait(false);
                     }
                     else
                     {
@@ -1067,7 +1117,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             _console.SdkLog(command, $"[Docker SDK] Equivalent CLI: {reconstructedDockerRun}", RankInfo);
 
             _console.SdkLog(command, $"[Docker SDK] Creating and starting container...", RankInfo);
-            var result = await _runner.RunContainerAsync(createParams, command, ct).ConfigureAwait(false);
+            var result = await _runner.RunContainerAsync(createParams, command, ct, verdict).ConfigureAwait(false);
             exitCode = result.exitCode;
             wasCancelled = result.wasCancelled;
             resourceProfile = result.profile;
@@ -1084,19 +1134,26 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                     errorMessage = $"Execution timed out after {timeoutMinutes:N0} minute(s).";
                     SafeInvoke(() => command.ErrorHandler?.Invoke($"[Docker SDK] {errorMessage}"));
                 }
+                outcome?.RecordCancellation();
                 return (false, result.output);
             }
 
             _console.SdkLog(command, $"[Docker SDK] Container finished. Exit code: {exitCode}", RankInfo);
+            outcome?.RecordExit(exitCode);
             return (exitCode == 0, result.output);
         }
         catch (OperationCanceledException)
         {
             wasCancelled = true;
+            outcome?.RecordCancellation();
             errorMessage = timeoutMinutes > 0
               ? $"Execution timed out after {timeoutMinutes:N0} minute(s)."
               : "Operation cancelled.";
-            SafeInvoke(() => command.ErrorHandler?.Invoke($"[Docker SDK] {errorMessage}"));
+            // ExecuteAsync reports a cancellation to the host; only a timeout needs a line saying why the run stopped.
+            if (timeoutMinutes > 0)
+                SafeInvoke(() => command.ErrorHandler?.Invoke($"[Docker SDK] {errorMessage}"));
+            else
+                _console.SdkLog(command, $"[Docker SDK] {errorMessage}", RankInfo);
             return (false, "Cancelled");
         }
         catch (Exception ex)

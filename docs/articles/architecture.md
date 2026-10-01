@@ -76,6 +76,16 @@ ResolveImage -> EnsureImage (pull if needed) -> BuildContainerParameters
     -> WaitContainer -> Log Telemetry -> Cleanup
 ```
 
+## Feedback in OneWare Studio
+
+A foreground run (`ExecuteAsync`) reports to OneWare Studio the way the native strategy does, whatever handlers the caller passes:
+
+- before the run, the command line in the output window, as `[folder]: tool arguments`
+- during the run, a status bar entry with the command's status message, the elapsed time when the caller asks for a timer, and cancel
+- after the run, `exited with code N` in red or `cancelled!` in orange
+
+Output and error lines go to the caller's `OutputHandler` and `ErrorHandler`. A handler the caller leaves unset falls back to the output window or the error log, and an error line then fails the run, even when the tool exits with code 0. A handler that returns `false` fails the run as well. Background runs (`StartProcess`, `StartWeakProcess`) report nothing on their own, like the native strategy's background processes.
+
 ## Docking System Integration
 
 The dashboard integrates with OneWare Studio's dock infrastructure via the `ExtendedTool` base class:
