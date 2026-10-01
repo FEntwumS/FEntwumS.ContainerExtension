@@ -77,6 +77,12 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     private ContainerRunner? _runner;
     private readonly NativeFallbackExecutor _nativeFallback;
 
+    /// <summary>
+    /// Where a foreground run's output and errors go when the caller passes no handler for them.
+    /// Replaceable so tests can observe it without a running host.
+    /// </summary>
+    internal IHostRunFeedback HostFeedback { get; set; }
+
     internal async Task EnsureInitializedAsync(CancellationToken ct = default)
     {
         await _initTask.WaitAsync(ct).ConfigureAwait(false);
@@ -86,6 +92,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     {
         _settingsService = serviceProvider.Resolve<ISettingsService>();
         _nativeFallback = new NativeFallbackExecutor(_settingsService, _console);
+        HostFeedback = new OneWareRunFeedback(serviceProvider);
         _initTask = Task.Run(InitializeInternalAsync, _strategyCts.Token);
     }
 
@@ -270,7 +277,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             {
                 try
                 {
-                    await ExecuteAsync(command, runCts.Token).ConfigureAwait(false);
+                    await ExecuteCoreAsync(command, runCts.Token).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -336,7 +343,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         {
             try
             {
-                await ExecuteAsync(command, runCts.Token).ConfigureAwait(false);
+                await ExecuteCoreAsync(command, runCts.Token).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -787,7 +794,18 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         return ExecuteAsync(command, CancellationToken.None);
     }
 
-    internal async Task<(bool success, string output)> ExecuteAsync(ToolCommand command, CancellationToken cancellationToken)
+    /// <summary>
+    /// Runs <paramref name="command"/> as a foreground tool call. Handlers the caller left unset fall back to
+    /// the host's output window and log, as they do under OneWare's native strategy.
+    /// </summary>
+    internal Task<(bool success, string output)> ExecuteAsync(ToolCommand command, CancellationToken cancellationToken)
+    {
+        return ExecuteCoreAsync(command.WithDefaultHandlers(HostFeedback), cancellationToken);
+    }
+
+    // The container run itself. Background runs call it directly: like the native strategy's background
+    // processes, they write nothing to the host on their own.
+    private async Task<(bool success, string output)> ExecuteCoreAsync(ToolCommand command, CancellationToken cancellationToken)
     {
         using var activity = DockerActivitySource.StartActivity("DockerExecutionStrategy.Execute");
         // Only emit telemetry tags when the user has not opted out, and never record the raw host
