@@ -156,6 +156,7 @@ public sealed class QualityVerificationTests
         {
             Executable = "sleep",
             ToolName = "sleep",
+            WorkingDirectory = AppContext.BaseDirectory,
             CommandArguments = BuildArgs("30"),
             ErrorHandler = msg => { lock (stderrList) stderrList.Add(msg); return true; }
         };
