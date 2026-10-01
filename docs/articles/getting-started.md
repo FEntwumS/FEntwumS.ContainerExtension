@@ -4,7 +4,7 @@ Installation, configuration, and a first containerized build with the Container 
 
 ## Prerequisites
 
-- [OneWare Studio](https://one-ware.com/) installed
+- [OneWare Studio](https://one-ware.com/) 1.0.40 or later
 - A container runtime:
   - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (recommended)
   - [Podman](https://podman.io/)
