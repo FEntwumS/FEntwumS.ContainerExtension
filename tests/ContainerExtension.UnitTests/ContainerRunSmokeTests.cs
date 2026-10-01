@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media;
 using ContainerExtension;
+using OneWare.Essentials.Enums;
 using OneWare.Essentials.ToolEngine;
 using Xunit;
 
@@ -199,6 +201,67 @@ public sealed class ContainerRunSmokeTests : IDisposable
         Assert.False(success);
         Assert.Contains(($"[{Path.GetFileName(_workDir)}]: sh cancelled!", (Color?)Colors.DarkOrange), feedback.Notices);
         Assert.DoesNotContain(feedback.Errors, e => e.Contains("exited with code", StringComparison.Ordinal));
+    }
+
+    [FactIfNoCI]
+    public async Task Busybox_EveryRun_ShowsAStatusEntryUntilItEnds()
+    {
+        using var provider = CreateBusyboxProvider();
+        using var strategy = new DockerExecutionStrategy(provider);
+        var feedback = new RecordingRunFeedback();
+        strategy.HostFeedback = feedback;
+        var command = new ToolCommand
+        {
+            Executable = "sh",
+            ToolName = "sh",
+            WorkingDirectory = _workDir,
+            CommandArguments = new List<ICommandArgument> { new E2ETestCommandArgument("-c"), new E2ETestCommandArgument("echo to-stdout") },
+            StatusMessage = "Running sh...",
+            ShowTimer = true
+        };
+
+        var (success, output) = await strategy.ExecuteAsync(command);
+
+        Assert.True(success, $"expected container run to succeed; output was: {output}");
+        var status = Assert.Single(feedback.Statuses);
+        Assert.Equal("Running sh...", status.Message);
+        Assert.Equal(AppState.Loading, status.State);
+        Assert.True(status.ShowTimer);
+        Assert.True(status.Disposed);
+    }
+
+    [FactIfNoCI]
+    public async Task Busybox_CancellingTheStatusEntry_CancelsTheRun()
+    {
+        using var provider = CreateBusyboxProvider();
+        using var strategy = new DockerExecutionStrategy(provider);
+        var feedback = new RecordingRunFeedback();
+        strategy.HostFeedback = feedback;
+        var elapsed = Stopwatch.StartNew();
+
+        var run = strategy.ExecuteAsync(CreateShellCommand("sleep 30", workingDirectory: _workDir));
+        var status = await feedback.FirstStatus.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        await Task.Delay(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+        status.CancelFromStatusBar();
+        var (success, _) = await run;
+
+        Assert.False(success);
+        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(20), $"the run ended only after {elapsed.Elapsed}");
+        Assert.Contains(($"[{Path.GetFileName(_workDir)}]: sh cancelled!", (Color?)Colors.DarkOrange), feedback.Notices);
+        Assert.True(status.Disposed);
+    }
+
+    [FactIfNoCI]
+    public async Task Busybox_TerminatedStatusEntry_FailsAnOtherwiseSuccessfulRun()
+    {
+        using var provider = CreateBusyboxProvider();
+        using var strategy = new DockerExecutionStrategy(provider);
+        // The user cancelled just as the run ended: too late to stop it, yet the run counts as failed.
+        strategy.HostFeedback = new RecordingRunFeedback { StatusesStartTerminated = true };
+
+        var (success, output) = await strategy.ExecuteAsync(CreateShellCommand("echo to-stdout", _ => true, _ => true, _workDir));
+
+        Assert.False(success, $"expected the cancelled status entry to fail the run; output was: {output}");
     }
 
     private static E2ETestServiceProvider CreateBusyboxProvider()

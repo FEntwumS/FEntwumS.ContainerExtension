@@ -802,9 +802,12 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     internal async Task<(bool success, string output)> ExecuteAsync(ToolCommand command, CancellationToken cancellationToken)
     {
         HostFeedback.WriteNotice(RunReport.CommandLine(command), Brushes.CornflowerBlue);
+        using var statusCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var status = await HostFeedback.BeginStatusAsync(command.StatusMessage, command.State, command.ShowTimer,
+            () => CancelQuietly(statusCancellation)).ConfigureAwait(false);
         var verdict = new HandlerVerdict();
         var outcome = new RunOutcome();
-        var (success, output) = await ExecuteCoreAsync(command.WithDefaultHandlers(HostFeedback), cancellationToken, verdict, outcome).ConfigureAwait(false);
+        var (success, output) = await ExecuteCoreAsync(command.WithDefaultHandlers(HostFeedback), statusCancellation.Token, verdict, outcome).ConfigureAwait(false);
         // The handlers run on the UI thread; their verdict is complete once every posted call has run.
         await WhenPostedActionsRanAsync().ConfigureAwait(false);
         if (outcome.Cancelled)
@@ -815,7 +818,20 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         {
             HostFeedback.WriteError(RunReport.ExitedWith(command, exitCode));
         }
-        return (success && !verdict.Rejected, output);
+        return (success && !verdict.Rejected && !status.Terminated, output);
+    }
+
+    // The status entry can outlive the run by a moment, so a late cancel may meet a disposed source.
+    private static void CancelQuietly(CancellationTokenSource source)
+    {
+        try
+        {
+            source.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The run has already ended.
+        }
     }
 
     // The container run itself. Background runs call it directly: like the native strategy's background

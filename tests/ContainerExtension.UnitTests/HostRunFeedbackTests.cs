@@ -1,12 +1,16 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using Avalonia.Media;
 using ContainerExtension.Services.Docker;
 using OneWare.Essentials.Enums;
+using OneWare.Essentials.Models;
+using OneWare.Essentials.Services;
 using OneWare.Essentials.ToolEngine;
 using Xunit;
 
@@ -147,6 +151,40 @@ public sealed class RunReportTests
         Assert.Equal("[VerilogBlink]: vvp cancelled!", RunReport.Cancelled(command));
         Assert.Equal("[VerilogBlink]: vvp exited with code 2", RunReport.ExitedWith(command, 2));
     }
+
+    [Fact]
+    public void StatusWithElapsed_AppendsMinutesAndSeconds()
+    {
+        Assert.Equal("Running IVerilog.. 00:07", RunReport.StatusWithElapsed("Running IVerilog..", TimeSpan.FromSeconds(7)));
+        Assert.Equal("Running IVerilog.. 01:15", RunReport.StatusWithElapsed("Running IVerilog..", TimeSpan.FromSeconds(75)));
+        Assert.Equal("Running IVerilog.. 125:00", RunReport.StatusWithElapsed("Running IVerilog..", TimeSpan.FromMinutes(125)));
+    }
+}
+
+public sealed class ApplicationStateRunStatusTests
+{
+    [Fact]
+    public void Status_AddsAnEntryThatCancelsTheRunAndRemovesItOnDispose()
+    {
+        var stateService = new RecordingApplicationStateService();
+        var cancelled = false;
+
+        var status = new ApplicationStateRunStatus(stateService, "Running IVerilog..", AppState.Loading, showTimer: true, () => cancelled = true);
+
+        var entry = Assert.Single(stateService.Added);
+        Assert.Equal("Running IVerilog..", entry.StatusMessage);
+        Assert.Equal(AppState.Loading, entry.State);
+        Assert.False(status.Terminated);
+
+        // What OneWare's status bar does when the user cancels the run.
+        entry.Terminated = true;
+        entry.Terminate!();
+        Assert.True(cancelled);
+        Assert.True(status.Terminated);
+
+        status.Dispose();
+        Assert.Same(entry, Assert.Single(stateService.Removed));
+    }
 }
 
 /// <summary>
@@ -164,4 +202,74 @@ internal sealed class RecordingRunFeedback : IHostRunFeedback
     public void WriteError(string line) => Errors.Enqueue(line);
 
     public void WriteNotice(string line, IBrush brush) => Notices.Enqueue((line, (brush as ISolidColorBrush)?.Color));
+
+    public ConcurrentQueue<RecordingRunStatus> Statuses { get; } = new();
+
+    /// <summary>Completes with the first status entry a run shows.</summary>
+    public Task<RecordingRunStatus> FirstStatus => _firstStatus.Task;
+
+    /// <summary>Hands out status entries the user has already cancelled, as if the click came as the run ended.</summary>
+    public bool StatusesStartTerminated { get; init; }
+
+    private readonly TaskCompletionSource<RecordingRunStatus> _firstStatus = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public Task<IHostRunStatus> BeginStatusAsync(string message, AppState state, bool showTimer, Action cancel)
+    {
+        var status = new RecordingRunStatus(message, state, showTimer, cancel) { Terminated = StatusesStartTerminated };
+        Statuses.Enqueue(status);
+        _firstStatus.TrySetResult(status);
+        return Task.FromResult<IHostRunStatus>(status);
+    }
+}
+
+/// <summary>A status entry as <see cref="RecordingRunFeedback"/> hands it out.</summary>
+internal sealed class RecordingRunStatus(string message, AppState state, bool showTimer, Action cancel) : IHostRunStatus
+{
+    public string Message { get; } = message;
+    public AppState State { get; } = state;
+    public bool ShowTimer { get; } = showTimer;
+    public bool Terminated { get; set; }
+    public bool Disposed { get; private set; }
+
+    /// <summary>What OneWare's status bar does when the user cancels a run.</summary>
+    public void CancelFromStatusBar()
+    {
+        Terminated = true;
+        cancel();
+    }
+
+    public void Dispose() => Disposed = true;
+}
+
+/// <summary>Records the status entries added and removed, in place of OneWare's application state.</summary>
+internal sealed class RecordingApplicationStateService : IApplicationStateService
+{
+    public List<ApplicationProcess> Added { get; } = [];
+    public List<ApplicationProcess> Removed { get; } = [];
+
+    public ApplicationProcess AddState(string status, AppState state, Action? terminate = null)
+    {
+        var process = new ApplicationProcess { StatusMessage = status, State = state, Terminate = terminate };
+        Added.Add(process);
+        return process;
+    }
+
+    public void RemoveState(ApplicationProcess key, string finishMessage = "Done") => Removed.Add(key);
+
+    public bool ShutdownComplete => false;
+    public ObservableCollection<ApplicationNotification> CurrentNotifications { get; } = new();
+    public ApplicationProcess ActiveProcess { get; } = new();
+    public Task TerminateActiveDialogAsync() => throw new NotSupportedException();
+    public void RegisterAutoLaunchAction(Action<string?> action) => throw new NotSupportedException();
+    public void RegisterPathLaunchAction(Action<string?> action) => throw new NotSupportedException();
+    public void RegisterUrlLaunchAction(string key, Action<string?> action) => throw new NotSupportedException();
+    public void RegisterShutdownAction(Action action) => throw new NotSupportedException();
+    public void RegisterShutdownTask(Func<Task<bool>> task) => throw new NotSupportedException();
+    public void ExecuteAutoLaunchActions(string? value) => throw new NotSupportedException();
+    public void ExecutePathLaunchActions(string? value) => throw new NotSupportedException();
+    public void ExecuteUrlLaunchActions(Uri uri) => throw new NotSupportedException();
+    public Task<bool> TryShutdownAsync() => throw new NotSupportedException();
+    public Task<bool> TryRestartAsync() => throw new NotSupportedException();
+    public void AddNotification(ApplicationNotification notification) => throw new NotSupportedException();
+    public void ClearNotifications() => throw new NotSupportedException();
 }
