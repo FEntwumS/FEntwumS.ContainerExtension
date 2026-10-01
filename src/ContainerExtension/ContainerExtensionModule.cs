@@ -524,6 +524,15 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         }, ct);
     }
 
+    /// <summary>
+    /// What an empty per-tool image field falls back to, shown as its placeholder: the <c>docker.image</c>
+    /// the tool's plugin declares, or else the Default Toolchain Image.
+    /// </summary>
+    internal static string PerToolImageFallback(IReadOnlyDictionary<string, string> strategyConfiguration)
+        => strategyConfiguration.TryGetValue(StrategyConfigurationImageKey, out var image) && !string.IsNullOrWhiteSpace(image)
+            ? image.Trim()
+            : DefaultImageSettingTitle;
+
     private static void InjectStrategyIntoAllTools(IToolService toolService, DockerExecutionStrategy dockerStrategy, ISettingsService settingsService)
     {
         var allTools = toolService.GetAllTools();
@@ -543,9 +552,9 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                 settingsService.RegisterSetting(
                   SettingsCategoryBinary, SettingsSubCategoryStrategy,
                   settingKey,
-                  new TextBoxSetting($"Container Image for {globalTool.Name}", "", DefaultImageSettingTitle)
+                  new TextBoxSetting($"Container Image for {globalTool.Name}", "", PerToolImageFallback(toolService.GetStrategyConfiguration(globalTool.Key)))
                   {
-                      HoverDescription = $"Overrides the Default Toolchain Image when '{globalTool.Name}' is executed via Docker.",
+                      HoverDescription = $"Overrides the image shown as placeholder when '{globalTool.Name}' is executed via Docker.",
                       Validator = ImageFormatValidatorAllowEmpty
                   }
                 );
