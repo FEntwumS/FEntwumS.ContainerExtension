@@ -81,6 +81,11 @@ public sealed class DockerExecutionE2ETests : IDisposable
         return args.Select(a => (ICommandArgument)new E2ETestCommandArgument(a)).ToList();
     }
 
+    // OneWare's Yosys service passes nextpnr handlers like this one: nextpnr reports its progress on stderr,
+    // and only a line starting with "Error:" counts as a failure.
+    private static bool AcceptsNextpnrLine(string line) =>
+        !line.TrimStart().StartsWith("Error:", StringComparison.OrdinalIgnoreCase);
+
     [FactIfNoCI]
     public async Task F1_GHDL_Analyze_HappyPath()
     {
@@ -560,7 +565,9 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 Executable = "nextpnr-ice40",
                 ToolName = "nextpnr-ice40",
                 WorkingDirectory = tempDir,
-                CommandArguments = BuildArgs("--json", "ice40_blink.json", "--pcf", "ice40_blink.pcf", "--asc", "test_ice.asc")
+                CommandArguments = BuildArgs("--json", "ice40_blink.json", "--pcf", "ice40_blink.pcf", "--asc", "test_ice.asc"),
+                OutputHandler = AcceptsNextpnrLine,
+                ErrorHandler = AcceptsNextpnrLine
             };
             var (success, _) = await strategy.ExecuteAsync(command);
             Assert.True(success);
@@ -610,7 +617,9 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 Executable = "nextpnr-ecp5",
                 ToolName = "nextpnr-ecp5",
                 WorkingDirectory = tempDir,
-                CommandArguments = BuildArgs("--json", "ecp5_blink.json", "--lpf", "ecp5_blink.lpf", "--textcfg", "test_ecp.config")
+                CommandArguments = BuildArgs("--json", "ecp5_blink.json", "--lpf", "ecp5_blink.lpf", "--textcfg", "test_ecp.config"),
+                OutputHandler = AcceptsNextpnrLine,
+                ErrorHandler = AcceptsNextpnrLine
             };
             var (success, _) = await strategy.ExecuteAsync(command);
             Assert.True(success);
@@ -660,7 +669,9 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 Executable = "nextpnr-ice40",
                 ToolName = "nextpnr-ice40",
                 WorkingDirectory = tempDir,
-                CommandArguments = BuildArgs("--json", "ice40_blink.json", "--pcf", "ice40_blink.pcf", "--asc", "temp_pcf.asc")
+                CommandArguments = BuildArgs("--json", "ice40_blink.json", "--pcf", "ice40_blink.pcf", "--asc", "temp_pcf.asc"),
+                OutputHandler = AcceptsNextpnrLine,
+                ErrorHandler = AcceptsNextpnrLine
             };
             var (success, _) = await strategy.ExecuteAsync(command);
             Assert.True(success);
@@ -1206,7 +1217,9 @@ public sealed class DockerExecutionE2ETests : IDisposable
             Executable = "nextpnr-ice40",
             ToolName = "nextpnr-ice40",
             WorkingDirectory = Directory.GetCurrentDirectory(),
-            CommandArguments = BuildArgs("--json", "missing_netlist.json", "--asc", "out.asc")
+            CommandArguments = BuildArgs("--json", "missing_netlist.json", "--asc", "out.asc"),
+            OutputHandler = AcceptsNextpnrLine,
+            ErrorHandler = AcceptsNextpnrLine
         };
         var (success, _) = await strategy.ExecuteAsync(command);
         Assert.False(success);
@@ -1227,7 +1240,9 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 Executable = "nextpnr-ice40",
                 ToolName = "nextpnr-ice40",
                 WorkingDirectory = tempDir,
-                CommandArguments = BuildArgs("--json", "ice40_blink.json", "--package", "invalid_package_option")
+                CommandArguments = BuildArgs("--json", "ice40_blink.json", "--package", "invalid_package_option"),
+                OutputHandler = AcceptsNextpnrLine,
+                ErrorHandler = AcceptsNextpnrLine
             };
             var (success, _) = await strategy.ExecuteAsync(command);
             Assert.False(success);
@@ -1269,7 +1284,9 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 Executable = "nextpnr-ecp5",
                 ToolName = "nextpnr-ecp5",
                 WorkingDirectory = tempDir,
-                CommandArguments = BuildArgs("--json", "ecp5_blink.json", "--lpf", "bad.lpf", "--textcfg", "out.config")
+                CommandArguments = BuildArgs("--json", "ecp5_blink.json", "--lpf", "bad.lpf", "--textcfg", "out.config"),
+                OutputHandler = AcceptsNextpnrLine,
+                ErrorHandler = AcceptsNextpnrLine
             };
             var (success, _) = await strategy.ExecuteAsync(command);
             Assert.False(success);
@@ -1435,7 +1452,9 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 Executable = "nextpnr-ice40",
                 ToolName = "nextpnr-ice40",
                 WorkingDirectory = tempDir,
-                CommandArguments = BuildArgs("--json", "test_synth.json", "--pcf", "ice40_blink.pcf", "--asc", "out.asc")
+                CommandArguments = BuildArgs("--json", "test_synth.json", "--pcf", "ice40_blink.pcf", "--asc", "out.asc"),
+                OutputHandler = AcceptsNextpnrLine,
+                ErrorHandler = AcceptsNextpnrLine
             };
             var (s2, _) = await strategy.ExecuteAsync(cmdPnr);
             Assert.True(s2);
@@ -1718,7 +1737,9 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 Executable = "nextpnr-ice40",
                 ToolName = "nextpnr-ice40",
                 WorkingDirectory = tempDir,
-                CommandArguments = BuildArgs("--json", "ice40_blink.json", "--pcf", "ice40_blink.pcf", "--asc", "out.asc")
+                CommandArguments = BuildArgs("--json", "ice40_blink.json", "--pcf", "ice40_blink.pcf", "--asc", "out.asc"),
+                OutputHandler = AcceptsNextpnrLine,
+                ErrorHandler = AcceptsNextpnrLine
             };
             var (s2, _) = await strategy.ExecuteAsync(cmdPnr);
             Assert.True(s2);
@@ -1765,7 +1786,9 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 Executable = "nextpnr-ecp5",
                 ToolName = "nextpnr-ecp5",
                 WorkingDirectory = tempDir,
-                CommandArguments = BuildArgs("--json", "ecp5_blink.json", "--lpf", "ecp5_blink.lpf", "--textcfg", "out.config")
+                CommandArguments = BuildArgs("--json", "ecp5_blink.json", "--lpf", "ecp5_blink.lpf", "--textcfg", "out.config"),
+                OutputHandler = AcceptsNextpnrLine,
+                ErrorHandler = AcceptsNextpnrLine
             };
             var (s2, _) = await strategy.ExecuteAsync(cmdPnr);
             Assert.True(s2);

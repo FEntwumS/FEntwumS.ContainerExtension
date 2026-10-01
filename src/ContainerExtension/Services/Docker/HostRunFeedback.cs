@@ -52,8 +52,8 @@ internal static class ToolCommandHandlerDefaults
 {
     /// <summary>
     /// Returns <paramref name="command"/> with the host feedback in place of each handler the caller left
-    /// unset: tool output goes to the output window and errors to the log, as the native strategy does.
-    /// A command that carries both handlers is returned unchanged.
+    /// unset, as the native strategy does: tool output goes to the output window, and errors go to the log
+    /// and fail the run. A command that carries both handlers is returned unchanged.
     /// </summary>
     internal static ToolCommand WithDefaultHandlers(this ToolCommand command, IHostRunFeedback feedback)
     {
@@ -84,7 +84,7 @@ internal static class ToolCommandHandlerDefaults
             ErrorHandler = command.ErrorHandler ?? (line =>
             {
                 feedback.WriteError(line);
-                return true;
+                return false;
             })
         };
     }

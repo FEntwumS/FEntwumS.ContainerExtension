@@ -21,7 +21,8 @@ public sealed class HostRunFeedbackTests
         var effective = command.WithDefaultHandlers(feedback);
 
         Assert.True(effective.OutputHandler!("to-stdout"));
-        Assert.True(effective.ErrorHandler!("to-stderr"));
+        // An error line rejects the run, as it does under the native strategy without an error handler.
+        Assert.False(effective.ErrorHandler!("to-stderr"));
         Assert.Equal(["to-stdout"], feedback.Output);
         Assert.Equal(["to-stderr"], feedback.Errors);
     }

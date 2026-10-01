@@ -94,6 +94,30 @@ public sealed class ContainerRunSmokeTests : IDisposable
     }
 
     [FactIfNoCI]
+    public async Task Busybox_WithoutErrorHandler_FailsARunThatWritesToStderr()
+    {
+        using var provider = CreateBusyboxProvider();
+        using var strategy = new DockerExecutionStrategy(provider);
+        strategy.HostFeedback = new RecordingRunFeedback();
+
+        var (success, output) = await strategy.ExecuteAsync(CreateShellCommand("echo to-stderr >&2"));
+
+        Assert.False(success, $"expected the line on stderr to fail the run despite exit code 0; output was: {output}");
+    }
+
+    [FactIfNoCI]
+    public async Task Busybox_ErrorHandlerAcceptingStderr_KeepsTheRunSuccessful()
+    {
+        using var provider = CreateBusyboxProvider();
+        using var strategy = new DockerExecutionStrategy(provider);
+        strategy.HostFeedback = new RecordingRunFeedback();
+
+        var (success, output) = await strategy.ExecuteAsync(CreateShellCommand("echo to-stderr >&2", errorHandler: _ => true));
+
+        Assert.True(success, $"expected container run to succeed; output was: {output}");
+    }
+
+    [FactIfNoCI]
     public async Task Busybox_HandlerRejectingALine_FailsTheRun()
     {
         using var provider = CreateBusyboxProvider();
