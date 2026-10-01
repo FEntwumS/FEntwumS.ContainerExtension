@@ -1,7 +1,7 @@
 # OSS CAD Suite Build
 
 # Stage 1
-FROM ubuntu@sha256:3131b4cc82a783df6c9df078f86e01819a13594b865c2cad47bd1bca2b7063bb AS downloader
+FROM ubuntu@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78 AS downloader
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -28,7 +28,7 @@ RUN wget --progress=dot:giga --retry-connrefused --read-timeout=60 --timeout=30 
     && rm -rf /opt/oss-cad-suite/lib/python3*/test
 
 # Stage 2
-FROM ubuntu@sha256:3131b4cc82a783df6c9df078f86e01819a13594b865c2cad47bd1bca2b7063bb
+FROM ubuntu@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
 
 LABEL org.opencontainers.image.authors="YosysHQ, Mert Torun"
 LABEL org.opencontainers.image.title="OSS CAD Suite"

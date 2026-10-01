@@ -10,6 +10,10 @@
         <GenerateRuntimeConfigurationFiles>True</GenerateRuntimeConfigurationFiles>
         <Nullable>enable</Nullable>
         <IsAotCompatible>false</IsAotCompatible>
+        <!-- xunit.v3 4 makes the project a Microsoft Testing Platform app by default, which `dotnet test`
+             on the .NET 10 SDK refuses to run in VSTest mode. Stay on VSTest until the move to the
+             platform, which also changes global.json and the CI test step. -->
+        <IsTestingPlatformApplication>false</IsTestingPlatformApplication>
         <!-- CA1707: Underscored test names are standard xUnit convention -->
         <!-- CA1016: Assembly version is not required for test projects -->
         <!-- CA1849: Test fixtures use synchronous file and process I/O by design; async offers no value here -->

@@ -316,8 +316,10 @@ internal sealed class ContainerRunner
               Volatile.Write(ref wasCancelledFlag, 1);
               try
               {
+                  // CancellationToken.None, not ct: this callback runs because ct was cancelled, and ct would
+                  // abort the very stop it requests.
                   var stopTask = _client.Containers.StopContainerAsync(containerId,
-                new ContainerStopParameters { WaitBeforeKillSeconds = 2 });
+                new ContainerStopParameters { WaitBeforeKillSeconds = 2 }, CancellationToken.None);
 #pragma warning disable VSTHRD110
                   stopTask.ContinueWith(t =>
     {

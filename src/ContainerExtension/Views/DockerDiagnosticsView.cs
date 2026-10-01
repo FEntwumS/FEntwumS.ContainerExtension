@@ -1386,7 +1386,7 @@ public partial class DockerDiagnosticsView : UserControl
                 });
 
                 var runtimePath = _strategy.GetRuntimePath();
-                var pull = await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} pull \"{activeImg}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5)).ConfigureAwait(false);
+                var pull = await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} pull \"{activeImg}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5), cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
                 if (pull.TimedOut || pull.ExitCode != 0)
                 {
@@ -1397,7 +1397,7 @@ public partial class DockerDiagnosticsView : UserControl
                         btn.Content = "Error";
                         ToolTip.SetTip(btn, $"Update failed: {detail}.");
                     });
-                    await Task.Delay(3000).ConfigureAwait(false);
+                    await Task.Delay(3000, CancellationToken.None).ConfigureAwait(false);
                     await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
                     {
                         ToolTip.SetTip(btn, prevTip);
@@ -1406,7 +1406,7 @@ public partial class DockerDiagnosticsView : UserControl
                 }
 
                 // Prune dangling images to free disk space
-                _ = _strategy.PruneDanglingImagesAsync();
+                _ = _strategy.PruneDanglingImagesAsync(CancellationToken.None);
             }
             catch (Exception ex)
             {
@@ -1416,7 +1416,7 @@ public partial class DockerDiagnosticsView : UserControl
                     btn.Content = "Error";
                     ToolTip.SetTip(btn, $"Update failed: {ex.Message}");
                 });
-                await Task.Delay(3000).ConfigureAwait(false);
+                await Task.Delay(3000, CancellationToken.None).ConfigureAwait(false);
                 await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     ToolTip.SetTip(btn, prevTip);
@@ -1486,10 +1486,10 @@ public partial class DockerDiagnosticsView : UserControl
                 openDesktopBtn.Content = "Opening...";
                 try
                 {
-                    var launched = await Task.Run(() => LaunchDesktopApp(_strategy.DetectedRuntime)).ConfigureAwait(true);
+                    var launched = await Task.Run(() => LaunchDesktopApp(_strategy.DetectedRuntime), CancellationToken.None).ConfigureAwait(true);
                     if (launched)
                     {
-                        await Task.Delay(1000).ConfigureAwait(true);
+                        await Task.Delay(1000, CancellationToken.None).ConfigureAwait(true);
                     }
                     else
                     {
@@ -1771,7 +1771,7 @@ public partial class DockerDiagnosticsView : UserControl
             // messages "disappearing almost instantly" after a few rapid clicks.
             var holdMs = isError ? 12000 : 6000;
             var weakSelf = new WeakReference<DockerDiagnosticsView>(this);
-            _ = System.Threading.Tasks.Task.Delay(holdMs).ContinueWith(_ =>
+            _ = System.Threading.Tasks.Task.Delay(holdMs, CancellationToken.None).ContinueWith(_ =>
             {
                 if (weakSelf.TryGetTarget(out var self))
                 {
@@ -1929,7 +1929,7 @@ public partial class DockerDiagnosticsView : UserControl
                     return;
                 }
                 ShowTemporaryStatus($"Pulling default image '{img}' in terminal...");
-                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} pull \"{img}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5)).ConfigureAwait(false);
+                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} pull \"{img}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5), cancellationToken: CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -2013,7 +2013,7 @@ public partial class DockerDiagnosticsView : UserControl
                 }
 
                 var commandLine = $"{runtimePath} build {extraArgs}-t {tag} -f \"{dockerfilePath}\" \"{buildContextDir}\"";
-                var build = await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + commandLine, ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(20)).ConfigureAwait(false);
+                var build = await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + commandLine, ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(20), cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
                 if (setAsDefault)
                 {
@@ -2054,7 +2054,8 @@ public partial class DockerDiagnosticsView : UserControl
                     msg => Dispatcher.UIThread.Post(() =>
                     {
                         _statusBannerText.Text = $"Updating images: {msg}";
-                    })
+                    }),
+                    CancellationToken.None
                 ).ConfigureAwait(false);
 
                 if (result.failed > 0)
@@ -2086,7 +2087,7 @@ public partial class DockerDiagnosticsView : UserControl
                 }
                 var runtimePath = _strategy.GetRuntimePath();
                 ShowTemporaryStatus("Pruning unused images in terminal...");
-                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} image prune -a -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} image prune -a -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2), cancellationToken: CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -2110,7 +2111,7 @@ public partial class DockerDiagnosticsView : UserControl
             {
                 var runtimePath = _strategy.GetRuntimePath();
                 ShowTemporaryStatus("Running Hello-World test in terminal...");
-                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} run --rm hello-world", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} run --rm hello-world", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2), cancellationToken: CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -2125,7 +2126,7 @@ public partial class DockerDiagnosticsView : UserControl
             {
                 var runtimePath = _strategy.GetRuntimePath();
                 ShowTemporaryStatus("Querying Engine Info in terminal...");
-                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} info", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(1)).ConfigureAwait(false);
+                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} info", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(1), cancellationToken: CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -2145,7 +2146,7 @@ public partial class DockerDiagnosticsView : UserControl
                 }
                 var runtimePath = _strategy.GetRuntimePath();
                 ShowTemporaryStatus("Pruning system in terminal...");
-                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} system prune -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} system prune -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2), cancellationToken: CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
