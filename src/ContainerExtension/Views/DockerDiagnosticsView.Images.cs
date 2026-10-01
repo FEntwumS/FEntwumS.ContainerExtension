@@ -219,7 +219,7 @@ public partial class DockerDiagnosticsView
             ToolTip.SetTip(removeBtn, "Delete this image from local storage (fails if a container is using it)");
             Avalonia.Automation.AutomationProperties.SetName(removeBtn, $"Remove image {repoTag}");
             Grid.SetColumn(removeBtn, 6);
-            (imageRow as Grid)!.Children.Add(removeBtn);
+            imageRow.Children.Add(removeBtn);
 
             newChildren.Add(imageRow);
         }

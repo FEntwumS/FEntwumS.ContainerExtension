@@ -417,7 +417,7 @@ public partial class DockerDiagnosticsView
                         {
                             await topLevel.Clipboard.SetTextAsync(pinRef);
                             pinBtn!.Content = "Pinned";
-                            _ = ResetButtonTextAsync(pinBtn!, "Pin", 2000);
+                            _ = ResetButtonTextAsync(pinBtn, "Pin", 2000);
                         }
                     }
                     catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView.History", "ClipboardPin", ex); }
@@ -470,7 +470,7 @@ public partial class DockerDiagnosticsView
                         {
                             await topLevel.Clipboard.SetTextAsync(cmdText);
                             copyBtn!.Content = "Copied";
-                            _ = ResetButtonTextAsync(copyBtn!, "Copy", 2000);
+                            _ = ResetButtonTextAsync(copyBtn, "Copy", 2000);
                         }
                     }
                     catch (Exception ex) { ContainerTelemetry.TrackError("DockerDiagnosticsView.History", "ClipboardCopyRunCmd", ex); }

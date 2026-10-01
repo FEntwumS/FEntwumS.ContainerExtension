@@ -957,7 +957,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             _console.SdkLog(command, $"[Docker SDK] Equivalent CLI: {reconstructedDockerRun}", RankInfo);
 
             _console.SdkLog(command, $"[Docker SDK] Creating and starting container...", RankInfo);
-            var result = await _runner!.RunContainerAsync(createParams, command, ct).ConfigureAwait(false);
+            var result = await _runner.RunContainerAsync(createParams, command, ct).ConfigureAwait(false);
             exitCode = result.exitCode;
             wasCancelled = result.wasCancelled;
             resourceProfile = result.profile;
