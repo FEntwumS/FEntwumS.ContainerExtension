@@ -54,6 +54,12 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     private readonly CancellationTokenSource _strategyCts = new();
     private int _disposed;
 
+    // Background runs started via StartProcess, keyed by the opaque handle handed back to the caller. Each
+    // value is that run's CancellationTokenSource (linked to _strategyCts) so StopProcess and Dispose can
+    // cancel it. Membership is the liveness signal: a run removes its own entry when it finishes, so a key
+    // present in this map means "still running".
+    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _backgroundRuns = new();
+
     private void ThrowIfDisposed()
     {
         if (Volatile.Read(ref _disposed) == 1)
@@ -310,6 +316,92 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         }
     }
 
+    /// <summary>
+    /// Starts <paramref name="command"/> as a tracked, long-running background container run and returns an
+    /// opaque handle. Unlike <see cref="StartWeakProcess(ToolCommand)"/> (which exposes a host sentinel
+    /// <see cref="Process"/>), a Docker run has no host process, so the run is tracked by handle: cancel it
+    /// with <see cref="StopProcess(Guid)"/> or query it with <see cref="IsProcessRunning(Guid)"/>. The run
+    /// removes its own entry when it completes.
+    /// </summary>
+    public Guid StartProcess(ToolCommand command)
+    {
+        ThrowIfDisposed();
+
+        var handle = Guid.NewGuid();
+        // Linked to the strategy token so Dispose (which cancels _strategyCts) tears down in-flight runs.
+        var runCts = CancellationTokenSource.CreateLinkedTokenSource(_strategyCts.Token);
+        _backgroundRuns[handle] = runCts;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ExecuteAsync(command, runCts.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    ContainerTelemetry.TrackError("DockerExecutionStrategy", "StartProcess background task crashed", ex, command.Executable);
+                    var errMsg = $"[ERROR] Execution of background task '{command.Executable}' failed: {ex.Message}";
+                    SafeInvoke(() =>
+                    {
+                        (command.ErrorHandler ?? command.OutputHandler)?.Invoke(errMsg);
+                    });
+                }
+                catch (Exception)
+                {
+                    // Exception is intentionally ignored because error handling failure during shutdown/crash is non-critical.
+                }
+            }
+            finally
+            {
+                // Removing the entry marks the run as finished; the disposer of runCts is always this task's
+                // finally, so StopProcess only ever cancels (never disposes) and no double-dispose can occur.
+                _backgroundRuns.TryRemove(handle, out _);
+                try
+                {
+                    runCts.Dispose();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Exception is intentionally ignored because the source may already be disposed during shutdown.
+                }
+            }
+        }, CancellationToken.None);
+
+        return handle;
+    }
+
+    /// <summary>
+    /// Stops a background run previously started with <see cref="StartProcess(ToolCommand)"/> by cancelling
+    /// its token; the run then tears its container down cooperatively. Returns <c>true</c> if a live run was
+    /// found for <paramref name="handle"/>, otherwise <c>false</c>.
+    /// </summary>
+    public bool StopProcess(Guid handle)
+    {
+        if (!_backgroundRuns.TryRemove(handle, out var runCts))
+        {
+            return false;
+        }
+
+        try
+        {
+            runCts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The background run completed and disposed its own CTS between the TryRemove and this Cancel.
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Returns whether a background run started with <see cref="StartProcess(ToolCommand)"/> is still
+    /// tracked for <paramref name="handle"/>. A completed or stopped run is no longer tracked.
+    /// </summary>
+    public bool IsProcessRunning(Guid handle) => _backgroundRuns.ContainsKey(handle);
+
     public string GetStrategyName() => "Docker Container (DotNet API)";
 
     public string GetStrategyKey() => ToolKey;
@@ -319,6 +411,24 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
         {
             return;
+        }
+
+        // Cancel any tracked background runs before tearing down the strategy CTS they are linked to. Each
+        // run's own finally disposes its CTS and removes its entry, so here we only cancel (guarded against a
+        // run that just finished and disposed its CTS).
+        foreach (var handle in _backgroundRuns.Keys)
+        {
+            if (_backgroundRuns.TryRemove(handle, out var runCts))
+            {
+                try
+                {
+                    runCts.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Exception is intentionally ignored because the run disposed its own CTS as it completed.
+                }
+            }
         }
 
         try

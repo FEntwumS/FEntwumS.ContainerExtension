@@ -23,7 +23,9 @@ OneWare Studio"* by [Mert Torun](https://mtorun0x7cd.com) at TH Köln.
 - **Side-load a local build:** publish the plugin and copy it into the OneWare plugins directory
   (`~/OneWareStudio/Packages/Plugins/` on Linux/macOS). See [docs/articles/getting-started.md](docs/articles/getting-started.md).
 
-A running container engine (Docker, Podman, OrbStack, or Colima) is required for containerized execution.
+OneWare Studio 1.0.40 or later is required; the plugin implements the tool-execution strategy interface
+that OneWare introduced in 1.0.40. A running container engine (Docker, Podman, OrbStack, or Colima) is
+required for containerized execution.
 
 ## Repository layout
 
