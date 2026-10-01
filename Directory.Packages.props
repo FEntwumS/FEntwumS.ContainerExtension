@@ -19,7 +19,7 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageVersion>
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.9" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <!-- Compile-time only (ExcludeAssets=runtime;Native): the OneWare host supplies the runtime
          assembly. Pin to the newest Essentials on NuGet that does not exceed the targeted host, or the
          plugin loader rejects the plugin. 1.0.20/1.0.21/1.0.23 are host git tags only (absent from
