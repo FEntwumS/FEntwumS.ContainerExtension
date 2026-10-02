@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Concurrent;
+using System.IO;
 using System.Linq;
 using System.Collections.Generic;
 using System.Threading;
@@ -28,11 +30,19 @@ public sealed class QualityVerificationTests
         using var provider = new E2ETestServiceProvider();
         using var strategy = new DockerExecutionStrategy(provider);
 
+        var output = new ConcurrentQueue<string>();
         var command = new ToolCommand
         {
             Executable = "echo",
             ToolName = "echo",
-            CommandArguments = BuildArgs("hello")
+            // A relative path would stop the run before it reaches Docker.
+            WorkingDirectory = Path.GetTempPath(),
+            CommandArguments = BuildArgs("hello"),
+            OutputHandler = line =>
+            {
+                output.Enqueue(line);
+                return true;
+            }
         };
 
         var weakRef = strategy.StartWeakProcess(command);
@@ -61,6 +71,8 @@ public sealed class QualityVerificationTests
         Assert.Null(exitCodeEx);
 
         Assert.True(hasExited);
+        // The container ran: without this, the test would also pass for a run that never reached Docker.
+        Assert.Contains("hello", output);
     }
 
     // Requires a reachable Docker daemon, so it is gated out of CI like the E2E suite.

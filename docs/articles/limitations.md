@@ -65,7 +65,8 @@ responsiveness under load — and are therefore unreliable on a shared, resource
 The `FactIfNoCI` attribute skips them when `GITHUB_ACTIONS == "true"`, with the recorded reason
 "Skipped in GitHub Actions to prevent Docker Hub rate limits and image pulling flakiness." The
 remainder of the suite (parameter assembly, path mapping, shell escaping, bind validation, telemetry
-scrubbing) runs in CI unconditionally.
+scrubbing) runs in CI unconditionally. What a local run needs is listed in the contributing guide, under
+[Running the container tests](https://github.com/FEntwumS/FEntwumS.ContainerExtension/blob/main/CONTRIBUTING.md#running-the-container-tests).
 
 Impact on the evaluation: container-level behaviour is validated locally against a built
 `fentwums/oss-cad-suite` image rather than on every push. CI guarantees the deterministic,
