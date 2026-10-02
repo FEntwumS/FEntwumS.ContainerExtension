@@ -1165,10 +1165,8 @@ public sealed class ContainerExtensionTests : IDisposable
                 Assert.Skip("This host does not allow creating a symbolic link.");
             }
 
-            // Verify that resolving linkFile resolved targetFile path (or resolves to targetFile)
-            var mappedLink = DockerCommandBuilder.MapPathToContainer(linkFile, tempDir);
-            var mappedTarget = DockerCommandBuilder.MapPathToContainer(targetFile, tempDir);
-            Assert.Equal(mappedTarget, mappedLink);
+            // The link maps to the place of its target in the workspace.
+            Assert.Equal("/workspace/realfile.txt", DockerCommandBuilder.MapPathToContainer(linkFile, tempDir));
         }
         finally
         {
