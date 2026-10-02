@@ -163,7 +163,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-a", "VHDL_Blink.vhd", "VHDL_Blink_tb.vhd")
             };
-            await strategy.ExecuteAsync(cmdAnalyze);
+            var (analyzed, analyzeOutput) = await strategy.ExecuteAsync(cmdAnalyze);
+            Assert.True(analyzed, analyzeOutput);
 
             var cmdElab = new ToolCommand
             {
@@ -172,7 +173,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-e", "VHDL_Blink_tb")
             };
-            await strategy.ExecuteAsync(cmdElab);
+            var (elaborated, elaborateOutput) = await strategy.ExecuteAsync(cmdElab);
+            Assert.True(elaborated, elaborateOutput);
 
             var cmdSim = new ToolCommand
             {
@@ -281,7 +283,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-o", "Blink.vvp", "Verilog_Blink.v", "Verilog_Blink_tb.v")
             };
-            await strategy.ExecuteAsync(cmdCompile);
+            var (compiled, compileOutput) = await strategy.ExecuteAsync(cmdCompile);
+            Assert.True(compiled, compileOutput);
 
             // Execute using vvp
             var cmdExec = new ToolCommand
