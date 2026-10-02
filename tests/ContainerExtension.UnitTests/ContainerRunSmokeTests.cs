@@ -77,6 +77,34 @@ public sealed class ContainerRunSmokeTests : IDisposable
     }
 
     [FactIfNoCI]
+    public async Task Busybox_CallImage_RunsWhileTheDefaultImageIsMissing()
+    {
+        using var provider = new E2ETestServiceProvider();
+        // An image no daemon has, under a policy that never pulls: only the call's own image can run.
+        provider.SettingsService.SetSettingValue(ContainerExtensionModule.DefaultImageSetting, "containerextension-tests/absent:none");
+        provider.SettingsService.SetSettingValue(ContainerExtensionModule.PullPolicySetting, "never");
+        provider.SettingsService.SetSettingValue(ContainerExtensionModule.BypassNamedPipeCheckSetting, true);
+
+        using var strategy = new DockerExecutionStrategy(provider);
+        var command = new ToolCommand
+        {
+            Executable = "echo",
+            ToolName = "echo",
+            WorkingDirectory = _workDir,
+            CommandArguments = new List<ICommandArgument> { new E2ETestCommandArgument("from-the-call-image") },
+            StrategyConfigurationOverrides = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [ContainerExtensionModule.StrategyConfigurationImageKey] = "busybox:latest"
+            }
+        };
+
+        var (success, output) = await strategy.ExecuteAsync(command);
+
+        Assert.True(success, $"expected the call's own image to run; output was: {output}");
+        Assert.Contains("from-the-call-image", output, StringComparison.Ordinal);
+    }
+
+    [FactIfNoCI]
     public async Task Busybox_WithoutHandlers_WritesOutputToTheHost()
     {
         using var provider = CreateBusyboxProvider();

@@ -2917,11 +2917,18 @@ internal sealed class TestServiceProvider : IServiceProvider, IDisposable
 {
     private readonly ISettingsService _settingsService = new MockSettingsService();
 
+    /// <summary>The host's tool service, which a test sets when the code under test asks for one.</summary>
+    public IToolService? ToolService { get; init; }
+
     public object? GetService(Type serviceType)
     {
         if (serviceType == typeof(ISettingsService))
         {
             return _settingsService;
+        }
+        if (serviceType == typeof(IToolService))
+        {
+            return ToolService;
         }
         return null;
     }

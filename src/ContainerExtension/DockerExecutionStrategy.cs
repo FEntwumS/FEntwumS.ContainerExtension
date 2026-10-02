@@ -42,6 +42,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     private readonly ReaderWriterLockSlim _strategyLock = new();
 
     private readonly ISettingsService _settingsService;
+    private readonly IServiceProvider _serviceProvider;
     private DockerClient? _client;
 
     private DockerConnectionProvider? _connectionProvider;
@@ -91,6 +92,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
 
     public DockerExecutionStrategy(IServiceProvider serviceProvider)
     {
+        _serviceProvider = serviceProvider;
         _settingsService = serviceProvider.Resolve<ISettingsService>();
         _nativeFallback = new NativeFallbackExecutor(_settingsService, _console);
         HostFeedback = new OneWareRunFeedback(serviceProvider);
@@ -734,23 +736,57 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     }
 
 
-    private string ResolveImage(string toolName)
+    /// <summary>
+    /// Picks the image for a run from the first source that names one: the <c>ONEWARE_DOCKER_IMAGE</c>
+    /// override, the call's own <c>docker.image</c>, the user's per-tool image, the <c>docker.image</c> the
+    /// tool's plugin declares (with any override OneWare keeps for it), the Default Toolchain Image, and
+    /// last the fallback image. Also returns that source, for the run log.
+    /// </summary>
+    internal (string Image, string Source) ResolveImage(ToolCommand command)
     {
+        var toolName = command.ToolName ?? string.Empty;
+
         var envImage = Environment.GetEnvironmentVariable("ONEWARE_DOCKER_IMAGE");
-        var specificImage = _settingsService.SafeGetSetting($"{ContainerExtensionModule.PerToolImagePrefix}{toolName.ToLowerInvariant()}", "");
-        var configuredImage = _settingsService.SafeGetSetting(ContainerExtensionModule.DefaultImageSetting, "");
+        if (!string.IsNullOrWhiteSpace(envImage))
+            return (CleanImage(envImage), "ONEWARE_DOCKER_IMAGE");
 
-        var image = envImage ?? "";
-        if (string.IsNullOrWhiteSpace(image)) image = specificImage;
-        if (string.IsNullOrWhiteSpace(image)) image = configuredImage;
-        if (string.IsNullOrWhiteSpace(image) && ContainerExtensionModule.DefaultToolImages.TryGetValue(toolName, out var toolDefault))
-            image = toolDefault;
-        if (string.IsNullOrWhiteSpace(image)) image = ContainerExtensionModule.FallbackImage;
+        if (command.StrategyConfigurationOverrides.TryGetValue(ContainerExtensionModule.StrategyConfigurationImageKey, out var callImage)
+            && !string.IsNullOrWhiteSpace(callImage))
+            return (CheckedImage(callImage, "this call"), $"{ContainerExtensionModule.StrategyConfigurationImageKey} of this call");
 
+        var perToolKey = $"{ContainerExtensionModule.PerToolImagePrefix}{toolName.ToLowerInvariant()}";
+        var perToolImage = _settingsService.SafeGetSetting(perToolKey, "");
+        if (!string.IsNullOrWhiteSpace(perToolImage))
+            return (CleanImage(perToolImage), perToolKey);
+
+        // Optional: a host without a tool service, such as the tests, declares no configuration per tool.
+        if (_serviceProvider.GetService(typeof(IToolService)) is IToolService toolService
+            && toolService.GetStrategyConfiguration(toolName).TryGetValue(ContainerExtensionModule.StrategyConfigurationImageKey, out var toolImage)
+            && !string.IsNullOrWhiteSpace(toolImage))
+            return (CheckedImage(toolImage, $"tool '{toolName}'"), $"{ContainerExtensionModule.StrategyConfigurationImageKey} of tool '{toolName}'");
+
+        var defaultImage = _settingsService.SafeGetSetting(ContainerExtensionModule.DefaultImageSetting, "");
+        if (!string.IsNullOrWhiteSpace(defaultImage))
+            return (CleanImage(defaultImage), ContainerExtensionModule.DefaultImageSettingTitle);
+
+        return (ContainerExtensionModule.FallbackImage, "fallback");
+    }
+
+    private static string CleanImage(string image)
+    {
         image = image.Trim();
-        if (image.Contains('\r'))
+        return image.Contains('\r') ? image.Replace("\r", "", StringComparison.Ordinal) : image;
+    }
+
+    // An image a call or a plugin names has passed no settings validator, so it is checked here. The
+    // message leaves the value out: a reference that fails the grammar may carry anything.
+    private static string CheckedImage(string image, string owner)
+    {
+        image = CleanImage(image);
+        if (!Validations.DockerImageFormatValidation.IsValidReference(image))
         {
-            image = image.Replace("\r", "", StringComparison.Ordinal);
+            throw new DockerExecutionException(
+                $"The {ContainerExtensionModule.StrategyConfigurationImageKey} of {owner} is not a valid image reference. Expected: repo:tag, namespace/repo:tag, or registry.io/ns/repo:tag");
         }
         return image;
     }
@@ -1072,9 +1108,9 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             }
 
             _console.SdkLog(command, $"[Docker SDK] Resolving image for tool '{executable}'...", RankInfo);
-            image = ResolveImage(command.ToolName ?? string.Empty);
+            (image, var imageSource) = ResolveImage(command);
 
-            _console.SdkLog(command, $"[Docker SDK] Resolved image: {image}", RankInfo);
+            _console.SdkLog(command, $"[Docker SDK] Resolved image: {image} ({imageSource})", RankInfo);
 
             _console.SdkLog(command, $"[Docker SDK] Building container parameters...", RankInfo);
             var createParams = BuildContainerParameters(image, command);

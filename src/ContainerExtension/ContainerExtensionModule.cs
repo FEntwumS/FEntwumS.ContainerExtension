@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -42,6 +41,8 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
 
     public const string DockerRuntimePathSetting = "ContainerExtension_DockerRuntimePath";
     public const string DefaultImageSetting = "ContainerExtension_DefaultImage";
+    // Also the placeholder of every per-tool image field, since an empty field falls back to this setting.
+    public const string DefaultImageSettingTitle = "Default Toolchain Image";
     public const string MemoryLimitSetting = "ContainerExtension_MemoryLimit";
 
     public const string PlatformSetting = "ContainerExtension_Platform";
@@ -66,6 +67,9 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     /// </summary>
     public const string AllowNativeFallbackSetting = "ContainerExtension_AllowNativeFallback";
     public const string PerToolImagePrefix = "ContainerImage_";
+    // The key OneWare's tool engine uses by convention for a container image in a tool's strategy
+    // configuration or in the overrides of a single call.
+    public const string StrategyConfigurationImageKey = "docker.image";
     public const string FallbackImage = "hdlc/ghdl:yosys";
 
     // The project's own full-flow toolchain image (built locally via "Build Local Image" or
@@ -97,30 +101,6 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     /// </summary>
     public const string SettingsKeyAllowNativeFallback = "Allow Native Fallback";
     public const string SettingsKeyAllowPrivileged = "Privileged Mode";
-
-    public static readonly FrozenDictionary<string, string> DefaultToolImages =
-      new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-      {
-          ["ghdl"] = FallbackImage,
-          ["nvc"] = "hdlc/nvc",
-          ["iverilog"] = "hdlc/iverilog",
-          ["verilator"] = "hdlc/verilator",
-          ["yosys"] = FallbackImage,
-          ["apicula"] = "hdlc/apicula",
-          ["nextpnr-ecp5"] = "hdlc/impl/prjtrellis",
-          ["nextpnr-generic"] = "hdlc/impl/generic",
-          ["nextpnr-ice40"] = "hdlc/impl/icestorm",
-          ["nextpnr-nexus"] = "hdlc/impl/prjoxide",
-          ["nextpnr-himbaechel"] = OssCadSuiteImage,
-          ["nextpnr-machxo2"] = OssCadSuiteImage,
-          ["openFPGALoader"] = "hdlc/prog",
-          ["iceprog"] = "hdlc/impl/icestorm",
-          ["icepack"] = "hdlc/impl/icestorm",
-          ["gowin_pack"] = OssCadSuiteImage,
-          ["gmpack"] = OssCadSuiteImage,
-          ["gmupack"] = OssCadSuiteImage,
-          ["gtkwave"] = "hdlc/gtkwave",
-      }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     public const string DashboardTitle = "Container Dashboard";
 
@@ -200,7 +180,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         ContainerTelemetry.LogLevelChecker = () => settingsService.SafeGetSetting<string>(ContainerExtensionModule.LogLevelSetting, "Errors Only");
 
         settingsService.RegisterSettingSubCategory(SettingsCategoryBinary, SettingsSubCategoryEngine);
-        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DefaultImageSetting, new TextBoxSetting("Default Toolchain Image", OssCadSuiteImage, "The default container image for all tools — the project's full-flow oss-cad-suite image. It is build-only (not on Docker Hub): produce it via Build Local Image, not Pull.") { Validator = ImageFormatValidatorNoEmpty });
+        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DefaultImageSetting, new TextBoxSetting(DefaultImageSettingTitle, OssCadSuiteImage, "The default container image for all tools — the project's full-flow oss-cad-suite image. It is build-only (not on Docker Hub): produce it via Build Local Image, not Pull.") { Validator = ImageFormatValidatorNoEmpty });
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, PullPolicySetting, new ComboBoxSetting("Image Pull Policy", "if-not-present", ["always", "if-not-present", "never"]));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, PlatformSetting, new ComboBoxSetting("Image Platform", "auto", ["auto", "linux/amd64", "linux/arm64", "linux/arm/v7"]));
 
@@ -544,6 +524,15 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         }, ct);
     }
 
+    /// <summary>
+    /// What an empty per-tool image field falls back to, shown as its placeholder: the <c>docker.image</c>
+    /// the tool's plugin declares, or else the Default Toolchain Image.
+    /// </summary>
+    internal static string PerToolImageFallback(IReadOnlyDictionary<string, string> strategyConfiguration)
+        => strategyConfiguration.TryGetValue(StrategyConfigurationImageKey, out var image) && !string.IsNullOrWhiteSpace(image)
+            ? image.Trim()
+            : DefaultImageSettingTitle;
+
     private static void InjectStrategyIntoAllTools(IToolService toolService, DockerExecutionStrategy dockerStrategy, ISettingsService settingsService)
     {
         var allTools = toolService.GetAllTools();
@@ -563,9 +552,9 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                 settingsService.RegisterSetting(
                   SettingsCategoryBinary, SettingsSubCategoryStrategy,
                   settingKey,
-                  new TextBoxSetting($"Container Image for {globalTool.Name}", "", DefaultToolImages.TryGetValue(globalTool.Key, out var defaultHint) ? defaultHint : FallbackImage)
+                  new TextBoxSetting($"Container Image for {globalTool.Name}", "", PerToolImageFallback(toolService.GetStrategyConfiguration(globalTool.Key)))
                   {
-                      HoverDescription = $"Overrides the Default Toolchain Image when '{globalTool.Name}' is executed via Docker.",
+                      HoverDescription = $"Overrides the image shown as placeholder when '{globalTool.Name}' is executed via Docker.",
                       Validator = ImageFormatValidatorAllowEmpty
                   }
                 );
