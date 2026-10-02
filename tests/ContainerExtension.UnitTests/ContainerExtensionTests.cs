@@ -232,6 +232,16 @@ public sealed class ContainerExtensionTests : IDisposable
     }
 
     [Theory]
+    [InlineData(ContainerExtensionModule.OssCadSuiteImage, true)]
+    [InlineData("fentwums/oss-cad-suite:custom", true)]
+    [InlineData(ContainerExtensionModule.FallbackImage, false)]
+    [InlineData("", false)]
+    public void IsBuildOnlyImage_RecognizesTheLocallyBuiltToolchainImage(string image, bool buildOnly)
+    {
+        Assert.Equal(buildOnly, ContainerExtensionModule.IsBuildOnlyImage(image));
+    }
+
+    [Theory]
     [InlineData("containerextension-", true)]
     [InlineData("my.prefix", true)]
     [InlineData("test_prefix", true)]
