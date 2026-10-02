@@ -4,6 +4,49 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-10-02
+
+Adapts the extension to the tool-execution strategy interface that OneWare Studio introduced in 1.0.40,
+lets a plugin choose its tool's container image through the strategy configuration, and makes a Docker
+run report to OneWare Studio the way the native strategy does. OneWare Studio 1.0.40 or later is
+required. Releases up to 1.0.14 implement the earlier interface and fail to load on 1.0.40 or later,
+although the package manager still lists them there; on such a host, install 1.1.0.
+
+### Added
+
+- A plugin can set the container image of its tool with the `docker.image` strategy configuration key, and a caller can override it for a single run. A run's image is resolved in this order: the `ONEWARE_DOCKER_IMAGE` environment variable, the per-call `docker.image`, the tool's per-tool image setting, the plugin's `docker.image`, the Default Toolchain Image, and the fallback image. An invalid per-call or plugin value fails the run and names its source, and the run log states the resolved image and where it came from.
+- Each foreground run shows a status entry with its elapsed time and a cancel action, and writes its command line and its exit code or cancellation to the output window, as the native strategy does.
+
+### Changed
+
+- The Docker strategy implements the tool-execution strategy interface of OneWare.Essentials 1.0.40, including background runs (`StartProcess`, `StopProcess`, `IsProcessRunning`), and registers once for all tools, including tools registered later, instead of adding itself to each tool's strategy selector.
+- The OneWare.Essentials pin is advanced from 1.0.22 to 1.0.40, the first version with these interface members, and the Avalonia pins from 11.3.17 to 11.3.22, the floor that version sets. The manifest entry of this release carries `minStudioVersion` 1.0.40.0, so older hosts neither select it for installation nor offer it as an update, and refuse it as incompatible when it is chosen by hand.
+- The placeholder of each per-tool image field names what an empty field means: the plugin's `docker.image` if it sets one, otherwise the Default Toolchain Image.
+- The build-time analyzers are updated, SonarAnalyzer.CSharp from 10.29 to 10.35, Meziantou.Analyzer from 3.0.122 to 3.0.290 and Microsoft.CodeAnalysis.NetAnalyzers from 10.0.301 to 10.0.401, and the code follows their new findings: explicit cancellation tokens in the execution core, explicit cancellation opt-outs in the dashboard views, and no null-forgiving operators where the compiler already proves a value non-null.
+- The GitHub Actions of CI and the release workflow are updated to their current releases, and the `oss-cad-suite` Dockerfile moves to the current `ubuntu` base image digest.
+
+### Removed
+
+- The built-in per-tool images. They never took effect in OneWare Studio, where the Default Toolchain Image is always set, but showed in every per-tool image field as a suggestion.
+
+### Fixed
+
+- Without output or error handlers, a foreground run's output and errors now reach the output window instead of being dropped. Error output without an error handler fails the run, and so does a handler that rejects a line, as with the native strategy. A cancelled run is reported once.
+- `vvp` gets the project mounted writable, so an Icarus Verilog simulation can write its waveform dump.
+- A cancellation during the Docker socket check, before the container starts, is reported as a cancellation instead of a connection failure, and a timeout is reported only when the timeout fired.
+- A refused image pull no longer suggests a Docker socket permission problem, and a run whose locally built toolchain image is missing points to Build Local Image.
+- The extension icon renders in the OneWare package manager: its shadow is drawn with SVG 1.1 filter steps, which the package manager's SVG renderer supports, and the package description no longer embeds the icon, which it cannot display.
+
+### Tests
+
+- xunit.v3 is updated from 3.2.2 to 4.0.1, xunit.runner.visualstudio from 3.1.5 to 4.0.0, and Microsoft.NET.Test.Sdk from 18.7.0 to 18.10.1.
+- New tests cover where a run's image comes from, background runs, the failure hints, and how a run reports its output, status and cancellation, including a cancellation before the container starts. Tests that passed a relative working directory, which the Docker strategy rejects before any container starts, now pass an absolute one; the weak-process property test checks the container's output, so it fails again if it stops reaching Docker.
+- The Docker tests call `vvp` by its own name, as OneWare Studio does, and the test for a missing simulation file runs `vvp` in an image that has it, so it fails on the missing file and not on a missing executable.
+
+### Documentation
+
+- The documentation states the minimum OneWare Studio version and describes the `docker.image` strategy configuration and how a run reports to OneWare Studio; `CONTRIBUTING.md` describes what the container tests need to run.
+
 ## [1.0.14] - 2026-08-20
 
 An internal maintainability pass over 1.0.13. The monolithic `DockerExecutionStrategy` is decomposed
