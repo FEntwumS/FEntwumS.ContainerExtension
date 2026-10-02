@@ -1182,11 +1182,13 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         {
             wasCancelled = true;
             outcome?.RecordCancellation();
-            errorMessage = timeoutMinutes > 0
+            // Timed out only when the timeout fired and the caller did not cancel, as for a cancelled container above.
+            var timedOut = timeoutMinutes > 0 && timeoutCts?.IsCancellationRequested == true && !cancellationToken.IsCancellationRequested;
+            errorMessage = timedOut
               ? $"Execution timed out after {timeoutMinutes:N0} minute(s)."
               : "Operation cancelled.";
             // ExecuteAsync reports a cancellation to the host; only a timeout needs a line saying why the run stopped.
-            if (timeoutMinutes > 0)
+            if (timedOut)
                 SafeInvoke(() => command.ErrorHandler?.Invoke($"[Docker SDK] {errorMessage}"));
             else
                 _console.SdkLog(command, $"[Docker SDK] {errorMessage}", RankInfo);
