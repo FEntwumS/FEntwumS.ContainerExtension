@@ -23,9 +23,31 @@ dotnet test   OneWare.ContainerExtension.slnx -c Release
 The build treats warnings as errors and runs the full analyzer set (`AnalysisMode=All`). A change must
 build clean; do not widen the `NoWarn` set in `Directory.Build.props` without a written justification.
 
-Container E2E tests (`tests/ContainerExtension.UnitTests`, marked `[FactIfNoCI]`) are skipped under CI and
-run locally when a daemon and the `fentwums/oss-cad-suite` image are available. Mutation testing is
-available via `dotnet stryker` (configured through `dotnet-tools.json`).
+Container E2E tests (`tests/ContainerExtension.UnitTests`, marked `[FactIfNoCI]`) are skipped under CI;
+[Running the container tests](#running-the-container-tests) lists what they need locally. Mutation testing
+is available via `dotnet stryker` (configured through `dotnet-tools.json`).
+
+## Running the container tests
+
+The container tests start real containers and are skipped under CI. Locally they need four things:
+
+1. A running container engine (Docker, Podman, OrbStack, or Colima).
+2. The project's toolchain image `fentwums/oss-cad-suite:latest`. It is on no registry: build it with
+   Build Local Image in the Container Dashboard or with `docker/build_oss_cad_suite.sh`. The `hdlc/*`
+   images some tests use are pulled on their first run.
+3. The HDL fixtures, which live in `evaluation/integration/` of the
+   [thesis repository](https://github.com/mtorun0x7cd/thesis-fentwums-container-extension). Copy that folder
+   to a place outside this repository and point `CONTAINER_EXTENSION_LOCAL_TESTS` at the copy.
+4. The intermediate files of the place-and-route tests (`*.json`, `*.asc`, `*.config`). Run `run_all.sh`
+   once in the copy; it builds them with the toolchain image. Use a copy, since `run_all.sh` writes into the
+   fixture folders.
+
+```bash
+export CONTAINER_EXTENSION_LOCAL_TESTS=/path/to/the/copy
+dotnet test OneWare.ContainerExtension.slnx -c Release
+```
+
+Without the fixtures, the tests that need them fail instead of being skipped.
 
 ## Code style
 

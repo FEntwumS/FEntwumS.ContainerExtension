@@ -15,7 +15,14 @@
       <stop offset="1" stop-color="#1D87CE" />
     </linearGradient>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000" flood-opacity="0.3" />
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" result="blur" />
+      <feOffset in="blur" dx="0" dy="4" result="offsetBlur" />
+      <feFlood flood-color="#000" flood-opacity="0.3" result="shadowColor" />
+      <feComposite in="shadowColor" in2="offsetBlur" operator="in" result="shadow" />
+      <feMerge>
+        <feMergeNode in="shadow" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
     </filter>
 
     <!-- Container module: corrugated side, a top sheen for depth, and a recessed door seam. -->

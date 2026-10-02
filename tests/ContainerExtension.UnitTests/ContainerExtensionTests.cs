@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using Avalonia.Media;
 using ContainerExtension;
 using ContainerExtension.Validations;
 using ContainerExtension.Services.Docker;
@@ -11,7 +13,7 @@ using OneWare.Essentials.Services;
 using OneWare.Essentials.ToolEngine;
 using Xunit;
 
-[assembly: CollectionBehavior(DisableTestParallelization = true)]
+[assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]
 
 namespace ContainerExtension.UnitTests;
 
@@ -227,6 +229,16 @@ public sealed class ContainerExtensionTests : IDisposable
         Assert.False(string.IsNullOrWhiteSpace(fallback));
         var result = _imageValidator.Validate(fallback, out _);
         Assert.True(result, $"FallbackImage '{fallback}' should pass the DockerImageFormatValidation.");
+    }
+
+    [Theory]
+    [InlineData(ContainerExtensionModule.OssCadSuiteImage, true)]
+    [InlineData("fentwums/oss-cad-suite:custom", true)]
+    [InlineData(ContainerExtensionModule.FallbackImage, false)]
+    [InlineData("", false)]
+    public void IsBuildOnlyImage_RecognizesTheLocallyBuiltToolchainImage(string image, bool buildOnly)
+    {
+        Assert.Equal(buildOnly, ContainerExtensionModule.IsBuildOnlyImage(image));
     }
 
     [Theory]
@@ -608,6 +620,22 @@ public sealed class ContainerExtensionTests : IDisposable
         };
         var paramIcepack = DockerCommandBuilder.BuildContainerParameters("img", cmdIcepack, null!, null, null, (c, l) => { });
         Assert.Contains(paramIcepack.HostConfig.Binds, b => b.EndsWith(":/workspace", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BuildContainerParameters_BindsWorkspaceWritableForVvp()
+    {
+        // OneWare passes vvp only the compiled file, so no output flag tells that a testbench dumping a
+        // waveform writes into the project.
+        var command = new ToolCommand
+        {
+            Executable = "vvp",
+            ToolName = "vvp",
+            WorkingDirectory = "/workspace/dir",
+            CommandArguments = new List<ICommandArgument> { new TestCommandArgument("Verilog_Blink_tb.vvp") }
+        };
+        var param = DockerCommandBuilder.BuildContainerParameters("img", command, null!, null, null, (c, l) => { });
+        Assert.Contains(param.HostConfig.Binds, b => b.EndsWith(":/workspace", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -2703,6 +2731,40 @@ public sealed class ContainerExtensionTests : IDisposable
     }
 
     [Fact]
+    public async Task DockerExecutionStrategy_CancelledNativeFallback_ReportsTheCancellationOnce()
+    {
+        if (OperatingSystem.IsWindows()) return; // Needs sh and sleep on the PATH
+
+        using var provider = new TestServiceProvider();
+        var settings = (MockSettingsService)provider.GetService(typeof(ISettingsService))!;
+
+        settings.SetSettingValue(ContainerExtensionModule.AllowNativeFallbackSetting, true);
+        settings.SetSettingValue(ContainerExtensionModule.DaemonSocketSetting, "unix:///invalid/offline/socket.sock");
+
+        using var strategy = new DockerExecutionStrategy(provider);
+        var feedback = new RecordingRunFeedback();
+        strategy.HostFeedback = feedback;
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
+        var errorLines = new ConcurrentQueue<string>();
+        var command = new ToolCommand
+        {
+            Executable = "sh",
+            ToolName = "sh",
+            WorkingDirectory = Directory.GetCurrentDirectory(),
+            CommandArguments = new List<ICommandArgument> { new TestCommandArgument("-c"), new TestCommandArgument("sleep 30") },
+            OutputHandler = _ => true,
+            ErrorHandler = line => { errorLines.Enqueue(line); return true; }
+        };
+
+        var (success, _) = await strategy.ExecuteAsync(command, cancellation.Token);
+
+        Assert.False(success);
+        Assert.Contains(($"[{Path.GetFileName(Directory.GetCurrentDirectory())}]: sh cancelled!", (Color?)Colors.DarkOrange), feedback.Notices);
+        Assert.Empty(errorLines);
+    }
+
+    [Fact]
     public void GetCanonicalPath_CircularSymlink_ThrowsDockerExecutionException()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "ContainerExtensionTests_Circular_" + Guid.NewGuid().ToString("N"));
@@ -2865,11 +2927,18 @@ internal sealed class TestServiceProvider : IServiceProvider, IDisposable
 {
     private readonly ISettingsService _settingsService = new MockSettingsService();
 
+    /// <summary>The host's tool service, which a test sets when the code under test asks for one.</summary>
+    public IToolService? ToolService { get; init; }
+
     public object? GetService(Type serviceType)
     {
         if (serviceType == typeof(ISettingsService))
         {
             return _settingsService;
+        }
+        if (serviceType == typeof(IToolService))
+        {
+            return ToolService;
         }
         return null;
     }

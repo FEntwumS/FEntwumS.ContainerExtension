@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using Avalonia.Media;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
@@ -41,6 +42,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     private readonly ReaderWriterLockSlim _strategyLock = new();
 
     private readonly ISettingsService _settingsService;
+    private readonly IServiceProvider _serviceProvider;
     private DockerClient? _client;
 
     private DockerConnectionProvider? _connectionProvider;
@@ -53,6 +55,12 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
 
     private readonly CancellationTokenSource _strategyCts = new();
     private int _disposed;
+
+    // Background runs started via StartProcess, keyed by the opaque handle handed back to the caller. Each
+    // value is that run's CancellationTokenSource (linked to _strategyCts) so StopProcess and Dispose can
+    // cancel it. Membership is the liveness signal: a run removes its own entry when it finishes, so a key
+    // present in this map means "still running".
+    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _backgroundRuns = new();
 
     private void ThrowIfDisposed()
     {
@@ -71,6 +79,12 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     private ContainerRunner? _runner;
     private readonly NativeFallbackExecutor _nativeFallback;
 
+    /// <summary>
+    /// Where a foreground run's output and errors go when the caller passes no handler for them.
+    /// Replaceable so tests can observe it without a running host.
+    /// </summary>
+    internal IHostRunFeedback HostFeedback { get; set; }
+
     internal async Task EnsureInitializedAsync(CancellationToken ct = default)
     {
         await _initTask.WaitAsync(ct).ConfigureAwait(false);
@@ -78,9 +92,11 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
 
     public DockerExecutionStrategy(IServiceProvider serviceProvider)
     {
+        _serviceProvider = serviceProvider;
         _settingsService = serviceProvider.Resolve<ISettingsService>();
         _nativeFallback = new NativeFallbackExecutor(_settingsService, _console);
-        _initTask = Task.Run(InitializeInternalAsync);
+        HostFeedback = new OneWareRunFeedback(serviceProvider);
+        _initTask = Task.Run(InitializeInternalAsync, _strategyCts.Token);
     }
 
     // Delegates the daemon bootstrap to DockerConnectionFactory, then adopts the resulting client + managers
@@ -264,7 +280,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             {
                 try
                 {
-                    await ExecuteAsync(command, runCts.Token).ConfigureAwait(false);
+                    await ExecuteCoreAsync(command, runCts.Token).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -310,6 +326,92 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         }
     }
 
+    /// <summary>
+    /// Starts <paramref name="command"/> as a tracked, long-running background container run and returns an
+    /// opaque handle. Unlike <see cref="StartWeakProcess(ToolCommand)"/> (which exposes a host sentinel
+    /// <see cref="Process"/>), a Docker run has no host process, so the run is tracked by handle: cancel it
+    /// with <see cref="StopProcess(Guid)"/> or query it with <see cref="IsProcessRunning(Guid)"/>. The run
+    /// removes its own entry when it completes.
+    /// </summary>
+    public Guid StartProcess(ToolCommand command)
+    {
+        ThrowIfDisposed();
+
+        var handle = Guid.NewGuid();
+        // Linked to the strategy token so Dispose (which cancels _strategyCts) tears down in-flight runs.
+        var runCts = CancellationTokenSource.CreateLinkedTokenSource(_strategyCts.Token);
+        _backgroundRuns[handle] = runCts;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ExecuteCoreAsync(command, runCts.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    ContainerTelemetry.TrackError("DockerExecutionStrategy", "StartProcess background task crashed", ex, command.Executable);
+                    var errMsg = $"[ERROR] Execution of background task '{command.Executable}' failed: {ex.Message}";
+                    SafeInvoke(() =>
+                    {
+                        (command.ErrorHandler ?? command.OutputHandler)?.Invoke(errMsg);
+                    });
+                }
+                catch (Exception)
+                {
+                    // Exception is intentionally ignored because error handling failure during shutdown/crash is non-critical.
+                }
+            }
+            finally
+            {
+                // Removing the entry marks the run as finished; the disposer of runCts is always this task's
+                // finally, so StopProcess only ever cancels (never disposes) and no double-dispose can occur.
+                _backgroundRuns.TryRemove(handle, out _);
+                try
+                {
+                    runCts.Dispose();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Exception is intentionally ignored because the source may already be disposed during shutdown.
+                }
+            }
+        }, CancellationToken.None);
+
+        return handle;
+    }
+
+    /// <summary>
+    /// Stops a background run previously started with <see cref="StartProcess(ToolCommand)"/> by cancelling
+    /// its token; the run then tears its container down cooperatively. Returns <c>true</c> if a live run was
+    /// found for <paramref name="handle"/>, otherwise <c>false</c>.
+    /// </summary>
+    public bool StopProcess(Guid handle)
+    {
+        if (!_backgroundRuns.TryRemove(handle, out var runCts))
+        {
+            return false;
+        }
+
+        try
+        {
+            runCts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The background run completed and disposed its own CTS between the TryRemove and this Cancel.
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Returns whether a background run started with <see cref="StartProcess(ToolCommand)"/> is still
+    /// tracked for <paramref name="handle"/>. A completed or stopped run is no longer tracked.
+    /// </summary>
+    public bool IsProcessRunning(Guid handle) => _backgroundRuns.ContainsKey(handle);
+
     public string GetStrategyName() => "Docker Container (DotNet API)";
 
     public string GetStrategyKey() => ToolKey;
@@ -319,6 +421,24 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
         {
             return;
+        }
+
+        // Cancel any tracked background runs before tearing down the strategy CTS they are linked to. Each
+        // run's own finally disposes its CTS and removes its entry, so here we only cancel (guarded against a
+        // run that just finished and disposed its CTS).
+        foreach (var handle in _backgroundRuns.Keys)
+        {
+            if (_backgroundRuns.TryRemove(handle, out var runCts))
+            {
+                try
+                {
+                    runCts.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Exception is intentionally ignored because the run disposed its own CTS as it completed.
+                }
+            }
         }
 
         try
@@ -350,6 +470,47 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         {
             yield return log;
         }
+    }
+
+    /// <summary>
+    /// The hint lines a failed run adds below its error line, chosen by the failure's message and type.
+    /// </summary>
+    internal static string FailureHints(Exception ex, string image)
+    {
+        var hints = "";
+        // A registry that refuses a pull says "pull access denied", which says nothing about local permissions.
+        var refusedPull = ex.Message.Contains("pull access denied", StringComparison.OrdinalIgnoreCase);
+        var noSuchImage = ex.Message.Contains("No such image", StringComparison.OrdinalIgnoreCase);
+        var notFoundLocally = ex.Message.Contains("not found locally", StringComparison.OrdinalIgnoreCase);
+        if ((refusedPull || noSuchImage || notFoundLocally) && ContainerExtensionModule.IsBuildOnlyImage(image))
+        {
+            // No registry has this image, so neither a pull nor a login can bring it.
+            hints += $"\n  Hint: The image '{image}' is built locally and is on no registry. Build it with Build Local Image in the Container Dashboard.";
+        }
+        else
+        {
+            if (noSuchImage)
+            {
+                hints += $"\n  Hint: Run 'docker pull {image}' to cache the image locally.";
+            }
+            if (refusedPull)
+            {
+                hints += $"\n  Hint: The image '{image}' does not exist on Docker Hub or requires authentication.";
+            }
+        }
+        if (ex.Message.Contains("permission denied", StringComparison.OrdinalIgnoreCase) ||
+            (!refusedPull && ex.Message.Contains("access denied", StringComparison.OrdinalIgnoreCase)) ||
+            ex is UnauthorizedAccessException ||
+            (ex is System.Net.Sockets.SocketException sex && (sex.SocketErrorCode == System.Net.Sockets.SocketError.AccessDenied || sex.NativeErrorCode == 13)))
+        {
+            hints += $"\n  Hint: A permission error was encountered. Ensure the current user has read/write permissions to the Docker socket, or add the user to the 'docker' group.";
+        }
+        if (ex.Message.Contains("port is already allocated", StringComparison.OrdinalIgnoreCase) ||
+            ex.Message.Contains("address already in use", StringComparison.OrdinalIgnoreCase))
+        {
+            hints += $"\n  Hint: A host port conflict was detected. Please check if another container or service is using the same port, or configure a different host port mapping.";
+        }
+        return hints;
     }
 
     private static string ScrubUserPaths(string? input)
@@ -616,23 +777,57 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     }
 
 
-    private string ResolveImage(string toolName)
+    /// <summary>
+    /// Picks the image for a run from the first source that names one: the <c>ONEWARE_DOCKER_IMAGE</c>
+    /// override, the call's own <c>docker.image</c>, the user's per-tool image, the <c>docker.image</c> the
+    /// tool's plugin declares (with any override OneWare keeps for it), the Default Toolchain Image, and
+    /// last the fallback image. Also returns that source, for the run log.
+    /// </summary>
+    internal (string Image, string Source) ResolveImage(ToolCommand command)
     {
+        var toolName = command.ToolName ?? string.Empty;
+
         var envImage = Environment.GetEnvironmentVariable("ONEWARE_DOCKER_IMAGE");
-        var specificImage = _settingsService.SafeGetSetting($"{ContainerExtensionModule.PerToolImagePrefix}{toolName.ToLowerInvariant()}", "");
-        var configuredImage = _settingsService.SafeGetSetting(ContainerExtensionModule.DefaultImageSetting, "");
+        if (!string.IsNullOrWhiteSpace(envImage))
+            return (CleanImage(envImage), "ONEWARE_DOCKER_IMAGE");
 
-        var image = envImage ?? "";
-        if (string.IsNullOrWhiteSpace(image)) image = specificImage;
-        if (string.IsNullOrWhiteSpace(image)) image = configuredImage;
-        if (string.IsNullOrWhiteSpace(image) && ContainerExtensionModule.DefaultToolImages.TryGetValue(toolName, out var toolDefault))
-            image = toolDefault;
-        if (string.IsNullOrWhiteSpace(image)) image = ContainerExtensionModule.FallbackImage;
+        if (command.StrategyConfigurationOverrides.TryGetValue(ContainerExtensionModule.StrategyConfigurationImageKey, out var callImage)
+            && !string.IsNullOrWhiteSpace(callImage))
+            return (CheckedImage(callImage, "this call"), $"{ContainerExtensionModule.StrategyConfigurationImageKey} of this call");
 
+        var perToolKey = $"{ContainerExtensionModule.PerToolImagePrefix}{toolName.ToLowerInvariant()}";
+        var perToolImage = _settingsService.SafeGetSetting(perToolKey, "");
+        if (!string.IsNullOrWhiteSpace(perToolImage))
+            return (CleanImage(perToolImage), perToolKey);
+
+        // Optional: a host without a tool service, such as the tests, declares no configuration per tool.
+        if (_serviceProvider.GetService(typeof(IToolService)) is IToolService toolService
+            && toolService.GetStrategyConfiguration(toolName).TryGetValue(ContainerExtensionModule.StrategyConfigurationImageKey, out var toolImage)
+            && !string.IsNullOrWhiteSpace(toolImage))
+            return (CheckedImage(toolImage, $"tool '{toolName}'"), $"{ContainerExtensionModule.StrategyConfigurationImageKey} of tool '{toolName}'");
+
+        var defaultImage = _settingsService.SafeGetSetting(ContainerExtensionModule.DefaultImageSetting, "");
+        if (!string.IsNullOrWhiteSpace(defaultImage))
+            return (CleanImage(defaultImage), ContainerExtensionModule.DefaultImageSettingTitle);
+
+        return (ContainerExtensionModule.FallbackImage, "fallback");
+    }
+
+    private static string CleanImage(string image)
+    {
         image = image.Trim();
-        if (image.Contains('\r'))
+        return image.Contains('\r') ? image.Replace("\r", "", StringComparison.Ordinal) : image;
+    }
+
+    // An image a call or a plugin names has passed no settings validator, so it is checked here. The
+    // message leaves the value out: a reference that fails the grammar may carry anything.
+    private static string CheckedImage(string image, string owner)
+    {
+        image = CleanImage(image);
+        if (!Validations.DockerImageFormatValidation.IsValidReference(image))
         {
-            image = image.Replace("\r", "", StringComparison.Ordinal);
+            throw new DockerExecutionException(
+                $"The {ContainerExtensionModule.StrategyConfigurationImageKey} of {owner} is not a valid image reference. Expected: repo:tag, namespace/repo:tag, or registry.io/ns/repo:tag");
         }
         return image;
     }
@@ -677,7 +872,49 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         return ExecuteAsync(command, CancellationToken.None);
     }
 
+    /// <summary>
+    /// Runs <paramref name="command"/> as a foreground tool call. Handlers the caller left unset fall back to
+    /// the host's output window and log, as they do under OneWare's native strategy.
+    /// </summary>
     internal async Task<(bool success, string output)> ExecuteAsync(ToolCommand command, CancellationToken cancellationToken)
+    {
+        HostFeedback.WriteNotice(RunReport.CommandLine(command), Brushes.CornflowerBlue);
+        using var statusCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var status = await HostFeedback.BeginStatusAsync(command.StatusMessage, command.State, command.ShowTimer,
+            () => CancelQuietly(statusCancellation)).ConfigureAwait(false);
+        var verdict = new HandlerVerdict();
+        var outcome = new RunOutcome();
+        var (success, output) = await ExecuteCoreAsync(command.WithDefaultHandlers(HostFeedback), statusCancellation.Token, verdict, outcome).ConfigureAwait(false);
+        // The handlers run on the UI thread; their verdict is complete once every posted call has run.
+        await WhenPostedActionsRanAsync().ConfigureAwait(false);
+        if (outcome.Cancelled)
+        {
+            HostFeedback.WriteNotice(RunReport.Cancelled(command), Brushes.DarkOrange);
+        }
+        else if (outcome.ExitCode is { } exitCode && exitCode != 0)
+        {
+            HostFeedback.WriteError(RunReport.ExitedWith(command, exitCode));
+        }
+        return (success && !verdict.Rejected && !status.Terminated, output);
+    }
+
+    // The status entry can outlive the run by a moment, so a late cancel may meet a disposed source.
+    private static void CancelQuietly(CancellationTokenSource source)
+    {
+        try
+        {
+            source.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The run has already ended.
+        }
+    }
+
+    // The container run itself. Background runs call it directly: like the native strategy's background
+    // processes, they write nothing to the host on their own, and no handler verdict decides their result.
+    private async Task<(bool success, string output)> ExecuteCoreAsync(ToolCommand command, CancellationToken cancellationToken,
+        HandlerVerdict? verdict = null, RunOutcome? outcome = null)
     {
         using var activity = DockerActivitySource.StartActivity("DockerExecutionStrategy.Execute");
         // Only emit telemetry tags when the user has not opted out, and never record the raw host
@@ -892,7 +1129,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                         // the finally does not also log a phantom container entry (exit -1) for a run that
                         // never happened, nor wipe the real one under retention=None.
                         nativeFallbackUsed = true;
-                        return await _nativeFallback.ExecuteNativelyAsync(command, resolvedPath, stopwatch, ct).ConfigureAwait(false);
+                        return await _nativeFallback.ExecuteNativelyAsync(command, resolvedPath, stopwatch, ct, verdict, outcome).ConfigureAwait(false);
                     }
                     else
                     {
@@ -912,9 +1149,9 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             }
 
             _console.SdkLog(command, $"[Docker SDK] Resolving image for tool '{executable}'...", RankInfo);
-            image = ResolveImage(command.ToolName ?? string.Empty);
+            (image, var imageSource) = ResolveImage(command);
 
-            _console.SdkLog(command, $"[Docker SDK] Resolved image: {image}", RankInfo);
+            _console.SdkLog(command, $"[Docker SDK] Resolved image: {image} ({imageSource})", RankInfo);
 
             _console.SdkLog(command, $"[Docker SDK] Building container parameters...", RankInfo);
             var createParams = BuildContainerParameters(image, command);
@@ -957,7 +1194,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             _console.SdkLog(command, $"[Docker SDK] Equivalent CLI: {reconstructedDockerRun}", RankInfo);
 
             _console.SdkLog(command, $"[Docker SDK] Creating and starting container...", RankInfo);
-            var result = await _runner!.RunContainerAsync(createParams, command, ct).ConfigureAwait(false);
+            var result = await _runner.RunContainerAsync(createParams, command, ct, verdict).ConfigureAwait(false);
             exitCode = result.exitCode;
             wasCancelled = result.wasCancelled;
             resourceProfile = result.profile;
@@ -974,45 +1211,34 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                     errorMessage = $"Execution timed out after {timeoutMinutes:N0} minute(s).";
                     SafeInvoke(() => command.ErrorHandler?.Invoke($"[Docker SDK] {errorMessage}"));
                 }
+                outcome?.RecordCancellation();
                 return (false, result.output);
             }
 
             _console.SdkLog(command, $"[Docker SDK] Container finished. Exit code: {exitCode}", RankInfo);
+            outcome?.RecordExit(exitCode);
             return (exitCode == 0, result.output);
         }
         catch (OperationCanceledException)
         {
             wasCancelled = true;
-            errorMessage = timeoutMinutes > 0
+            outcome?.RecordCancellation();
+            // Timed out only when the timeout fired and the caller did not cancel, as for a cancelled container above.
+            var timedOut = timeoutMinutes > 0 && timeoutCts?.IsCancellationRequested == true && !cancellationToken.IsCancellationRequested;
+            errorMessage = timedOut
               ? $"Execution timed out after {timeoutMinutes:N0} minute(s)."
               : "Operation cancelled.";
-            SafeInvoke(() => command.ErrorHandler?.Invoke($"[Docker SDK] {errorMessage}"));
+            // ExecuteAsync reports a cancellation to the host; only a timeout needs a line saying why the run stopped.
+            if (timedOut)
+                SafeInvoke(() => command.ErrorHandler?.Invoke($"[Docker SDK] {errorMessage}"));
+            else
+                _console.SdkLog(command, $"[Docker SDK] {errorMessage}", RankInfo);
             return (false, "Cancelled");
         }
         catch (Exception ex)
         {
             errorMessage = ScrubUserPaths(ex.Message);
-            var err = ScrubUserPaths($"[Docker SDK Error] {ex.GetType().Name}: {ex.Message}");
-            if (ex.Message.Contains("No such image", StringComparison.OrdinalIgnoreCase))
-            {
-                err += $"\n  Hint: Run 'docker pull {image}' to cache the image locally.";
-            }
-            if (ex.Message.Contains("pull access denied", StringComparison.OrdinalIgnoreCase))
-            {
-                err += $"\n  Hint: The image '{image}' does not exist on Docker Hub or requires authentication.";
-            }
-            if (ex.Message.Contains("permission denied", StringComparison.OrdinalIgnoreCase) ||
-                ex.Message.Contains("access denied", StringComparison.OrdinalIgnoreCase) ||
-                ex is UnauthorizedAccessException ||
-                (ex is System.Net.Sockets.SocketException sex && (sex.SocketErrorCode == System.Net.Sockets.SocketError.AccessDenied || sex.NativeErrorCode == 13)))
-            {
-                err += $"\n  Hint: A permission error was encountered. Ensure the current user has read/write permissions to the Docker socket, or add the user to the 'docker' group.";
-            }
-            if (ex.Message.Contains("port is already allocated", StringComparison.OrdinalIgnoreCase) ||
-                ex.Message.Contains("address already in use", StringComparison.OrdinalIgnoreCase))
-            {
-                err += $"\n  Hint: A host port conflict was detected. Please check if another container or service is using the same port, or configure a different host port mapping.";
-            }
+            var err = ScrubUserPaths($"[Docker SDK Error] {ex.GetType().Name}: {ex.Message}") + FailureHints(ex, image);
             SafeInvoke(() => command.ErrorHandler?.Invoke(err));
             var friendlyEx = new DockerExecutionException(errorMessage, ex);
             ContainerTelemetry.TrackError("DockerExecutionStrategy", $"ExecuteAsync failed for '{executable}'", friendlyEx);

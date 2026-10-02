@@ -23,7 +23,9 @@ OneWare Studio"* by [Mert Torun](https://mtorun0x7cd.com) at TH Köln.
 - **Side-load a local build:** publish the plugin and copy it into the OneWare plugins directory
   (`~/OneWareStudio/Packages/Plugins/` on Linux/macOS). See [docs/articles/getting-started.md](docs/articles/getting-started.md).
 
-A running container engine (Docker, Podman, OrbStack, or Colima) is required for containerized execution.
+OneWare Studio 1.0.40 or later is required; the plugin implements the tool-execution strategy interface
+that OneWare introduced in 1.0.40. A running container engine (Docker, Podman, OrbStack, or Colima) is
+required for containerized execution.
 
 ## Repository layout
 
@@ -105,8 +107,8 @@ dotnet build  OneWare.ContainerExtension.slnx -warnaserror -c Release
 dotnet test   OneWare.ContainerExtension.slnx -c Release
 ```
 
-The container E2E tests are skipped in CI (Docker Hub rate limits and image-pull flakiness); they run
-locally when a daemon and the toolchain image are present.
+The container E2E tests are skipped in CI (Docker Hub rate limits and image-pull flakiness). What they
+need to run locally is listed under [Running the container tests](CONTRIBUTING.md#running-the-container-tests).
 
 ## Documentation
 

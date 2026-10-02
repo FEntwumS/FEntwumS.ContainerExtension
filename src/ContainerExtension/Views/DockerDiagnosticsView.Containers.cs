@@ -82,7 +82,7 @@ public partial class DockerDiagnosticsView
 
             try
             {
-                var logs = await _strategy.GetContainerLogsAsync(logContainerId);
+                var logs = await _strategy.GetContainerLogsAsync(logContainerId, ct: CancellationToken.None);
                 if (!_hasAttached)
                 {
                     _openLogWindows.TryRemove(logContainerId, out _);
@@ -331,7 +331,7 @@ public partial class DockerDiagnosticsView
                                         await using var stream = await file.OpenWriteAsync().ConfigureAwait(false);
                                         await using var writer = new StreamWriter(stream, new UTF8Encoding(false));
                                         await writer.WriteAsync(liveLogText).ConfigureAwait(false);
-                                    });
+                                    }, CancellationToken.None);
 
                                     saveBtn.Content = "Saved";
                                     saveBtn.IsEnabled = true; // re-enable on success too, not only on cancel/error
@@ -347,7 +347,7 @@ public partial class DockerDiagnosticsView
                             ContainerTelemetry.TrackError("DockerDiagnosticsView.Containers", "LogsSaveToFile", ex);
                             saveBtn.Content = "Save failed";
                             ToolTip.SetTip(saveBtn, $"Export failed: {ex.Message}");
-                            await Task.Delay(3000);
+                            await Task.Delay(3000, CancellationToken.None);
                             saveBtn.Content = "Save Logs";
                             ToolTip.SetTip(saveBtn, prevTip);
                             saveBtn.IsEnabled = true;
@@ -546,7 +546,7 @@ public partial class DockerDiagnosticsView
                                 {
                                 }
                             }
-                        });
+                        }, CancellationToken.None);
 
                         logWindow.Closed += (_, _) =>
                         {
@@ -589,10 +589,10 @@ public partial class DockerDiagnosticsView
         });
 
         _stopCommand = new AsyncRelayCommand<string>(containerId =>
-            RunContainerActionAsync(containerId, "stop", "Stop", "Stopping", "stopped", id => _strategy.StopContainerAsync(id)));
+            RunContainerActionAsync(containerId, "stop", "Stop", "Stopping", "stopped", id => _strategy.StopContainerAsync(id, CancellationToken.None)));
 
         _startCommand = new AsyncRelayCommand<string>(containerId =>
-            RunContainerActionAsync(containerId, "start", "Start", "Starting", "started", id => _strategy.StartContainerAsync(id)));
+            RunContainerActionAsync(containerId, "start", "Start", "Starting", "started", id => _strategy.StartContainerAsync(id, CancellationToken.None)));
 
         _removeCommand = new AsyncRelayCommand<string>(async containerId =>
         {
@@ -603,7 +603,7 @@ public partial class DockerDiagnosticsView
             {
                 return;
             }
-            await RunContainerActionAsync(containerId, "remove", "Remove", "Removing", "removed", id => _strategy.RemoveContainerAsync(id));
+            await RunContainerActionAsync(containerId, "remove", "Remove", "Removing", "removed", id => _strategy.RemoveContainerAsync(id, CancellationToken.None));
         });
 
         _restartCommand = new AsyncRelayCommand<string>(async (containerId) =>
@@ -614,7 +614,7 @@ public partial class DockerDiagnosticsView
             try
             {
                 ShowTemporaryStatus($"Restarting container '{displayName}'...");
-                await _strategy.RestartContainerAsync(containerId);
+                await _strategy.RestartContainerAsync(containerId, CancellationToken.None);
                 await RefreshAllAsync();
                 ShowTemporaryStatus($"Container '{displayName}' restarted successfully.");
             }
@@ -689,7 +689,7 @@ public partial class DockerDiagnosticsView
                 if (!_hasAttached) return;
                 btn.Content = "Error";
                 ToolTip.SetTip(btn, $"Failed to {restVerb.ToLowerInvariant()}: {ex.Message}");
-                await Task.Delay(3000);
+                await Task.Delay(3000, CancellationToken.None);
                 if (!_hasAttached) return;
                 btn.Content = restVerb;
                 ToolTip.SetTip(btn, prevTip);
@@ -798,7 +798,7 @@ public partial class DockerDiagnosticsView
             {
                 _activeStatsQueries.TryRemove(containerId, out _);
             }
-        });
+        }, CancellationToken.None);
     }
 
     private void UpdateContainerStatsUI(string containerId, string statsStr, bool isRunning)

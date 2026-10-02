@@ -61,11 +61,14 @@ graph TD
 
 ```text
 1. ONEWARE_DOCKER_IMAGE env var        (highest - CI/CD override)
-2. ContainerImage_{tool} per-tool      (settings UI)
-3. ContainerExtension_DefaultImage     (global setting; defaults to fentwums/oss-cad-suite:latest)
-4. DefaultToolImages[tool]             (built-in per-tool map)
-5. hdlc/ghdl:yosys                     (hardcoded fallback)
+2. docker.image of the call            (ToolCommand.StrategyConfigurationOverrides)
+3. ContainerImage_{tool} per-tool      (settings UI)
+4. docker.image of the tool            (IToolService.GetStrategyConfiguration)
+5. ContainerExtension_DefaultImage     (global setting; defaults to fentwums/oss-cad-suite:latest)
+6. hdlc/ghdl:yosys                     (hardcoded fallback when no default image is set)
 ```
+
+Values from steps 2 and 4 are checked against the image grammar before use; see [Configuration](configuration.md#image-resolution-hierarchy).
 
 ## Container Lifecycle
 
@@ -75,6 +78,16 @@ ResolveImage -> EnsureImage (pull if needed) -> BuildContainerParameters
     -> DrainLines (demultiplex stdout/stderr)
     -> WaitContainer -> Log Telemetry -> Cleanup
 ```
+
+## Feedback in OneWare Studio
+
+A foreground run (`ExecuteAsync`) reports to OneWare Studio the way the native strategy does, whatever handlers the caller passes:
+
+- before the run, the command line in the output window, as `[folder]: tool arguments`
+- during the run, a status bar entry with the command's status message, the elapsed time when the caller asks for a timer, and cancel
+- after the run, `exited with code N` in red or `cancelled!` in orange
+
+Output and error lines go to the caller's `OutputHandler` and `ErrorHandler`. A handler the caller leaves unset falls back to the output window or the error log, and an error line then fails the run, even when the tool exits with code 0. A handler that returns `false` fails the run as well. Background runs (`StartProcess`, `StartWeakProcess`) report nothing on their own, like the native strategy's background processes.
 
 ## Docking System Integration
 

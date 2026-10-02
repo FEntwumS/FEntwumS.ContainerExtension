@@ -1,7 +1,5 @@
 # OneWare Container Extension
 
-![Icon](Icon.svg)
-
 Runs FPGA toolchains inside containers from within OneWare Studio, without changing the user's workflow
 or requiring a host toolchain install.
 

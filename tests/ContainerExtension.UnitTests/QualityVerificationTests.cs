@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Concurrent;
+using System.IO;
 using System.Linq;
 using System.Collections.Generic;
 using System.Threading;
@@ -28,11 +30,19 @@ public sealed class QualityVerificationTests
         using var provider = new E2ETestServiceProvider();
         using var strategy = new DockerExecutionStrategy(provider);
 
+        var output = new ConcurrentQueue<string>();
         var command = new ToolCommand
         {
             Executable = "echo",
             ToolName = "echo",
-            CommandArguments = BuildArgs("hello")
+            // A relative path would stop the run before it reaches Docker.
+            WorkingDirectory = Path.GetTempPath(),
+            CommandArguments = BuildArgs("hello"),
+            OutputHandler = line =>
+            {
+                output.Enqueue(line);
+                return true;
+            }
         };
 
         var weakRef = strategy.StartWeakProcess(command);
@@ -61,6 +71,8 @@ public sealed class QualityVerificationTests
         Assert.Null(exitCodeEx);
 
         Assert.True(hasExited);
+        // The container ran: without this, the test would also pass for a run that never reached Docker.
+        Assert.Contains("hello", output);
     }
 
     // Requires a reachable Docker daemon, so it is gated out of CI like the E2E suite.
@@ -78,6 +90,7 @@ public sealed class QualityVerificationTests
         {
             Executable = "sleep",
             ToolName = "sleep",
+            WorkingDirectory = AppContext.BaseDirectory,
             CommandArguments = BuildArgs("5"),
             OutputHandler = msg => { lock (stdoutList) stdoutList.Add(msg); return true; },
             ErrorHandler = msg => { lock (stderrList) stderrList.Add(msg); return true; }
@@ -98,10 +111,83 @@ public sealed class QualityVerificationTests
         // Wait a short delay to allow background cancellation task to run
         await Task.Delay(2000, TestContext.Current.CancellationToken);
 
-        // Verify that the container was cancelled
+        // Verify that the container was cancelled. At this log level the extension's notice reaches the output
+        // handler; a kill during the daemon check still surfaces on the error handler.
+        List<string> lines;
+        lock (stdoutList) lines = [.. stdoutList];
+        lock (stderrList) lines.AddRange(stderrList);
+        Assert.Contains(lines, line => line.Contains("cancel", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // StartProcess hands back a real, non-empty handle synchronously (the background container run is
+    // launched fire-and-forget). Daemon-independent: an unreachable daemon still yields a valid handle.
+    [Fact]
+    public void StartProcess_ReturnsNonEmptyHandle()
+    {
+        using var provider = new E2ETestServiceProvider();
+        using var strategy = new DockerExecutionStrategy(provider);
+
+        var command = new ToolCommand
+        {
+            Executable = "echo",
+            ToolName = "echo",
+            CommandArguments = BuildArgs("hello")
+        };
+
+        var handle = strategy.StartProcess(command);
+
+        Assert.NotEqual(Guid.Empty, handle);
+    }
+
+    // An unknown handle is not tracked, so both queries report "not running" / "nothing to stop" rather
+    // than throwing. Daemon-independent.
+    [Fact]
+    public void IsProcessRunning_AndStopProcess_UnknownHandle_ReturnFalse()
+    {
+        using var provider = new E2ETestServiceProvider();
+        using var strategy = new DockerExecutionStrategy(provider);
+
+        var unknown = Guid.NewGuid();
+
+        Assert.False(strategy.IsProcessRunning(unknown));
+        Assert.False(strategy.StopProcess(unknown));
+    }
+
+    // Full lifecycle against a real daemon: a started run is tracked (IsProcessRunning == true), StopProcess
+    // finds and cancels it (returns true, then untracked), and the cancellation surfaces to the error
+    // handler. Requires a reachable Docker daemon, so it is gated out of CI like the E2E suite.
+    [FactIfNoCI]
+    public async Task StopProcess_CancelsRunningProcess_ReturnsTrue()
+    {
+        using var provider = new E2ETestServiceProvider();
+        provider.SettingsService.SetSettingValue(ContainerExtensionModule.DefaultImageSetting, ContainerExtensionModule.FallbackImage);
+        using var strategy = new DockerExecutionStrategy(provider);
+
+        var stderrList = new List<string>();
+        var command = new ToolCommand
+        {
+            Executable = "sleep",
+            ToolName = "sleep",
+            WorkingDirectory = AppContext.BaseDirectory,
+            CommandArguments = BuildArgs("30"),
+            ErrorHandler = msg => { lock (stderrList) stderrList.Add(msg); return true; }
+        };
+
+        var handle = strategy.StartProcess(command);
+        Assert.NotEqual(Guid.Empty, handle);
+
+        // Give the container run time to reach the running state (still tracked while pulling/executing).
+        await Task.Delay(3000, TestContext.Current.CancellationToken);
+        Assert.True(strategy.IsProcessRunning(handle));
+
+        // Stopping a tracked run returns true and immediately drops it from tracking.
+        Assert.True(strategy.StopProcess(handle));
+        Assert.False(strategy.IsProcessRunning(handle));
+
+        // Cancellation should propagate into the run and surface via the error handler.
+        await Task.Delay(3000, TestContext.Current.CancellationToken);
         lock (stderrList)
         {
-            Assert.NotEmpty(stderrList);
             Assert.Contains(stderrList, line => line.Contains("cancel", StringComparison.OrdinalIgnoreCase));
         }
     }

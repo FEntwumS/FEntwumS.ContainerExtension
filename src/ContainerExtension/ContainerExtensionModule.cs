@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -42,6 +41,8 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
 
     public const string DockerRuntimePathSetting = "ContainerExtension_DockerRuntimePath";
     public const string DefaultImageSetting = "ContainerExtension_DefaultImage";
+    // Also the placeholder of every per-tool image field, since an empty field falls back to this setting.
+    public const string DefaultImageSettingTitle = "Default Toolchain Image";
     public const string MemoryLimitSetting = "ContainerExtension_MemoryLimit";
 
     public const string PlatformSetting = "ContainerExtension_Platform";
@@ -66,6 +67,9 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     /// </summary>
     public const string AllowNativeFallbackSetting = "ContainerExtension_AllowNativeFallback";
     public const string PerToolImagePrefix = "ContainerImage_";
+    // The key OneWare's tool engine uses by convention for a container image in a tool's strategy
+    // configuration or in the overrides of a single call.
+    public const string StrategyConfigurationImageKey = "docker.image";
     public const string FallbackImage = "hdlc/ghdl:yosys";
 
     // The project's own full-flow toolchain image (built locally via "Build Local Image" or
@@ -74,6 +78,11 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     // simulation across all supported device families, including the GateMate/Gowin tools that have no
     // hdlc/* equivalent.
     public const string OssCadSuiteImage = "fentwums/oss-cad-suite:latest";
+
+    // Since the toolchain image is on no registry, Pull, Check-for-Updates and a run's own pull cannot
+    // fetch it. Used to point to Build Local Image instead of attempting a doomed registry pull (which 404s).
+    internal static bool IsBuildOnlyImage(string image) =>
+        !string.IsNullOrEmpty(image) && image.StartsWith("fentwums/oss-cad-suite", StringComparison.OrdinalIgnoreCase);
 
     // Summary keys constants
     public const string SettingsKeyImage = "Image";
@@ -97,30 +106,6 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     /// </summary>
     public const string SettingsKeyAllowNativeFallback = "Allow Native Fallback";
     public const string SettingsKeyAllowPrivileged = "Privileged Mode";
-
-    public static readonly FrozenDictionary<string, string> DefaultToolImages =
-      new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-      {
-          ["ghdl"] = FallbackImage,
-          ["nvc"] = "hdlc/nvc",
-          ["iverilog"] = "hdlc/iverilog",
-          ["verilator"] = "hdlc/verilator",
-          ["yosys"] = FallbackImage,
-          ["apicula"] = "hdlc/apicula",
-          ["nextpnr-ecp5"] = "hdlc/impl/prjtrellis",
-          ["nextpnr-generic"] = "hdlc/impl/generic",
-          ["nextpnr-ice40"] = "hdlc/impl/icestorm",
-          ["nextpnr-nexus"] = "hdlc/impl/prjoxide",
-          ["nextpnr-himbaechel"] = OssCadSuiteImage,
-          ["nextpnr-machxo2"] = OssCadSuiteImage,
-          ["openFPGALoader"] = "hdlc/prog",
-          ["iceprog"] = "hdlc/impl/icestorm",
-          ["icepack"] = "hdlc/impl/icestorm",
-          ["gowin_pack"] = OssCadSuiteImage,
-          ["gmpack"] = OssCadSuiteImage,
-          ["gmupack"] = OssCadSuiteImage,
-          ["gtkwave"] = "hdlc/gtkwave",
-      }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     public const string DashboardTitle = "Container Dashboard";
 
@@ -200,7 +185,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         ContainerTelemetry.LogLevelChecker = () => settingsService.SafeGetSetting<string>(ContainerExtensionModule.LogLevelSetting, "Errors Only");
 
         settingsService.RegisterSettingSubCategory(SettingsCategoryBinary, SettingsSubCategoryEngine);
-        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DefaultImageSetting, new TextBoxSetting("Default Toolchain Image", OssCadSuiteImage, "The default container image for all tools — the project's full-flow oss-cad-suite image. It is build-only (not on Docker Hub): produce it via Build Local Image, not Pull.") { Validator = ImageFormatValidatorNoEmpty });
+        settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, DefaultImageSetting, new TextBoxSetting(DefaultImageSettingTitle, OssCadSuiteImage, "The default container image for all tools — the project's full-flow oss-cad-suite image. It is build-only (not on Docker Hub): produce it via Build Local Image, not Pull.") { Validator = ImageFormatValidatorNoEmpty });
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, PullPolicySetting, new ComboBoxSetting("Image Pull Policy", "if-not-present", ["always", "if-not-present", "never"]));
         settingsService.RegisterSetting(SettingsCategoryBinary, SettingsSubCategoryEngine, PlatformSetting, new ComboBoxSetting("Image Platform", "auto", ["auto", "linux/amd64", "linux/arm64", "linux/arm/v7"]));
 
@@ -280,29 +265,20 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
             try
             {
-                var strategyKey = dockerStrategy.GetStrategyKey();
                 while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
                 {
                     if (ct.IsCancellationRequested) break;
 
                     // Isolate each tick: a transient fault in one scan must not tear down the
-                    // poller, otherwise late-registered tools would silently never receive the
-                    // strategy until the next IDE restart.
+                    // poller, otherwise late-registered tools would silently never receive their
+                    // per-tool image setting until the next IDE restart.
                     try
                     {
-                        var currentTools = toolService.GetAllTools();
-                        var needsInjection = false;
-                        foreach (var tool in currentTools)
-                        {
-                            if (settingsService.HasSetting(tool.Key) && settingsService.GetSetting(tool.Key) is ComboBoxSetting comboSetting && (comboSetting.Options == null || comboSetting.Options.Length == 0 || !OptionsContains(comboSetting.Options, strategyKey)))
-                            {
-                                needsInjection = true;
-                                break;
-                            }
-                        }
-
-                        var currentToolCount = currentTools.Count;
-                        if (currentToolCount != knownToolCount || needsInjection)
+                        // The Docker strategy is registered once for all tools — current and future — via the
+                        // predicate registration, so late tools need no strategy re-injection, only their
+                        // per-tool image setting, which InjectStrategyIntoAllTools creates when the count grows.
+                        var currentToolCount = toolService.GetAllTools().Count;
+                        if (currentToolCount != knownToolCount)
                         {
                             knownToolCount = currentToolCount;
                             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -330,7 +306,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                         "Late-tool strategy wiring has stopped. Newly registered FPGA tools will not run in containers until OneWare is restarted.",
                         Avalonia.Controls.Notifications.NotificationType.Warning));
             }
-        });
+        }, ct);
 
         try
         {
@@ -550,19 +526,30 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                         $"{dockerStrategy.DetectedRuntime} daemon is not reachable. FPGA tools will run natively or fail until it is started.",
                         Avalonia.Controls.Notifications.NotificationType.Warning));
             }
-        });
+        }, ct);
     }
+
+    /// <summary>
+    /// What an empty per-tool image field falls back to, shown as its placeholder: the <c>docker.image</c>
+    /// the tool's plugin declares, or else the Default Toolchain Image.
+    /// </summary>
+    internal static string PerToolImageFallback(IReadOnlyDictionary<string, string> strategyConfiguration)
+        => strategyConfiguration.TryGetValue(StrategyConfigurationImageKey, out var image) && !string.IsNullOrWhiteSpace(image)
+            ? image.Trim()
+            : DefaultImageSettingTitle;
 
     private static void InjectStrategyIntoAllTools(IToolService toolService, DockerExecutionStrategy dockerStrategy, ISettingsService settingsService)
     {
         var allTools = toolService.GetAllTools();
         if (allTools == null) return;
 
+        // Strategy-side opt-in: register the Docker strategy once with a predicate matching every tool —
+        // including tools registered later, which the tool service re-evaluates on demand.
+        toolService.RegisterStrategy(dockerStrategy, static _ => true);
+
         foreach (var globalTool in allTools)
         {
             if (globalTool == null || string.IsNullOrEmpty(globalTool.Key)) continue;
-
-            toolService.RegisterStrategy(globalTool.Key, dockerStrategy);
 
             var settingKey = $"{PerToolImagePrefix}{globalTool.Key.ToLowerInvariant()}";
             if (!settingsService.HasSetting(settingKey))
@@ -570,39 +557,14 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                 settingsService.RegisterSetting(
                   SettingsCategoryBinary, SettingsSubCategoryStrategy,
                   settingKey,
-                  new TextBoxSetting($"Container Image for {globalTool.Name}", "", DefaultToolImages.TryGetValue(globalTool.Key, out var defaultHint) ? defaultHint : FallbackImage)
+                  new TextBoxSetting($"Container Image for {globalTool.Name}", "", PerToolImageFallback(toolService.GetStrategyConfiguration(globalTool.Key)))
                   {
-                      HoverDescription = $"Overrides the Default Toolchain Image when '{globalTool.Name}' is executed via Docker.",
+                      HoverDescription = $"Overrides the image shown as placeholder when '{globalTool.Name}' is executed via Docker.",
                       Validator = ImageFormatValidatorAllowEmpty
                   }
                 );
             }
-
-            if (settingsService.HasSetting(globalTool.Key) && settingsService.GetSetting(globalTool.Key) is ComboBoxSetting comboSetting)
-            {
-                var strategyKey = dockerStrategy.GetStrategyKey();
-                if (!OptionsContains(comboSetting.Options, strategyKey))
-                {
-                    var newOptions = new object[comboSetting.Options.Length + 1];
-                    Array.Copy(comboSetting.Options, newOptions, comboSetting.Options.Length);
-                    newOptions[^1] = strategyKey;
-                    comboSetting.Options = newOptions;
-                }
-            }
         }
-    }
-
-    private static bool OptionsContains(object[] options, string value)
-    {
-        if (options == null || options.Length == 0) return false;
-        for (int idx = 0; idx < options.Length; idx++)
-        {
-            if (options[idx] is string str && string.Equals(str, value, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-        return false;
     }
 
     /// <summary>

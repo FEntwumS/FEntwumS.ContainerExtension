@@ -250,8 +250,11 @@ internal sealed class ContainerRunner
     }
 
     internal async Task<(long exitCode, string output, bool wasCancelled, ResourceProfile? profile)> RunContainerAsync(
-      CreateContainerParameters createParams, ToolCommand command, CancellationToken ct)
+      CreateContainerParameters createParams, ToolCommand command, CancellationToken ct, HandlerVerdict? verdict = null)
     {
+        // The tool's own lines go through the verdict, so a handler that rejects one fails the run.
+        var outputHandler = verdict is null ? command.OutputHandler : verdict.Track(command.OutputHandler);
+        var errorHandler = verdict is null ? command.ErrorHandler : verdict.Track(command.ErrorHandler);
         var outputBuilder = new StringBuilder();
         var executable = (command.Executable ?? command.ToolName ?? string.Empty).Replace("\r", "");
         long exitCode = -1;
@@ -316,8 +319,10 @@ internal sealed class ContainerRunner
               Volatile.Write(ref wasCancelledFlag, 1);
               try
               {
+                  // CancellationToken.None, not ct: this callback runs because ct was cancelled, and ct would
+                  // abort the very stop it requests.
                   var stopTask = _client.Containers.StopContainerAsync(containerId,
-                new ContainerStopParameters { WaitBeforeKillSeconds = 2 });
+                new ContainerStopParameters { WaitBeforeKillSeconds = 2 }, CancellationToken.None);
 #pragma warning disable VSTHRD110
                   stopTask.ContinueWith(t =>
     {
@@ -400,7 +405,7 @@ internal sealed class ContainerRunner
                             {
                                 AppendCapped(outputBuilder, textSpan);
                             }
-                            DrainLines(stderrBuf, textSpan, command.ErrorHandler);
+                            DrainLines(stderrBuf, textSpan, errorHandler);
                         }
                         else
                         {
@@ -410,7 +415,7 @@ internal sealed class ContainerRunner
                             {
                                 AppendCapped(outputBuilder, textSpan);
                             }
-                            DrainLines(stdoutBuf, textSpan, command.OutputHandler);
+                            DrainLines(stdoutBuf, textSpan, outputHandler);
                         }
                     }
                 }
@@ -426,14 +431,14 @@ internal sealed class ContainerRunner
                         {
                             var tailSpan = charBuf.AsSpan(0, tailOut);
                             lock (outputBuilder) { AppendCapped(outputBuilder, tailSpan); }
-                            DrainLines(stdoutBuf, tailSpan, command.OutputHandler);
+                            DrainLines(stdoutBuf, tailSpan, outputHandler);
                         }
                         var tailErr = stderrDecoder.GetChars(buffer, 0, 0, charBuf, 0, flush: true);
                         if (tailErr > 0)
                         {
                             var tailSpan = charBuf.AsSpan(0, tailErr);
                             lock (outputBuilder) { AppendCapped(outputBuilder, tailSpan); }
-                            DrainLines(stderrBuf, tailSpan, command.ErrorHandler);
+                            DrainLines(stderrBuf, tailSpan, errorHandler);
                         }
                     }
                     catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -445,12 +450,12 @@ internal sealed class ContainerRunner
                     if (stdoutBuf.Length > 0)
                     {
                         var finalStdout = stdoutBuf.ToString();
-                        SafeInvoke(() => command.OutputHandler?.Invoke(finalStdout));
+                        SafeInvoke(() => outputHandler?.Invoke(finalStdout));
                     }
                     if (stderrBuf.Length > 0)
                     {
                         var finalStderr = stderrBuf.ToString();
-                        SafeInvoke(() => command.ErrorHandler?.Invoke(finalStderr));
+                        SafeInvoke(() => errorHandler?.Invoke(finalStderr));
                     }
                 }
             }, CancellationToken.None);
@@ -458,7 +463,6 @@ internal sealed class ContainerRunner
             statsCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             statsTask = CollectResourceStatsAsync(containerId, command, statsCts.Token);
 
-            var logRank = _console.CurrentLevelRank;
             try
             {
                 var wait = await _client.Containers.WaitContainerAsync(containerId, ct).ConfigureAwait(false);
@@ -467,8 +471,8 @@ internal sealed class ContainerRunner
             catch (OperationCanceledException)
             {
                 Volatile.Write(ref wasCancelledFlag, 1);
-                if (logRank >= RankErrors)
-                    SafeInvoke(() => command.ErrorHandler?.Invoke("[Docker SDK] Container execution was cancelled."));
+                // The strategy reports the cancellation to the host; this notice is a diagnostic, not output of the tool.
+                _console.SdkLog(command, "[Docker SDK] Container execution was cancelled.", RankInfo);
             }
 
             if (statsCts != null) await statsCts.CancelAsync().ConfigureAwait(false);
