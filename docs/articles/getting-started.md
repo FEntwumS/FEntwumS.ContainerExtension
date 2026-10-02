@@ -32,7 +32,7 @@ cp -r src/ContainerExtension/bin/Release/net10.0/* \
 
 1. Open OneWare Studio and go to the **Extension Manager**.
 2. Search for **Container Extension** and click **Install**.
-3. Restart OneWare Studio to load the extension.
+3. Restart OneWare Studio once, so that the Container Dashboard's tab and menu entry appear.
 
 ## First Run
 
