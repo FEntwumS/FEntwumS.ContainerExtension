@@ -20,7 +20,7 @@ or requiring a host toolchain install.
 
 ## Getting started
 
-1. Install via the OneWare Studio Extension Manager, then restart OneWare Studio once so that the
+1. Install via Extras > Extensions in OneWare Studio, then restart OneWare Studio once so that the
    Container Dashboard's tab and menu entry appear.
 2. Ensure a container engine (Docker, Podman, OrbStack, or Colima) is running.
 3. Open Settings > Binary Management > Container Engine to configure.

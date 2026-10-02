@@ -30,9 +30,13 @@ cp -r src/ContainerExtension/bin/Release/net10.0/* \
 
 ### From OneWare Package Manager
 
-1. Open OneWare Studio and go to the **Extension Manager**.
+1. Open OneWare Studio and choose **Extras > Extensions**.
 2. Search for **Container Extension** and click **Install**.
 3. Restart OneWare Studio once, so that the Container Dashboard's tab and menu entry appear.
+
+If the search finds nothing, first add the manifest link
+`https://raw.githubusercontent.com/FEntwumS/FEntwumS.ContainerExtension/main/oneware-extension.json` to
+**Custom Package Sources** under **Settings > Package Manager > Sources**.
 
 ## First Run
 
