@@ -4,6 +4,27 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-10-05
+
+Fixes the Container Dashboard multiplying in a saved layout when its menu entry was used, and makes
+a tool's messages under the Docker strategy name files the way the caller passed them instead of by
+their path inside the container. OneWare Studio 1.0.40 or later is still required.
+
+### Fixed
+
+- The Container Dashboard is restored from a saved layout as the instance the extension registers, so View > Tool Windows > Container Dashboard no longer adds a second dashboard beside a restored one. A layout that already holds several dashboards fails to load once, and OneWare Studio falls back to its default layout, which holds one.
+- A relative path that stays inside the working directory reaches the tool as passed instead of as an absolute path under `/workspace`, so a tool message names a file as under the native strategy, `Warn_tb.v:6:` rather than `/workspace/Warn_tb.v:6:`. Absolute paths keep their mapping under `/workspace`.
+
+### Tests
+
+- The end-to-end tests show the output of a run when an assertion on it fails, and two of them check the runs that prepare their last one.
+- The symlink mapping test can fail: it catches only a failure to create the link, reports itself as skipped in that case, and expects the container path of the link's target.
+- New tests cover restoring the dashboard from a saved layout and the mapping of relative paths, including a Docker test in which a tool warning names its source as passed.
+
+### Documentation
+
+- The README, the getting-started guide and the package description ask for one restart of OneWare Studio after an install through the package manager, so that the dashboard's tab and menu entry appear. They name the package manager as OneWare Studio shows it, Extras > Extensions, and the guide gives the manifest link to add under Custom Package Sources when the search finds nothing.
+
 ## [1.1.0] - 2026-10-02
 
 Adapts the extension to the tool-execution strategy interface that OneWare Studio introduced in 1.0.40,
