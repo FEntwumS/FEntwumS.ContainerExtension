@@ -4,6 +4,22 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-10-05
+
+Treats the container runtime as unavailable, instead of failing every run, when the startup fails
+after the Docker connection is made, and corrects a warning about tools registered after startup.
+OneWare Studio 1.0.40 or later is still required.
+
+### Fixed
+
+- If arming the cleanup of containers on exit fails after the daemon connection is made, for example because registering the Ctrl-C handler throws, the extension treats the runtime as unavailable, as when no daemon can be reached, so the native fallback can engage and a message names the problem. Before, every later run failed with that exception.
+- When the background check for tools registered after startup stops, its warning no longer says that such tools will not run in containers until OneWare Studio is restarted. They can; only their per-tool image setting is missing until then.
+
+### Tests
+
+- A new test makes arming the container cleanup fail and expects no exception and the runtime unavailable.
+- The summary of the endpoint validator tests no longer names suites that do not exist as covering the trust checks on a daemon's named pipe and socket.
+
 ## [1.1.1] - 2026-10-05
 
 Fixes the Container Dashboard multiplying in a saved layout when its menu entry was used, and makes
