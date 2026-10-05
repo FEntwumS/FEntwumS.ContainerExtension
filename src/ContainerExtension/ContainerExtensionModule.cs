@@ -258,10 +258,10 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
         _ = Task.Run(async () =>
         {
             var knownToolCount = toolService.GetAllTools().Count;
-            // Strategy injection for all known tools already happened synchronously above; this
-            // timer only re-injects for tools registered later. A 5 s cadence keeps late-tool
-            // latency low while avoiding a per-second scan of every tool's settings for the
-            // entire plugin lifetime.
+            // The per-tool image settings of all known tools were created synchronously above; this
+            // timer only creates them for tools registered later, since the predicate registration
+            // already covers every tool. A 5 s cadence keeps late-tool latency low while avoiding a
+            // per-second scan of every tool's settings for the entire plugin lifetime.
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
             try
             {
@@ -297,13 +297,14 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
             catch (OperationCanceledException) { /* Ignore */ }
             catch (Exception ex)
             {
-                // The loop itself failed (not a per-tick fault): late-tool wiring has stopped for
-                // the remainder of this session and only an IDE restart will restore it.
+                // The loop itself failed (not a per-tick fault): tools registered later in this session
+                // get no per-tool image setting until OneWare is restarted, though the predicate
+                // registration still lets them run in containers.
                 ContainerTelemetry.TrackError("ContainerExtensionModule", "ToolPollingError", ex);
                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                     windowService?.ShowNotification(
                         "Container Extension",
-                        "Late-tool strategy wiring has stopped. Newly registered FPGA tools will not run in containers until OneWare is restarted.",
+                        "Newly registered FPGA tools get no per-tool image setting until OneWare is restarted. They can still run in containers, with the image their plugin declares or the default image.",
                         Avalonia.Controls.Notifications.NotificationType.Warning));
             }
         }, ct);
