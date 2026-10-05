@@ -1249,7 +1249,18 @@ internal static class DockerCommandBuilder
             return CollapseContainerPath(normalizedPath);
         }
 
-        var fullPath = GetCanonicalPath(Path.IsPathRooted(path) ? path : Path.Combine(resolvedWorkingDir, path));
+        var isRelative = !Path.IsPathRooted(path);
+        var fullPath = GetCanonicalPath(isRelative ? Path.Combine(resolvedWorkingDir, path) : path);
+        var insideWorkingDir = fullPath.StartsWith(workingDirNormalized, osComparison) || fullPath.Equals(resolvedWorkingDir, osComparison);
+
+        // The container starts in the mounted working directory, so a relative path inside it names the same file
+        // there, and the tool's messages name it as the caller passed it. A path through a symbolic link keeps its
+        // resolved form below, since the target of an absolute link does not exist inside the container.
+        if (isRelative && insideWorkingDir
+            && fullPath.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(resolvedWorkingDir, normalizedPath))), osComparison))
+        {
+            return normalizedPath;
+        }
 
         if (fullPath.StartsWith(workingDirNormalized, osComparison))
         {

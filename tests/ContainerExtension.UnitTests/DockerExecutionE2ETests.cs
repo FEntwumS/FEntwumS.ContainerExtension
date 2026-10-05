@@ -343,6 +343,46 @@ public sealed class DockerExecutionE2ETests : IDisposable
     }
 
     [FactIfNoCI]
+    public async Task F2_Verilog_CompileWarning_NamesTheSourceAsPassed()
+    {
+        // OneWare's Icarus simulator passes its sources relative to the project, and iverilog names a source in a
+        // warning the way it was given, so the warning reads as it does under the native strategy.
+        var tempDir = Path.Combine(Path.GetTempPath(), "F2_VWarning_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "warn_tb.v"),
+                "module leaf(input a); endmodule\nmodule warn_tb; reg [1:0] r = 0; leaf u(.a(r)); endmodule\n");
+
+            using var provider = new E2ETestServiceProvider();
+            provider.SettingsService.SetSettingValue("ContainerImage_iverilog", "hdlc/iverilog:latest");
+            using var strategy = new DockerExecutionStrategy(provider);
+
+            var lines = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            var command = new ToolCommand
+            {
+                Executable = "iverilog",
+                ToolName = "iverilog",
+                WorkingDirectory = tempDir,
+                CommandArguments = new List<ICommandArgument>
+                {
+                    new E2ETestCommandArgument("-o"),
+                    new E2ETestPathArgument("warn_tb.vvp"),
+                    new E2ETestPathArgument("warn_tb.v")
+                },
+                OutputHandler = line => { lines.Enqueue(line); return true; },
+                ErrorHandler = line => { lines.Enqueue(line); return true; }
+            };
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
+            var warnings = lines.Where(line => line.Contains(": warning:", StringComparison.Ordinal)).ToList();
+            Assert.NotEmpty(warnings);
+            Assert.All(warnings, line => Assert.StartsWith("warn_tb.v:2: warning:", line, StringComparison.Ordinal));
+        }
+        finally { try { Directory.Delete(tempDir, true); } catch { } }
+    }
+
+    [FactIfNoCI]
     public async Task F2_Verilator_Compile_HappyPath()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "F2_Verilator_" + Guid.NewGuid().ToString("N"));
@@ -1887,6 +1927,26 @@ internal sealed class E2ETestCommandArgument : ICommandArgument
     }
     public void Prepare(System.Runtime.InteropServices.OSPlatform osPlatform, Func<string, string>? pathMapper = null) { }
     public string GetArgument() => _argument;
+}
+
+// A path passed the way OneWare's PathArgument passes one: through the strategy's path mapper, then with the
+// separators of the target platform.
+internal sealed class E2ETestPathArgument : ICommandArgument
+{
+    private string _path;
+    public E2ETestPathArgument(string path)
+    {
+        _path = path;
+    }
+    public void Prepare(System.Runtime.InteropServices.OSPlatform osPlatform, Func<string, string>? pathMapper = null)
+    {
+        if (pathMapper != null)
+        {
+            _path = pathMapper(_path);
+        }
+        _path = osPlatform == System.Runtime.InteropServices.OSPlatform.Windows ? _path.Replace('/', '\\') : _path.Replace('\\', '/');
+    }
+    public string GetArgument() => _path;
 }
 
 internal sealed class E2ETestServiceProvider : IServiceProvider, IDisposable
