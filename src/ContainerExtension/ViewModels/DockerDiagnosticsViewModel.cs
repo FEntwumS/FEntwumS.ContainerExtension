@@ -55,7 +55,8 @@ public class DockerDiagnosticsViewModel : ExtendedTool
         return new Avalonia.Media.DrawingImage { Drawing = drawing };
     }
 
-    [Newtonsoft.Json.JsonConstructor]
+    // No [JsonConstructor]: OneWare Studio restores a registered tool window through its service
+    // provider, so a saved layout must yield the registered dashboard rather than build a second one.
     public DockerDiagnosticsViewModel() : base(DashboardIcon)
     {
         InitializeDockIdentity();

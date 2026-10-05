@@ -104,8 +104,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-a", "VHDL_Blink.vhd")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
             Assert.True(File.Exists(Path.Combine(tempDir, "work-obj93.cf")));
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -129,8 +129,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-a", "VHDL_Blink.vhd", "VHDL_Blink_tb.vhd")
             };
-            var (s1, _) = await strategy.ExecuteAsync(cmdAnalyze);
-            Assert.True(s1);
+            var (s1, output1) = await strategy.ExecuteAsync(cmdAnalyze);
+            Assert.True(s1, output1);
 
             var cmdElab = new ToolCommand
             {
@@ -139,8 +139,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-e", "VHDL_Blink_tb")
             };
-            var (s2, _) = await strategy.ExecuteAsync(cmdElab);
-            Assert.True(s2);
+            var (s2, output2) = await strategy.ExecuteAsync(cmdElab);
+            Assert.True(s2, output2);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -163,7 +163,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-a", "VHDL_Blink.vhd", "VHDL_Blink_tb.vhd")
             };
-            await strategy.ExecuteAsync(cmdAnalyze);
+            var (analyzed, analyzeOutput) = await strategy.ExecuteAsync(cmdAnalyze);
+            Assert.True(analyzed, analyzeOutput);
 
             var cmdElab = new ToolCommand
             {
@@ -172,7 +173,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-e", "VHDL_Blink_tb")
             };
-            await strategy.ExecuteAsync(cmdElab);
+            var (elaborated, elaborateOutput) = await strategy.ExecuteAsync(cmdElab);
+            Assert.True(elaborated, elaborateOutput);
 
             var cmdSim = new ToolCommand
             {
@@ -181,8 +183,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-r", "VHDL_Blink_tb", "--stop-time=1us")
             };
-            var (success, _) = await strategy.ExecuteAsync(cmdSim);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(cmdSim);
+            Assert.True(success, output);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -205,8 +207,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-a", "--work=custom_lib", "VHDL_Blink.vhd")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
             Assert.True(File.Exists(Path.Combine(tempDir, "custom_lib-obj93.cf")));
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -230,8 +232,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-s", "VHDL_Blink.vhd")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -254,8 +256,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-o", "Blink.vvp", "Verilog_Blink.v", "Verilog_Blink_tb.v")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
             Assert.True(File.Exists(Path.Combine(tempDir, "Blink.vvp")));
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -281,7 +283,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-o", "Blink.vvp", "Verilog_Blink.v", "Verilog_Blink_tb.v")
             };
-            await strategy.ExecuteAsync(cmdCompile);
+            var (compiled, compileOutput) = await strategy.ExecuteAsync(cmdCompile);
+            Assert.True(compiled, compileOutput);
 
             // Execute using vvp
             var cmdExec = new ToolCommand
@@ -291,8 +294,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("Blink.vvp")
             };
-            var (success, _) = await strategy.ExecuteAsync(cmdExec);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(cmdExec);
+            Assert.True(success, output);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -319,8 +322,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-o", "wave_tb.vvp", "wave_tb.v")
             };
-            var (compiled, _) = await strategy.ExecuteAsync(cmdCompile);
-            Assert.True(compiled);
+            var (compiled, compileOutput) = await strategy.ExecuteAsync(cmdCompile);
+            Assert.True(compiled, compileOutput);
 
             // Called as OneWare's Icarus simulator calls it: the tool name as executable, the compiled file as the only argument
             var cmdExec = new ToolCommand
@@ -335,6 +338,46 @@ public sealed class DockerExecutionE2ETests : IDisposable
             var waveform = Path.Combine(tempDir, "wave_tb.vcd");
             Assert.True(File.Exists(waveform));
             Assert.True(new FileInfo(waveform).Length > 0);
+        }
+        finally { try { Directory.Delete(tempDir, true); } catch { } }
+    }
+
+    [FactIfNoCI]
+    public async Task F2_Verilog_CompileWarning_NamesTheSourceAsPassed()
+    {
+        // OneWare's Icarus simulator passes its sources relative to the project, and iverilog names a source in a
+        // warning the way it was given, so the warning reads as it does under the native strategy.
+        var tempDir = Path.Combine(Path.GetTempPath(), "F2_VWarning_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "warn_tb.v"),
+                "module leaf(input a); endmodule\nmodule warn_tb; reg [1:0] r = 0; leaf u(.a(r)); endmodule\n");
+
+            using var provider = new E2ETestServiceProvider();
+            provider.SettingsService.SetSettingValue("ContainerImage_iverilog", "hdlc/iverilog:latest");
+            using var strategy = new DockerExecutionStrategy(provider);
+
+            var lines = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            var command = new ToolCommand
+            {
+                Executable = "iverilog",
+                ToolName = "iverilog",
+                WorkingDirectory = tempDir,
+                CommandArguments = new List<ICommandArgument>
+                {
+                    new E2ETestCommandArgument("-o"),
+                    new E2ETestPathArgument("warn_tb.vvp"),
+                    new E2ETestPathArgument("warn_tb.v")
+                },
+                OutputHandler = line => { lines.Enqueue(line); return true; },
+                ErrorHandler = line => { lines.Enqueue(line); return true; }
+            };
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
+            var warnings = lines.Where(line => line.Contains(": warning:", StringComparison.Ordinal)).ToList();
+            Assert.NotEmpty(warnings);
+            Assert.All(warnings, line => Assert.StartsWith("warn_tb.v:2: warning:", line, StringComparison.Ordinal));
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -357,8 +400,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("--cc", "Verilog_Blink.v")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -381,8 +424,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-p", "synth_ice40 -json ice40_blink.json", "ice40_blink.v")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
             Assert.True(File.Exists(Path.Combine(tempDir, "ice40_blink.json")));
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -406,8 +449,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-p", "synth_ecp5 -json ecp5_blink_test.json", "ecp5_blink.v")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
             Assert.True(File.Exists(Path.Combine(tempDir, "ecp5_blink_test.json")));
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -431,8 +474,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "Blink.sby")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
             Assert.True(Directory.Exists(Path.Combine(tempDir, "Blink")));
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -462,8 +505,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "Blink.sby")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.False(success); // Verification should fail due to assertion violation
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.False(success, output); // Verification should fail due to assertion violation
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -491,8 +534,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "Blink.sby", "bmc")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -515,8 +558,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "Blink.sby")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -541,10 +584,10 @@ public sealed class DockerExecutionE2ETests : IDisposable
             };
 
             // Run twice; the second run should clean the output directory without error
-            var (s1, _) = await strategy.ExecuteAsync(command);
-            Assert.True(s1);
-            var (s2, _) = await strategy.ExecuteAsync(command);
-            Assert.True(s2);
+            var (s1, output1) = await strategy.ExecuteAsync(command);
+            Assert.True(s1, output1);
+            var (s2, output2) = await strategy.ExecuteAsync(command);
+            Assert.True(s2, output2);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -569,8 +612,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 OutputHandler = AcceptsNextpnrLine,
                 ErrorHandler = AcceptsNextpnrLine
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
             Assert.True(File.Exists(Path.Combine(tempDir, "test_ice.asc")));
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -594,8 +637,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("ice40_blink.asc", "test_out.bin")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
             Assert.True(File.Exists(Path.Combine(tempDir, "test_out.bin")));
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -621,8 +664,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 OutputHandler = AcceptsNextpnrLine,
                 ErrorHandler = AcceptsNextpnrLine
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
             Assert.True(File.Exists(Path.Combine(tempDir, "test_ecp.config")));
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -646,8 +689,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("ecp5_blink.config", "test_out.bit")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
             Assert.True(File.Exists(Path.Combine(tempDir, "test_out.bit")));
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -673,8 +716,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 OutputHandler = AcceptsNextpnrLine,
                 ErrorHandler = AcceptsNextpnrLine
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
             Assert.True(File.Exists(Path.Combine(tempDir, "temp_pcf.asc")));
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -808,8 +851,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
             CommandArguments = BuildArgs("--version")
         };
 
-        var (success, _) = await strategy.ExecuteAsync(cmd);
-        Assert.True(success);
+        var (success, output) = await strategy.ExecuteAsync(cmd);
+        Assert.True(success, output);
     }
 
     [FactIfNoCI]
@@ -825,8 +868,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
             WorkingDirectory = Directory.GetCurrentDirectory(),
             CommandArguments = BuildArgs("-a", "non_existent_file_xyz.vhd")
         };
-        var (success, _) = await strategy.ExecuteAsync(command);
-        Assert.False(success);
+        var (success, output) = await strategy.ExecuteAsync(command);
+        Assert.False(success, output);
     }
 
     [FactIfNoCI]
@@ -848,8 +891,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-a", "bad.vhd")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.False(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.False(success, output);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -880,8 +923,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-e", "NonExistentEntity")
             };
-            var (success, _) = await strategy.ExecuteAsync(cmdElab);
-            Assert.False(success);
+            var (success, output) = await strategy.ExecuteAsync(cmdElab);
+            Assert.False(success, output);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -924,7 +967,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 CommandArguments = BuildArgs("-r", "VHDL_Blink_tb", "--stop-time=1s")
             };
             var (success, output) = await strategy.ExecuteAsync(cmdSim);
-            Assert.False(success);
+            Assert.False(success, output);
             Assert.Equal("Cancelled", output);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -956,9 +999,9 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 ErrorHandler = s => { messages.Add(s); return true; },
             };
 
-            var (success, _) = await strategy.ExecuteAsync(cmd);
+            var (success, output) = await strategy.ExecuteAsync(cmd);
 
-            Assert.False(success);
+            Assert.False(success, output);
             Assert.Contains(messages, m => m.Contains("timed out", StringComparison.OrdinalIgnoreCase));
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -983,8 +1026,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-a", "empty.vhd")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.False(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.False(success, output);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -1002,8 +1045,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
             WorkingDirectory = Directory.GetCurrentDirectory(),
             CommandArguments = BuildArgs("-o", "out.vvp", "missing_file_abc.v")
         };
-        var (success, _) = await strategy.ExecuteAsync(command);
-        Assert.False(success);
+        var (success, output) = await strategy.ExecuteAsync(command);
+        Assert.False(success, output);
     }
 
     [FactIfNoCI]
@@ -1025,8 +1068,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-o", "out.vvp", "bad.v")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.False(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.False(success, output);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -1046,7 +1089,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
             CommandArguments = BuildArgs("missing_file.vvp")
         };
         var (success, output) = await strategy.ExecuteAsync(command);
-        Assert.False(success);
+        Assert.False(success, output);
         Assert.Contains("Unable to open input file", output, StringComparison.Ordinal);
     }
 
@@ -1063,8 +1106,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
             WorkingDirectory = Directory.GetCurrentDirectory(),
             CommandArguments = BuildArgs("--invalid-flag-abc")
         };
-        var (success, _) = await strategy.ExecuteAsync(command);
-        Assert.False(success);
+        var (success, output) = await strategy.ExecuteAsync(command);
+        Assert.False(success, output);
     }
 
     [FactIfNoCI]
@@ -1080,8 +1123,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
             WorkingDirectory = Directory.GetCurrentDirectory(),
             CommandArguments = BuildArgs("-p", "invalid_command_abc")
         };
-        var (success, _) = await strategy.ExecuteAsync(command);
-        Assert.False(success);
+        var (success, output) = await strategy.ExecuteAsync(command);
+        Assert.False(success, output);
     }
 
     [FactIfNoCI]
@@ -1098,8 +1141,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
             WorkingDirectory = Directory.GetCurrentDirectory(),
             CommandArguments = BuildArgs("-f", "missing_config.sby")
         };
-        var (success, _) = await strategy.ExecuteAsync(command);
-        Assert.False(success);
+        var (success, output) = await strategy.ExecuteAsync(command);
+        Assert.False(success, output);
     }
 
     [FactIfNoCI]
@@ -1122,8 +1165,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "bad.sby")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.False(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.False(success, output);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -1148,8 +1191,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "config.sby")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.False(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.False(success, output);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -1174,7 +1217,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 CommandArguments = BuildArgs("-f", "Blink.sby")
             };
             var (success, output) = await strategy.ExecuteAsync(command);
-            Assert.False(success);
+            Assert.False(success, output);
             Assert.Equal("Cancelled", output);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -1200,8 +1243,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "empty.sby")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.False(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.False(success, output);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -1221,8 +1264,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
             OutputHandler = AcceptsNextpnrLine,
             ErrorHandler = AcceptsNextpnrLine
         };
-        var (success, _) = await strategy.ExecuteAsync(command);
-        Assert.False(success);
+        var (success, output) = await strategy.ExecuteAsync(command);
+        Assert.False(success, output);
     }
 
     [FactIfNoCI]
@@ -1244,8 +1287,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 OutputHandler = AcceptsNextpnrLine,
                 ErrorHandler = AcceptsNextpnrLine
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.False(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.False(success, output);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -1263,8 +1306,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
             WorkingDirectory = Directory.GetCurrentDirectory(),
             CommandArguments = BuildArgs("missing.asc", "out.bin")
         };
-        var (success, _) = await strategy.ExecuteAsync(command);
-        Assert.False(success);
+        var (success, output) = await strategy.ExecuteAsync(command);
+        Assert.False(success, output);
     }
 
     [FactIfNoCI]
@@ -1288,8 +1331,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 OutputHandler = AcceptsNextpnrLine,
                 ErrorHandler = AcceptsNextpnrLine
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.False(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.False(success, output);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -1307,8 +1350,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
             WorkingDirectory = Directory.GetCurrentDirectory(),
             CommandArguments = BuildArgs("missing.config", "out.bit")
         };
-        var (success, _) = await strategy.ExecuteAsync(command);
-        Assert.False(success);
+        var (success, output) = await strategy.ExecuteAsync(command);
+        Assert.False(success, output);
     }
 
     [FactIfNoCI]
@@ -1444,8 +1487,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-p", "synth_ice40 -json test_synth.json", "ice40_blink.v")
             };
-            var (s1, _) = await strategy.ExecuteAsync(cmdYosys);
-            Assert.True(s1);
+            var (s1, output1) = await strategy.ExecuteAsync(cmdYosys);
+            Assert.True(s1, output1);
 
             var cmdPnr = new ToolCommand
             {
@@ -1456,8 +1499,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 OutputHandler = AcceptsNextpnrLine,
                 ErrorHandler = AcceptsNextpnrLine
             };
-            var (s2, _) = await strategy.ExecuteAsync(cmdPnr);
-            Assert.True(s2);
+            var (s2, output2) = await strategy.ExecuteAsync(cmdPnr);
+            Assert.True(s2, output2);
             Assert.True(File.Exists(Path.Combine(tempDir, "out.asc")));
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -1482,8 +1525,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-a", "VHDL_Blink.vhd")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
 
             var entries = ContainerTelemetry.GetRecentEntries(10);
             Assert.Single(entries);
@@ -1512,8 +1555,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "Blink.sby")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
 
             var entries = ContainerTelemetry.GetRecentEntries(10);
             Assert.Single(entries);
@@ -1563,8 +1606,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("ice40_blink.asc", "out.bin")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
 
             var entries = ContainerTelemetry.GetRecentEntries(10);
             Assert.Single(entries);
@@ -1612,8 +1655,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-a", "VHDL_Blink.vhd")
             };
-            var (s1, _) = await strategy.ExecuteAsync(cmdAnalyzeDesign);
-            Assert.True(s1);
+            var (s1, output1) = await strategy.ExecuteAsync(cmdAnalyzeDesign);
+            Assert.True(s1, output1);
 
             var cmdAnalyzeTb = new ToolCommand
             {
@@ -1622,8 +1665,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-a", "VHDL_Blink_tb.vhd")
             };
-            var (s2, _) = await strategy.ExecuteAsync(cmdAnalyzeTb);
-            Assert.True(s2);
+            var (s2, output2) = await strategy.ExecuteAsync(cmdAnalyzeTb);
+            Assert.True(s2, output2);
 
             var cmdElab = new ToolCommand
             {
@@ -1632,8 +1675,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-e", "VHDL_Blink_tb")
             };
-            var (s3, _) = await strategy.ExecuteAsync(cmdElab);
-            Assert.True(s3);
+            var (s3, output3) = await strategy.ExecuteAsync(cmdElab);
+            Assert.True(s3, output3);
 
             var cmdSim = new ToolCommand
             {
@@ -1642,8 +1685,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-r", "VHDL_Blink_tb", "--stop-time=100us")
             };
-            var (s4, _) = await strategy.ExecuteAsync(cmdSim);
-            Assert.True(s4);
+            var (s4, output4) = await strategy.ExecuteAsync(cmdSim);
+            Assert.True(s4, output4);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -1667,8 +1710,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-o", "Blink.vvp", "Verilog_Blink.v", "Verilog_Blink_tb.v")
             };
-            var (s1, _) = await strategy.ExecuteAsync(cmdCompile);
-            Assert.True(s1);
+            var (s1, output1) = await strategy.ExecuteAsync(cmdCompile);
+            Assert.True(s1, output1);
             Assert.True(File.Exists(Path.Combine(tempDir, "Blink.vvp")));
 
             var cmdExec = new ToolCommand
@@ -1678,8 +1721,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("Blink.vvp")
             };
-            var (s2, _) = await strategy.ExecuteAsync(cmdExec);
-            Assert.True(s2);
+            var (s2, output2) = await strategy.ExecuteAsync(cmdExec);
+            Assert.True(s2, output2);
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
     }
@@ -1702,8 +1745,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "Blink.sby")
             };
-            var (success, _) = await strategy.ExecuteAsync(command);
-            Assert.True(success);
+            var (success, output) = await strategy.ExecuteAsync(command);
+            Assert.True(success, output);
             Assert.True(Directory.Exists(Path.Combine(tempDir, "Blink")));
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -1729,8 +1772,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-p", "synth_ice40 -json ice40_blink.json", "ice40_blink.v")
             };
-            var (s1, _) = await strategy.ExecuteAsync(cmdYosys);
-            Assert.True(s1);
+            var (s1, output1) = await strategy.ExecuteAsync(cmdYosys);
+            Assert.True(s1, output1);
 
             var cmdPnr = new ToolCommand
             {
@@ -1741,8 +1784,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 OutputHandler = AcceptsNextpnrLine,
                 ErrorHandler = AcceptsNextpnrLine
             };
-            var (s2, _) = await strategy.ExecuteAsync(cmdPnr);
-            Assert.True(s2);
+            var (s2, output2) = await strategy.ExecuteAsync(cmdPnr);
+            Assert.True(s2, output2);
 
             var cmdPack = new ToolCommand
             {
@@ -1751,8 +1794,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("out.asc", "out.bin")
             };
-            var (s3, _) = await strategy.ExecuteAsync(cmdPack);
-            Assert.True(s3);
+            var (s3, output3) = await strategy.ExecuteAsync(cmdPack);
+            Assert.True(s3, output3);
             Assert.True(File.Exists(Path.Combine(tempDir, "out.bin")));
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -1778,8 +1821,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-p", "synth_ecp5 -json ecp5_blink.json", "ecp5_blink.v")
             };
-            var (s1, _) = await strategy.ExecuteAsync(cmdYosys);
-            Assert.True(s1);
+            var (s1, output1) = await strategy.ExecuteAsync(cmdYosys);
+            Assert.True(s1, output1);
 
             var cmdPnr = new ToolCommand
             {
@@ -1790,8 +1833,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 OutputHandler = AcceptsNextpnrLine,
                 ErrorHandler = AcceptsNextpnrLine
             };
-            var (s2, _) = await strategy.ExecuteAsync(cmdPnr);
-            Assert.True(s2);
+            var (s2, output2) = await strategy.ExecuteAsync(cmdPnr);
+            Assert.True(s2, output2);
 
             var cmdPack = new ToolCommand
             {
@@ -1800,8 +1843,8 @@ public sealed class DockerExecutionE2ETests : IDisposable
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("out.config", "out.bit")
             };
-            var (s3, _) = await strategy.ExecuteAsync(cmdPack);
-            Assert.True(s3);
+            var (s3, output3) = await strategy.ExecuteAsync(cmdPack);
+            Assert.True(s3, output3);
             Assert.True(File.Exists(Path.Combine(tempDir, "out.bit")));
         }
         finally { try { Directory.Delete(tempDir, true); } catch { } }
@@ -1884,6 +1927,26 @@ internal sealed class E2ETestCommandArgument : ICommandArgument
     }
     public void Prepare(System.Runtime.InteropServices.OSPlatform osPlatform, Func<string, string>? pathMapper = null) { }
     public string GetArgument() => _argument;
+}
+
+// A path passed the way OneWare's PathArgument passes one: through the strategy's path mapper, then with the
+// separators of the target platform.
+internal sealed class E2ETestPathArgument : ICommandArgument
+{
+    private string _path;
+    public E2ETestPathArgument(string path)
+    {
+        _path = path;
+    }
+    public void Prepare(System.Runtime.InteropServices.OSPlatform osPlatform, Func<string, string>? pathMapper = null)
+    {
+        if (pathMapper != null)
+        {
+            _path = pathMapper(_path);
+        }
+        _path = osPlatform == System.Runtime.InteropServices.OSPlatform.Windows ? _path.Replace('/', '\\') : _path.Replace('\\', '/');
+    }
+    public string GetArgument() => _path;
 }
 
 internal sealed class E2ETestServiceProvider : IServiceProvider, IDisposable

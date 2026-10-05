@@ -971,11 +971,44 @@ public sealed class ContainerExtensionTests : IDisposable
     }
 
     [Fact]
-    public void MapPathToContainer_RelativePath_MapsToWorkspace()
+    public void MapPathToContainer_RelativePath_StaysRelative()
     {
         var curDir = Directory.GetCurrentDirectory();
         var relativeResult = DockerCommandBuilder.MapPathToContainer("somefile.txt", curDir);
-        Assert.Equal("/workspace/somefile.txt", relativeResult);
+        Assert.Equal("somefile.txt", relativeResult);
+    }
+
+    [Fact]
+    public void MapPathToContainer_RelativePathLeavingTheWorkspace_MapsToTheSentinel()
+    {
+        var result = DockerCommandBuilder.MapPathToContainer("../outside.v", Directory.GetCurrentDirectory());
+        Assert.Equal("/workspace/invalid_escaped_path", result);
+    }
+
+    [Fact]
+    public void MapPathToContainer_RelativePathThroughASymlink_KeepsTheResolvedPath()
+    {
+        // The target of an absolute link is a host path, which does not exist inside the container.
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var realDir = Path.Combine(tempDir, "real");
+        Directory.CreateDirectory(realDir);
+        try
+        {
+            try
+            {
+                Directory.CreateSymbolicLink(Path.Combine(tempDir, "link"), realDir);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Assert.Skip("This host does not allow creating a symbolic link.");
+            }
+
+            Assert.Equal("/workspace/real/a.v", DockerCommandBuilder.MapPathToContainer("link/a.v", tempDir));
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
     }
 
     [Fact]
@@ -1147,7 +1180,7 @@ public sealed class ContainerExtensionTests : IDisposable
     public void MapPathToContainer_ResolvesSymlinksCanonically()
     {
         // On macOS/Linux, we can create a temporary file and a symlink to test canonical path resolution.
-        // On Windows, symlinks are supported but require privilege, so we test best effort or fallback.
+        // On Windows, creating a symlink requires privilege, so a host without it skips the test.
         var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
         var targetFile = Path.Combine(tempDir, "realfile.txt");
@@ -1156,15 +1189,17 @@ public sealed class ContainerExtensionTests : IDisposable
         var linkFile = Path.Combine(tempDir, "linkfile.txt");
         try
         {
-            File.CreateSymbolicLink(linkFile, targetFile);
-            // Verify that resolving linkFile resolved targetFile path (or resolves to targetFile)
-            var mappedLink = DockerCommandBuilder.MapPathToContainer(linkFile, tempDir);
-            var mappedTarget = DockerCommandBuilder.MapPathToContainer(targetFile, tempDir);
-            Assert.Equal(mappedTarget, mappedLink);
-        }
-        catch
-        {
-            // If creation of link fails (e.g. windows without developer mode), skip verification of link targets
+            try
+            {
+                File.CreateSymbolicLink(linkFile, targetFile);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Assert.Skip("This host does not allow creating a symbolic link.");
+            }
+
+            // The link maps to the place of its target in the workspace.
+            Assert.Equal("/workspace/realfile.txt", DockerCommandBuilder.MapPathToContainer(linkFile, tempDir));
         }
         finally
         {
@@ -1197,14 +1232,14 @@ public sealed class ContainerExtensionTests : IDisposable
     public void MapPathToContainer_OptionWithEqualsSignRelative_MapsPathCorrectly()
     {
         var result = DockerCommandBuilder.MapPathToContainer("--workdir=build", "/workspace/myproj");
-        Assert.Equal("--workdir=/workspace/build", result.Replace('\\', '/'));
+        Assert.Equal("--workdir=build", result.Replace('\\', '/'));
     }
 
     [Fact]
     public void MapPathToContainer_OptionWithPRelative_MapsPathCorrectly()
     {
         var result = DockerCommandBuilder.MapPathToContainer("-Pbuild", "/workspace/myproj");
-        Assert.Equal("-P/workspace/build", result.Replace('\\', '/'));
+        Assert.Equal("-Pbuild", result.Replace('\\', '/'));
     }
 
     [Fact]
@@ -1817,7 +1852,7 @@ public sealed class ContainerExtensionTests : IDisposable
             "test_image", command, null!, null, null, (c, l) => { });
 
         var shellCmd = string.Join(" ", param.Cmd!);
-        Assert.Equal("ghdl /workspace/file/name.vhd", shellCmd);
+        Assert.Equal("ghdl file/name.vhd", shellCmd);
     }
 
     [Theory]
@@ -2005,7 +2040,7 @@ public sealed class ContainerExtensionTests : IDisposable
                 "img", command, null!, null, null, (c, l) => { });
 
             var shellCmd = string.Join(" ", param.Cmd!);
-            Assert.Equal("ghdl -m --work=iceduino --workdir=/workspace/build neorv32_iceduino_top", shellCmd);
+            Assert.Equal("ghdl -m --work=iceduino --workdir=build neorv32_iceduino_top", shellCmd);
         }
         finally
         {
@@ -2104,7 +2139,7 @@ public sealed class ContainerExtensionTests : IDisposable
                 "img", command, null!, null, null, (c, l) => { });
 
             var shellCmd = string.Join(" ", param.Cmd!);
-            Assert.Equal("ghdl --synth --work=iceduino --std=08 --workdir=/workspace/build neorv32_iceduino_top", shellCmd);
+            Assert.Equal("ghdl --synth --work=iceduino --std=08 --workdir=build neorv32_iceduino_top", shellCmd);
         }
         finally
         {
@@ -2369,7 +2404,7 @@ public sealed class ContainerExtensionTests : IDisposable
 
         var path2 = "src/main.v";
         var result2 = method.Invoke(null, new object[] { path2, workingDir }) as string;
-        Assert.Equal("/workspace/src/main.v", result2);
+        Assert.Equal("src/main.v", result2);
     }
 
     [Fact]
