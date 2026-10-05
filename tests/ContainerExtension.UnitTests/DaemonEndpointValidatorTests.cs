@@ -10,9 +10,10 @@ namespace ContainerExtension.UnitTests;
 
 /// <summary>
 /// Coverage for <see cref="DaemonEndpointValidator"/>. Focuses on the absolute-path resolution of
-/// system utilities that defeats PATH hijacking; the named-pipe/socket trust checks require a live
-/// endpoint and are exercised by the integration and hardening-challenge suites. The socket probe's
-/// handling of a cancellation runs against a socket the test listens on itself.
+/// system utilities that defeats PATH hijacking. The checks of who serves a daemon's named pipe and who
+/// owns its socket need a live endpoint and have no automated test; the hardening-challenge suite only
+/// checks the impersonation level of the pipe client that SecureStreamOpenerAsync opens. The socket
+/// probe's handling of a cancellation runs against a socket the test listens on itself.
 /// </summary>
 public sealed class DaemonEndpointValidatorTests
 {

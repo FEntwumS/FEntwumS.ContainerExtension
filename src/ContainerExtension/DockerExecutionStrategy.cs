@@ -105,16 +105,34 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     private async Task InitializeInternalAsync()
     {
         var conn = await Services.Docker.DockerConnectionFactory.CreateAsync(_settingsService, _strategyCts.Token).ConfigureAwait(false);
+        AdoptConnection(conn, ContainerReaper.TryArm);
+    }
+
+    // Adopts the connection's client and managers, arms the container reaper and creates the runner. A fault
+    // while arming (registering the Ctrl-C handler can throw) or creating leaves the strategy offline, as a
+    // failed connect does, instead of faulting the initialization every run awaits. The arming is a parameter
+    // so a test can make it fail.
+    internal void AdoptConnection(Services.Docker.DockerConnectionFactory.Connection conn, Func<DockerClient, bool> armReaper)
+    {
         _detectedRuntime = conn.DetectedRuntime;
         _daemonUri = conn.DaemonUri;
         _client = conn.Client;
         _connectionProvider = conn.ConnectionProvider;
         _imageManager = conn.ImageManager;
         _containerManager = conn.ContainerManager;
-        if (_client != null)
+        if (_client == null) return;
+        try
         {
-            ContainerReaper.TryArm(_client);
+            armReaper(_client);
             _runner = new ContainerRunner(_client, _settingsService, _console, _daemonUri!);
+        }
+        catch (Exception ex)
+        {
+            ContainerReaper.Disarm(_client);
+            _connectionProvider?.Dispose();
+            _client.Dispose();
+            _client = null;
+            ContainerTelemetry.TrackError("DockerExecutionStrategy", "Asynchronous daemon connection initialization failed", ex);
         }
     }
 
