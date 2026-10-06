@@ -26,4 +26,5 @@ or requiring a host toolchain install.
 3. Open Settings > Binary Management > Container Engine to configure.
 4. Select the container execution strategy for any tool.
 
-Developed by [Mert Torun](https://mtorun0x7cd.com) as part of a Master's thesis at TH Köln.
+Developed by Mert Torun as part of a Master's thesis at TH Köln (2026), openly available at
+[https://doi.org/10.57683/EPUB-3597](https://doi.org/10.57683/EPUB-3597).

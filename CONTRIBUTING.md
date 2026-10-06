@@ -53,7 +53,10 @@ Without the fixtures, the tests that need them fail instead of being skipped.
 
 - Follow the existing idiom; `dotnet format` and the in-build analyzers are authoritative.
 - Comments explain *why*, not *what*. No banner/divider comments, no narration of the adjacent code.
-- Prefer source-generated JSON and regex; keep the plugin assembly reflection-free and AOT-compatible.
+- Prefer source-generated JSON and regex, and keep the plugin assembly AOT-compatible. The one exception is
+  the reflection on Docker.DotNet's private `_streamOpener` field in `DaemonEndpointValidator`, which the
+  public API cannot replace (section 5.3.1 of the Master's thesis cited in the README); add no further
+  reflection.
 
 ## Commit messages
 

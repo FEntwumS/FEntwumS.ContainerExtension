@@ -10,9 +10,11 @@ It plugs into OneWare's pluggable tool-execution strategy, maps the project into
 unmodified tool, and streams output back to the IDE, so a build behaves identically across machines with
 no host toolchain install.
 
-Developed as part of the Master's thesis *"Design and Implementation of a Modular Architecture for the
+Developed as part of the Master's thesis *Design and Implementation of a Modular Architecture for the
 Transparent Integration of Containerized Execution Environments for Heterogeneous Open-Source Binaries in
-OneWare Studio"* by [Mert Torun](https://mtorun0x7cd.com) at TH Köln.
+OneWare Studio* by Mert Torun at TH Köln (2026), openly available at
+[https://doi.org/10.57683/EPUB-3597](https://doi.org/10.57683/EPUB-3597). The code has changed since the
+thesis was submitted.
 
 ![Icon](Icon.svg)
 
@@ -134,4 +136,4 @@ If you use this software, cite it via [CITATION.cff](CITATION.cff).
 
 ## License
 
-[MIT](License.md) © 2025–2026 [Mert Torun](https://mtorun0x7cd.com)
+[MIT](License.md) © 2025–2026 Mert Torun
