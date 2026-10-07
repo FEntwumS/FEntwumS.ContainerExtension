@@ -83,6 +83,20 @@ public sealed class ToolRegistrationTests
         Assert.Equal("hdlc/ghdl:yosys", setting.Watermark);
     }
 
+    [Fact]
+    public void EnsurePerToolImageSettings_SortsTheImageFieldAfterTheStrategyChoices()
+    {
+        // OneWare sorts a settings page by priority, ascending, and creates each tool's strategy choice with the
+        // default priority.
+        var settings = new RecordingSettingsService();
+        var strategyChoice = new ComboBoxSetting("ghdl", "NativeExecutionStrategy", new object[] { "NativeExecutionStrategy", "DockerExecutionStrategy" });
+
+        ContainerExtensionModule.EnsurePerToolImageSettings([Tool("ghdl")], new StrategyConfigurationToolService(), settings);
+
+        var imageField = settings.Registered[$"{ContainerExtensionModule.PerToolImagePrefix}ghdl"];
+        Assert.True(imageField.Priority > strategyChoice.Priority);
+    }
+
     private static ToolContext Tool(string key) => new(key, "Synth Tool", key);
 }
 
