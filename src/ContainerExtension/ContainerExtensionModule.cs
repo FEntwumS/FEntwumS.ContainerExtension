@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using OneWare.Essentials.Enums;
 using OneWare.Essentials.Models;
 using OneWare.Essentials.Services;
+using OneWare.Essentials.ToolEngine;
 using ContainerExtension.Validations;
 
 namespace ContainerExtension;
@@ -253,7 +254,10 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
             return;
         }
 
-        InjectStrategyIntoAllTools(toolService, dockerStrategy, settingsService);
+        // Strategy-side opt-in, registered once: the predicate matches every tool, and the tool service
+        // evaluates it on demand, so tools registered later are covered without registering it again.
+        toolService.RegisterStrategy(dockerStrategy, static _ => true);
+        EnsurePerToolImageSettings(toolService.GetAllTools(), toolService, settingsService);
 
         _ = Task.Run(async () =>
         {
@@ -274,16 +278,15 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                     // per-tool image setting until the next IDE restart.
                     try
                     {
-                        // The Docker strategy is registered once for all tools — current and future — via the
-                        // predicate registration, so late tools need no strategy re-injection, only their
-                        // per-tool image setting, which InjectStrategyIntoAllTools creates when the count grows.
+                        // Late tools need no strategy registration of their own, only their per-tool image
+                        // setting, which EnsurePerToolImageSettings creates when the count changes.
                         var currentToolCount = toolService.GetAllTools().Count;
                         if (currentToolCount != knownToolCount)
                         {
                             knownToolCount = currentToolCount;
                             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                             {
-                                InjectStrategyIntoAllTools(toolService, dockerStrategy, settingsService);
+                                EnsurePerToolImageSettings(toolService.GetAllTools(), toolService, settingsService);
                             });
                         }
                     }
@@ -539,16 +542,15 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
             ? image.Trim()
             : DefaultImageSettingTitle;
 
-    private static void InjectStrategyIntoAllTools(IToolService toolService, DockerExecutionStrategy dockerStrategy, ISettingsService settingsService)
+    /// <summary>
+    /// Creates the per-tool image setting of each given tool that has none yet, keyed by
+    /// <see cref="PerToolImagePrefix"/> and the lowercased tool key.
+    /// </summary>
+    private static void EnsurePerToolImageSettings(IEnumerable<ToolContext>? tools, IToolService toolService, ISettingsService settingsService)
     {
-        var allTools = toolService.GetAllTools();
-        if (allTools == null) return;
+        if (tools == null) return;
 
-        // Strategy-side opt-in: register the Docker strategy once with a predicate matching every tool —
-        // including tools registered later, which the tool service re-evaluates on demand.
-        toolService.RegisterStrategy(dockerStrategy, static _ => true);
-
-        foreach (var globalTool in allTools)
+        foreach (var globalTool in tools)
         {
             if (globalTool == null || string.IsNullOrEmpty(globalTool.Key)) continue;
 
