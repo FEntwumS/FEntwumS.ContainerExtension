@@ -92,8 +92,7 @@ The extension automatically loads environment variables from a `.env` file in yo
 
 ```env
 # .env file in your project root
-ONEWARE_DOCKER_IMAGE=ghcr.io/custom/image:v2.0
 MY_LICENSE_KEY=abc123
 ```
 
-These variables are injected into the container alongside the tool command.
+These variables are injected into the container alongside the tool command. They do not reach the extension itself, so `ONEWARE_DOCKER_IMAGE`, which overrides the image of every run, takes effect only in the environment OneWare Studio is started with.
