@@ -1975,7 +1975,11 @@ public partial class DockerDiagnosticsView : UserControl
                 {
                     throw new InvalidOperationException("Could not determine build context directory.");
                 }
-                var tag = "fentwums/oss-cad-suite:local";
+                // The pinned build is the toolchain image itself: it gets the name the Default Toolchain Image has
+                // out of the box, so that a fresh host runs its tools once this build is done, as the failure hint
+                // promises. A dated release keeps a name of its own, so that only Build & Set Default makes it the
+                // default.
+                var tag = selection == PinnedBuildSelection ? ContainerExtensionModule.OssCadSuiteImage : "fentwums/oss-cad-suite:local";
                 // Always build linux/amd64: the upstream arm64 releases omit GHDL, and the pinned
                 // checksum is for the amd64 tarball. This matches docker/build_oss_cad_suite.sh.
                 const string arch = "linux-x64";
