@@ -30,7 +30,9 @@ thesis was submitted.
 
 OneWare Studio 1.0.40 or later is required; the plugin implements the tool-execution strategy interface
 that OneWare introduced in 1.0.40. A running container engine (Docker, Podman, OrbStack, or Colima) is
-required for containerized execution.
+required for containerized execution. Containerized runs use the toolchain image
+`fentwums/oss-cad-suite:latest`, which is on no registry: build it once with Build Local Image in the
+Container Dashboard, or with [`docker/build_oss_cad_suite.sh`](docker/build_oss_cad_suite.sh).
 
 ## Repository layout
 
