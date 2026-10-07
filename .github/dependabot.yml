@@ -11,10 +11,6 @@ updates:
       nuget-dependencies:
         patterns:
           - "*"
-    labels:
-      - "dependencies"
-      - "nuget"
-      - "security"
     commit-message:
       prefix: "deps(nuget)"
     ignore:
@@ -39,10 +35,6 @@ updates:
       actions-dependencies:
         patterns:
           - "*"
-    labels:
-      - "dependencies"
-      - "ci"
-      - "security"
     commit-message:
       prefix: "deps(actions)"
 
@@ -57,9 +49,5 @@ updates:
       docker-dependencies:
         patterns:
           - "*"
-    labels:
-      - "dependencies"
-      - "docker"
-      - "security"
     commit-message:
       prefix: "deps(docker)"
