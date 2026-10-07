@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using OneWare.Essentials.Enums;
 using OneWare.Essentials.Models;
 using OneWare.Essentials.Services;
+using OneWare.Essentials.ToolEngine;
 using ContainerExtension.Validations;
 
 namespace ContainerExtension;
@@ -26,6 +28,7 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     private static System.ComponentModel.PropertyChangedEventHandler? _propertyChangedHandler;
     private static DockerDiagnosticsViewModel? _cachedDashboardVm;
     private static IDisposable? _telemetryRetentionSubscription;
+    private static IDisposable? _toolRegistrationSubscription;
     internal static IServiceProvider? GlobalServiceProvider { get; private set; }
 
     // Settings category and subcategory constants to prevent multiple string literal references
@@ -253,61 +256,27 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
             return;
         }
 
-        InjectStrategyIntoAllTools(toolService, dockerStrategy, settingsService);
+        // Strategy-side opt-in, registered once: the predicate matches every tool, and the tool service
+        // evaluates it on demand, so tools registered later are covered without registering it again.
+        toolService.RegisterStrategy(dockerStrategy, static _ => true);
 
-        _ = Task.Run(async () =>
+        // A tool registered later, by a plugin initialized after this one or installed at runtime, gets its
+        // per-tool image setting as it registers. Subscribing before the first pass leaves no tool between the
+        // two, and both run on the UI thread, where OneWare registers settings, so none is registered twice.
+        var tools = toolService.GetAllTools();
+        _toolRegistrationSubscription?.Dispose();
+        _toolRegistrationSubscription = WatchToolRegistrations(tools, registered => OnUiThread(() =>
         {
-            var knownToolCount = toolService.GetAllTools().Count;
-            // The per-tool image settings of all known tools were created synchronously above; this
-            // timer only creates them for tools registered later, since the predicate registration
-            // already covers every tool. A 5 s cadence keeps late-tool latency low while avoiding a
-            // per-second scan of every tool's settings for the entire plugin lifetime.
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
             try
             {
-                while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
-                {
-                    if (ct.IsCancellationRequested) break;
-
-                    // Isolate each tick: a transient fault in one scan must not tear down the
-                    // poller, otherwise late-registered tools would silently never receive their
-                    // per-tool image setting until the next IDE restart.
-                    try
-                    {
-                        // The Docker strategy is registered once for all tools — current and future — via the
-                        // predicate registration, so late tools need no strategy re-injection, only their
-                        // per-tool image setting, which InjectStrategyIntoAllTools creates when the count grows.
-                        var currentToolCount = toolService.GetAllTools().Count;
-                        if (currentToolCount != knownToolCount)
-                        {
-                            knownToolCount = currentToolCount;
-                            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                            {
-                                InjectStrategyIntoAllTools(toolService, dockerStrategy, settingsService);
-                            });
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OutOfMemoryException)
-                    {
-                        // Swallow and let the loop advance to the next tick.
-                        ContainerTelemetry.TrackError("ContainerExtensionModule", "ToolPollingTickError", ex);
-                    }
-                }
+                EnsurePerToolImageSettings(registered, toolService, settingsService);
             }
-            catch (OperationCanceledException) { /* Ignore */ }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                // The loop itself failed (not a per-tick fault): tools registered later in this session
-                // get no per-tool image setting until OneWare is restarted, though the predicate
-                // registration still lets them run in containers.
-                ContainerTelemetry.TrackError("ContainerExtensionModule", "ToolPollingError", ex);
-                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                    windowService?.ShowNotification(
-                        "Container Extension",
-                        "Newly registered FPGA tools get no per-tool image setting until OneWare is restarted. They can still run in containers, with the image their plugin declares or the default image.",
-                        Avalonia.Controls.Notifications.NotificationType.Warning));
+                ContainerTelemetry.TrackError("ContainerExtensionModule", "ToolRegistrationError", ex);
             }
-        }, ct);
+        }));
+        OnUiThread(() => EnsurePerToolImageSettings(tools, toolService, settingsService));
 
         try
         {
@@ -539,16 +508,15 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
             ? image.Trim()
             : DefaultImageSettingTitle;
 
-    private static void InjectStrategyIntoAllTools(IToolService toolService, DockerExecutionStrategy dockerStrategy, ISettingsService settingsService)
+    /// <summary>
+    /// Creates the per-tool image setting of each given tool that has none yet, keyed by
+    /// <see cref="PerToolImagePrefix"/> and the lowercased tool key. Call it on the UI thread.
+    /// </summary>
+    internal static void EnsurePerToolImageSettings(IEnumerable<ToolContext>? tools, IToolService toolService, ISettingsService settingsService)
     {
-        var allTools = toolService.GetAllTools();
-        if (allTools == null) return;
+        if (tools == null) return;
 
-        // Strategy-side opt-in: register the Docker strategy once with a predicate matching every tool —
-        // including tools registered later, which the tool service re-evaluates on demand.
-        toolService.RegisterStrategy(dockerStrategy, static _ => true);
-
-        foreach (var globalTool in allTools)
+        foreach (var globalTool in tools)
         {
             if (globalTool == null || string.IsNullOrEmpty(globalTool.Key)) continue;
 
@@ -561,11 +529,55 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                   new TextBoxSetting($"Container Image for {globalTool.Name}", "", PerToolImageFallback(toolService.GetStrategyConfiguration(globalTool.Key)))
                   {
                       HoverDescription = $"Overrides the image shown as placeholder when '{globalTool.Name}' is executed via Docker.",
-                      Validator = ImageFormatValidatorAllowEmpty
+                      Validator = ImageFormatValidatorAllowEmpty,
+                      // OneWare sorts a settings page by priority, and the strategy choice it adds for each tool
+                      // keeps the default 0, so the image fields stay below all of them, however late a tool registers.
+                      Priority = 1
                   }
                 );
             }
         }
+    }
+
+    /// <summary>
+    /// Reports the tools added to <paramref name="tools"/> from now on, once per change, until the returned
+    /// subscription is disposed. Removing, moving or clearing tools reports nothing.
+    /// </summary>
+    internal static IDisposable WatchToolRegistrations(INotifyCollectionChanged? tools, Action<IReadOnlyList<ToolContext>> onRegistered)
+    {
+        ArgumentNullException.ThrowIfNull(onRegistered);
+        if (tools == null) return new Subscription(static () => { });
+
+        NotifyCollectionChangedEventHandler handler = (_, e) =>
+        {
+            if (e.Action is NotifyCollectionChangedAction.Add or NotifyCollectionChangedAction.Replace
+                && e.NewItems is { Count: > 0 } added)
+            {
+                onRegistered(added.OfType<ToolContext>().ToList());
+            }
+        };
+        tools.CollectionChanged += handler;
+        return new Subscription(() => tools.CollectionChanged -= handler);
+    }
+
+    // Runs the action at once on the UI thread, or posts it there from any other thread.
+    private static void OnUiThread(Action action)
+    {
+        if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+        {
+            action();
+        }
+        else
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(action);
+        }
+    }
+
+    private sealed class Subscription(Action unsubscribe) : IDisposable
+    {
+        private Action? _unsubscribe = unsubscribe;
+
+        public void Dispose() => Interlocked.Exchange(ref _unsubscribe, null)?.Invoke();
     }
 
     /// <summary>
@@ -590,6 +602,9 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
             try { _telemetryRetentionSubscription?.Dispose(); }
             catch (ObjectDisposedException) { /* already disposed */ }
             _telemetryRetentionSubscription = null;
+
+            _toolRegistrationSubscription?.Dispose();
+            _toolRegistrationSubscription = null;
 
             if (_processExitHandler != null)
             {

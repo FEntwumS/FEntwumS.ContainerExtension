@@ -10,17 +10,19 @@ It plugs into OneWare's pluggable tool-execution strategy, maps the project into
 unmodified tool, and streams output back to the IDE, so a build behaves identically across machines with
 no host toolchain install.
 
-Developed as part of the Master's thesis *"Design and Implementation of a Modular Architecture for the
+Developed as part of the Master's thesis *Design and Implementation of a Modular Architecture for the
 Transparent Integration of Containerized Execution Environments for Heterogeneous Open-Source Binaries in
-OneWare Studio"* by [Mert Torun](https://mtorun0x7cd.com) at TH Köln.
+OneWare Studio* by Mert Torun at TH Köln (2026), openly available at
+[https://doi.org/10.57683/EPUB-3597](https://doi.org/10.57683/EPUB-3597). The code has changed since the
+thesis was submitted.
 
 ![Icon](Icon.svg)
 
 ## Installation
 
-- **From OneWare Studio:** open Extras > Extensions, search for "Container Extension", install, and restart
-  OneWare Studio once, so that the Container Dashboard's tab and menu entry appear. If the search finds
-  nothing, add the extension's manifest as a package source first; the
+- **From OneWare Studio:** open Extras > Extensions, search for "Container Extension", and install. On
+  OneWare Studio before 1.0.43, restart it once, so that the Container Dashboard's tab and menu entry
+  appear. If the search finds nothing, add the extension's manifest as a package source first; the
   [getting-started guide](docs/articles/getting-started.md) gives the link. The plugin ships as a managed
   `net10.0` assembly; OneWare provides the runtime.
 - **Side-load a local build:** publish the plugin and copy it into the OneWare plugins directory
@@ -134,4 +136,4 @@ If you use this software, cite it via [CITATION.cff](CITATION.cff).
 
 ## License
 
-[MIT](License.md) © 2025–2026 [Mert Torun](https://mtorun0x7cd.com)
+[MIT](License.md) © 2025–2026 Mert Torun

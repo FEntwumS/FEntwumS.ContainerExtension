@@ -4,6 +4,32 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2026-10-07
+
+Creates the per-tool image setting of a tool registered after startup as soon as the tool registers,
+keeps the per-tool image fields below the strategy choices in the settings, cites the published
+thesis, and asks for a restart after an install only on OneWare Studio before 1.0.43. OneWare Studio
+1.0.40 or later is still required.
+
+### Fixed
+
+- A tool registered after startup, by a plugin initialized later or installed at runtime through the package manager, gets its per-tool image setting as soon as it registers. Before, a check every five seconds created it up to five seconds late, and missed a tool that took the place of a removed one within those five seconds until the next change or a restart. The extension now listens to the change notifications of OneWare Studio's tool collection; the check is gone, and with it the warning shown when it failed.
+- On Settings > Binary Management > Execution Strategy, the per-tool image fields stay below all strategy choices. A tool registered after startup added its strategy choice and its image field at the bottom, below the other image fields, and mixed the two lists.
+
+### Changed
+
+- The build-time analyzer Meziantou.Analyzer is updated from 3.0.290 to 3.0.294, and the GitHub Actions `github/codeql-action` and `anchore/sbom-action` to v4.38.2 and v0.24.3.
+
+### Tests
+
+- New tests cover the registration notifications: a tool registered later, one that takes the place of a removed one, moving, removing and clearing tools, and the end of the subscription; and that each missing per-tool image setting is registered once and sorts after the strategy choices.
+
+### Documentation
+
+- The README, the documentation index and the package description give the year the Master's thesis was published and its DOI, and `CITATION.cff` lists the thesis under references with DOI, URN, publication date and license, while the citation file still asks to cite the software. The links to the author's web site are gone, and the affiliation names Technische Hochschule Köln, as the thesis reference does.
+- The contributing guide keeps the plugin assembly AOT-compatible and names the one reflection it needs, on Docker.DotNet's private stream opener in `DaemonEndpointValidator`, instead of asking for an assembly free of reflection.
+- The README, the package description and the getting-started guide ask for the restart after an install only on OneWare Studio before 1.0.43, which shows the Container Dashboard's tab and menu entry right after the install.
+
 ## [1.1.2] - 2026-10-05
 
 Treats the container runtime as unavailable, instead of failing every run, when the startup fails
