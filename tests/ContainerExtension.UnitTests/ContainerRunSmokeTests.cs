@@ -415,6 +415,35 @@ public sealed class ContainerRunSmokeTests : IDisposable
         Assert.False(success, $"expected the cancelled status entry to fail the run; output was: {output}");
     }
 
+    [FactIfNoCI]
+    public async Task BuildOnlyImage_MissingLocally_FailsWithoutAPull()
+    {
+        // The toolchain image is built locally and is on no registry: a pull could only fail, or fetch an image
+        // that someone else has published under that name.
+        using var provider = new E2ETestServiceProvider();
+        provider.SettingsService.SetSettingValue(ContainerExtensionModule.DefaultImageSetting, $"fentwums/oss-cad-suite:missing-{Guid.NewGuid():N}");
+        provider.SettingsService.SetSettingValue(ContainerExtensionModule.BypassNamedPipeCheckSetting, true);
+
+        using var strategy = new DockerExecutionStrategy(provider);
+        var (success, output) = await strategy.ExecuteAsync(CreateShellCommand("echo unreachable", workingDirectory: _workDir));
+
+        Assert.False(success, output);
+        Assert.Contains("it is built, not pulled", output, StringComparison.Ordinal);
+    }
+
+    [FactIfNoCI]
+    public async Task PrePull_LeavesTheBuildOnlyImageAlone()
+    {
+        using var provider = new E2ETestServiceProvider();
+        provider.SettingsService.SetSettingValue(ContainerExtensionModule.BypassNamedPipeCheckSetting, true);
+        using var strategy = new DockerExecutionStrategy(provider);
+
+        // A pull of this name would find nothing on a registry and throw.
+        var error = await Record.ExceptionAsync(() => strategy.PrePullImageAsync($"fentwums/oss-cad-suite:missing-{Guid.NewGuid():N}", TestContext.Current.CancellationToken));
+
+        Assert.Null(error);
+    }
+
     private static E2ETestServiceProvider CreateBusyboxProvider()
     {
         var provider = new E2ETestServiceProvider();
