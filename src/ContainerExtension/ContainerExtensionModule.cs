@@ -529,7 +529,10 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
                   new TextBoxSetting($"Container Image for {globalTool.Name}", "", PerToolImageFallback(toolService.GetStrategyConfiguration(globalTool.Key)))
                   {
                       HoverDescription = $"Overrides the image shown as placeholder when '{globalTool.Name}' is executed via Docker.",
-                      Validator = ImageFormatValidatorAllowEmpty
+                      Validator = ImageFormatValidatorAllowEmpty,
+                      // OneWare sorts a settings page by priority, and the strategy choice it adds for each tool
+                      // keeps the default 0, so the image fields stay below all of them, however late a tool registers.
+                      Priority = 1
                   }
                 );
             }
