@@ -2,7 +2,9 @@
 
 ## Execution Telemetry
 
-Every containerized tool execution is recorded as a JSON Lines entry in `~/.oneware/container_telemetry.jsonl`.
+Containerized tool executions are recorded as JSON Lines entries in `~/.oneware/container_telemetry.jsonl`. The
+**Log Level** setting decides which: at the default `Errors Only`, a run that fails, reports an error or is
+cancelled; at `Info` and `Verbose`, every run; at `Off`, none.
 
 ### Entry Format
 
