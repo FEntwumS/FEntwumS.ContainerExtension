@@ -9,12 +9,14 @@ or requiring a host toolchain install.
   is not root-owned; on rootless runtimes, where `--user` is omitted, the image's `oneware` user applies.
   `tini` runs as PID 1 to reap children and forward signals.
 - **Hybrid execution:** runs GHDL, Yosys, nextpnr, gmpack, Icarus, Verilator, and SymbiYosys in a
-  container, with path and script mapping; falls back to a host-native tool when the daemon is offline.
+  container, with path and script mapping; with Allow Native Fallback turned on, runs the host's own tool
+  when the daemon is offline.
 - **Multi-runtime detection:** detects Docker, Podman, Colima, and OrbStack, with retry.
 - **Execution telemetry:** JSON Lines log with statistics, export, image-digest pinning, and a
   per-execution "copy docker run" command.
 - **Docker dashboard:** live container, image, and daemon status.
-- **Orphan cleanup:** dangling containers are removed on IDE shutdown or crash.
+- **Orphan cleanup:** running containers are stopped when the IDE closes; stopped ones left behind,
+  for instance by a crash, are removed at the next start.
 - **Supply chain:** digest-pinned base image and a checksum-verified toolchain archive, SBOM and OIDC build attestations on releases, CodeQL and
   Trivy scans in CI.
 
