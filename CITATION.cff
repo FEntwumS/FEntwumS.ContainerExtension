@@ -10,8 +10,7 @@ authors:
   - family-names: Torun
     given-names: Mert
     email: info@mtorun0x7cd.com
-    website: "https://mtorun0x7cd.com"
-    affiliation: TH Köln – University of Applied Sciences
+    affiliation: Technische Hochschule Köln
 date-released: "2026-10-05"
 version: "1.1.2"
 license: MIT
@@ -38,6 +37,14 @@ references:
       - family-names: Torun
         given-names: Mert
     institution:
-      name: TH Köln – University of Applied Sciences
+      name: Technische Hochschule Köln
     year: 2026
-    thesis-type: "Master's Thesis"
+    date-published: "2026-09-15"
+    thesis-type: "Master's thesis"
+    doi: 10.57683/EPUB-3597
+    url: "https://doi.org/10.57683/EPUB-3597"
+    identifiers:
+      - type: other
+        value: "urn:nbn:de:hbz:832-epub4-35974"
+        description: URN
+    license: CC-BY-4.0
