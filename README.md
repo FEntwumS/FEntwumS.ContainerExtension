@@ -7,8 +7,8 @@
 A [OneWare Studio](https://github.com/one-ware/OneWare) plugin that runs FPGA toolchains (GHDL, Yosys,
 nextpnr, gmpack, Icarus, Verilator, SymbiYosys) inside containers without changing the user's workflow.
 It plugs into OneWare's pluggable tool-execution strategy, maps the project into a container, runs the
-unmodified tool, and streams output back to the IDE, so a build behaves identically across machines with
-no host toolchain install.
+tool there with its paths mapped into the container, and streams output back to the IDE, so a build
+behaves identically across machines with no host toolchain install.
 
 Developed as part of the Master's thesis *Design and Implementation of a Modular Architecture for the
 Transparent Integration of Containerized Execution Environments for Heterogeneous Open-Source Binaries in
@@ -62,8 +62,8 @@ flowchart TD
     A[OneWare runs an FPGA tool] -->|dispatches to the selected<br/>IToolExecutionStrategy| B[DockerExecutionStrategy]
     B --> C{Container engine<br/>reachable?}
     C -->|yes| D[Resolve image<br/>env var → per-call → per-tool →<br/>plugin → default → built-in fallback]
-    D --> E[Map project into /workspace<br/>inject host UID/GID<br/>cap-drop ALL · no-new-privileges<br/>PID cap]
-    E --> F[Run the unmodified tool<br/>in the container<br/>tini as PID 1 · non-root host UID/GID]
+    D --> E[Map project into /workspace<br/>host UID/GID via --user,<br/>not on Windows or rootless<br/>cap-drop ALL · no-new-privileges<br/>PID cap]
+    E --> F[Run the tool<br/>in the container<br/>tini as PID 1]
     C -->|no, native fallback enabled| G[Run the tool<br/>from the host PATH]
     C -->|no, fallback disabled| H[Fail: daemon<br/>unreachable]
     F --> I[Stream stdout/stderr to the IDE<br/>same working dir and exit code]
@@ -73,9 +73,9 @@ flowchart TD
 
 - **Containerized (opt-in per tool):** each tool's *Execution Strategy* setting defaults to native; selecting
   the Docker strategy routes that tool through a container, which pulls and runs the toolchain image, pinning
-  the container process to the host UID/GID via `--user` so output files are not root-owned (on rootless
-  runtimes the image's `oneware` user applies instead). `tini` runs as PID 1 to reap children and forward
-  signals.
+  the container process to the host UID/GID via `--user` so output files are not root-owned. On rootless
+  runtimes and on Windows hosts `--user` is left out and the image's default user applies, `oneware` in the
+  toolchain image. `tini` runs as PID 1 to reap children and forward signals.
 - **Native fallback:** if the daemon is unreachable and `Allow Native Fallback` is enabled, the tool is
   located on the host `PATH` and run natively so work is not blocked.
 - **Telemetry:** execution records are written as JSON Lines with a configurable level (`Off`,
@@ -83,7 +83,8 @@ flowchart TD
 
 ## Security
 
-- Non-root container execution with host UID/GID injection; `tini` as PID 1. The default
+- Containers run as the host UID/GID via `--user`, except on rootless runtimes and Windows hosts, where
+  the image's default user applies (`oneware` in the toolchain image); `tini` as PID 1. The default
   (non-privileged) path drops all capabilities (`--cap-drop=ALL`), forbids privilege escalation
   (`--security-opt no-new-privileges`), and caps the task count as a fork-bomb backstop.
 - Host paths that escape the mounted workspace are remapped to an in-workspace sentinel rather than

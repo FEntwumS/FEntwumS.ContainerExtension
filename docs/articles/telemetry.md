@@ -117,7 +117,6 @@ Use the **Copy Docker Run** feature:
 docker run --rm \
   -v /path/to/project:/workspace \
   -w /workspace \
-  --platform linux/amd64 \
   hdlc/ghdl:yosys \
   ghdl -a --std=08 test.vhd
 ```

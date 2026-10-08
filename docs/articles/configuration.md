@@ -1,6 +1,6 @@
 # Configuration Guide
 
-All settings are registered under **Binary Management -> Container Engine** in OneWare Studio's settings panel.
+The extension's settings are under **Binary Management > Container Engine** in OneWare Studio's settings (**Extras > Settings**). The settings of each tool, its execution strategy and its container image, are under **Binary Management > Execution Strategy**.
 
 ## Settings Reference
 
@@ -8,7 +8,7 @@ All settings are registered under **Binary Management -> Container Engine** in O
 
 | Setting | Type | Default | Description |
 | ------- | ---- | ------- | ----------- |
-| Container Runtime Path | File Path | *(auto-detect)* | Absolute path to `docker` or `podman` CLI. Leave empty for auto-detection |
+| Container Runtime Path | File Path | *(empty)* | Absolute path to the `docker` or `podman` CLI that the dashboard's terminal commands and the copied `docker run` commands use; empty means `docker` from the `PATH`. Runs do not use it: they reach the daemon through its socket or pipe |
 | Custom Daemon Socket | Text (validated) | *(auto-detect)* | Override `DOCKER_HOST`. Accepts `unix://`, `tcp://`, `npipe://` |
 
 ### Image Management
@@ -16,7 +16,7 @@ All settings are registered under **Binary Management -> Container Engine** in O
 | Setting | Type | Default | Description |
 | ------- | ---- | ------- | ----------- |
 | Default Toolchain Image | Text (validated) | `fentwums/oss-cad-suite:latest` | Default image for all tools — the project's full-flow image (build-only; produce it via Build Local Image) |
-| Image Platform | ComboBox | *(auto)* | Force platform (e.g., `linux/amd64` on Apple Silicon) |
+| Image Platform | ComboBox | *(auto)* | Platform to pull images for (e.g., `linux/amd64` on Apple Silicon). It applies to pulls only; a container is created from the image as it was pulled |
 | Image Pull Policy | ComboBox | `if-not-present` | When to pull: `always`, `if-not-present`, `never` |
 
 > [!TIP]
@@ -61,7 +61,7 @@ All settings are registered under **Binary Management -> Container Engine** in O
 
 ## Per-Tool Image Overrides
 
-Each tool registered in OneWare Studio gets its own image override setting, dynamically created as `ContainerImage_{toolName}`. This allows using different images for different tools:
+Each tool registered in OneWare Studio gets its own image override setting, dynamically created as `ContainerImage_{toolName}` and shown as **Container Image for {tool}** under **Binary Management > Execution Strategy**. This allows using different images for different tools:
 
 ```text
 ContainerImage_ghdl          -> fentwums/oss-cad-suite:latest
