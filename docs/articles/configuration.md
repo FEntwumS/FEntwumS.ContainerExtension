@@ -16,7 +16,7 @@ The extension's settings are under **Binary Management > Container Engine** in O
 | Setting | Type | Default | Description |
 | ------- | ---- | ------- | ----------- |
 | Default Toolchain Image | Text (validated) | `fentwums/oss-cad-suite:latest` | Default image for all tools — the project's full-flow image (build-only; produce it via Build Local Image) |
-| Image Platform | ComboBox | *(auto)* | Force platform (e.g., `linux/amd64` on Apple Silicon) |
+| Image Platform | ComboBox | *(auto)* | Platform to pull images for (e.g., `linux/amd64` on Apple Silicon). It applies to pulls only; a container is created from the image as it was pulled |
 | Image Pull Policy | ComboBox | `if-not-present` | When to pull: `always`, `if-not-present`, `never` |
 
 > [!TIP]
