@@ -25,8 +25,10 @@ or requiring a host toolchain install.
 1. Install via Extras > Extensions in OneWare Studio. On OneWare Studio before 1.0.43, restart it once
    so that the Container Dashboard's tab and menu entry appear.
 2. Ensure a container engine (Docker, Podman, OrbStack, or Colima) is running.
-3. Open Settings > Binary Management > Container Engine to configure.
-4. Select the container execution strategy for any tool.
+3. Build the toolchain image once: open View > Tool Windows > Container Dashboard, choose Build Local
+   Image and click Build. The image is on no registry, so no pull can fetch it.
+4. Open Settings > Binary Management > Container Engine to configure.
+5. Select the container execution strategy for any tool.
 
 Developed by Mert Torun as part of a Master's thesis at TH Köln (2026), openly available at
 [https://doi.org/10.57683/EPUB-3597](https://doi.org/10.57683/EPUB-3597).
