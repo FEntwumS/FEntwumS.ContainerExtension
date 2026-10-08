@@ -97,31 +97,12 @@ internal static class GitHubReleaseClient
     // A release JSON is a few hundred KB even for the list endpoint; cap the buffered body well above that
     // so a hostile or misbehaving endpoint cannot force unbounded allocation during deserialization (a
     // small compressed payload that decompresses huge is bounded here too, since the loop caps the
-    // decompressed byte count). Mirrors RegistryClient.ReadCappedAsync.
+    // decompressed byte count).
     private const long MaxResponseBytes = 8 * 1024 * 1024;
 
-    private static async Task<Stream> ReadCappedAsync(HttpResponseMessage response, CancellationToken ct)
-    {
-        if (response.Content.Headers.ContentLength is > MaxResponseBytes)
-        {
-            throw new InvalidOperationException("GitHub response exceeds the maximum allowed size.");
-        }
-        using var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        var buffer = new MemoryStream();
-        var chunk = new byte[81920];
-        int read;
-        while ((read = await source.ReadAsync(chunk, ct).ConfigureAwait(false)) > 0)
-        {
-            if (buffer.Length + read > MaxResponseBytes)
-            {
-                await buffer.DisposeAsync().ConfigureAwait(false);
-                throw new InvalidOperationException("GitHub response exceeds the maximum allowed size.");
-            }
-            await buffer.WriteAsync(chunk.AsMemory(0, read), ct).ConfigureAwait(false);
-        }
-        buffer.Position = 0;
-        return buffer;
-    }
+    private static Task<Stream> ReadCappedAsync(HttpResponseMessage response, CancellationToken ct)
+        => CappedHttpResponse.ReadAsync(response, MaxResponseBytes,
+            () => new InvalidOperationException("GitHub response exceeds the maximum allowed size."), ct);
 
     public static async Task<string?> GetLatestReleaseTagAsync(CancellationToken ct)
     {
@@ -131,7 +112,7 @@ internal static class GitHubReleaseClient
 
         try
         {
-            using var response = await client.SendAsync(request, ct).ConfigureAwait(false);
+            using var response = await CappedHttpResponse.SendAsync(client, request, ct).ConfigureAwait(false);
             ThrowIfRateLimited(response);
             // Surface a missing repository/release distinctly; otherwise the HttpRequestException
             // from EnsureSuccessStatusCode is rewrapped by Translate as a generic connectivity failure.
@@ -173,7 +154,7 @@ internal static class GitHubReleaseClient
 
         try
         {
-            using var response = await client.SendAsync(request, ct).ConfigureAwait(false);
+            using var response = await CappedHttpResponse.SendAsync(client, request, ct).ConfigureAwait(false);
             ThrowIfRateLimited(response);
             response.EnsureSuccessStatusCode();
 
@@ -216,7 +197,7 @@ internal static class GitHubReleaseClient
 
         try
         {
-            using var response = await client.SendAsync(request, ct).ConfigureAwait(false);
+            using var response = await CappedHttpResponse.SendAsync(client, request, ct).ConfigureAwait(false);
             ThrowIfRateLimited(response);
             response.EnsureSuccessStatusCode();
 
