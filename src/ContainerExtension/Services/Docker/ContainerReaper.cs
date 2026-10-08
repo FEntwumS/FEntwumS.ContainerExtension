@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Docker.DotNet;
 using Docker.DotNet.Models;
+using OneWare.Essentials.Services;
 
 namespace ContainerExtension.Services.Docker;
 
@@ -141,6 +143,53 @@ internal static class ContainerReaper
         catch (Exception)
         {
             // Best effort per container
+        }
+    }
+
+    /// <summary>
+    /// Removes, at startup, the stopped containers that an earlier session left behind: every exited, dead or
+    /// created container whose name starts with the Container Name Prefix. A failure to remove one is recorded
+    /// and the sweep goes on; a cancellation ends it.
+    /// </summary>
+    internal static async Task ReapLeftoverContainersAsync(IContainerOperations containers, ISettingsService? settings, CancellationToken ct)
+    {
+        var prefix = settings.SafeGetSetting(ContainerExtensionModule.ContainerNamePrefixSetting, (string?)null);
+        if (string.IsNullOrWhiteSpace(prefix))
+        {
+            return;
+        }
+
+        var leftovers = await containers.ListContainersAsync(new ContainersListParameters
+        {
+            All = true,
+            Filters = new Dictionary<string, IDictionary<string, bool>>(StringComparer.Ordinal)
+            {
+                { "name", new Dictionary<string, bool>(StringComparer.Ordinal) { { prefix, true } } },
+                { "status", new Dictionary<string, bool>(StringComparer.Ordinal) { { "exited", true }, { "dead", true }, { "created", true } } },
+            },
+        }, ct).ConfigureAwait(false);
+        if (leftovers == null)
+        {
+            return;
+        }
+
+        foreach (var container in leftovers)
+        {
+            if (container == null || string.IsNullOrEmpty(container.ID)) continue;
+            var matchesPrefix = container.Names != null && container.Names.Any(n =>
+                n != null && (n.StartsWith(prefix, StringComparison.Ordinal) ||
+                             n.StartsWith($"/{prefix}", StringComparison.Ordinal)));
+            if (!matchesPrefix) continue;
+            var names = container.Names != null ? string.Join(", ", container.Names) : container.ID;
+            try
+            {
+                await containers.RemoveContainerAsync(container.ID, new ContainerRemoveParameters { Force = true }, ct).ConfigureAwait(false);
+                await Console.Out.WriteLineAsync($"[ContainerExtension] Reaped dangling container: {names}").ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                ContainerTelemetry.TrackError("ContainerExtensionModule", $"Failed to reap container {names}", ex);
+            }
         }
     }
 }

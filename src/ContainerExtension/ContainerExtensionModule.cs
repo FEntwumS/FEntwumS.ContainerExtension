@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls.Templates;
+using ContainerExtension.Services.Docker;
 using ContainerExtension.ViewModels;
 using ContainerExtension.Views;
 using Microsoft.Extensions.DependencyInjection;
@@ -433,42 +434,9 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
 
                 try
                 {
-                    var prefix = settingsService.SafeGetSetting(ContainerNamePrefixSetting, (string?)null);
-                    if (!string.IsNullOrWhiteSpace(prefix) && dockerStrategy.Client?.Containers != null)
+                    if (dockerStrategy.Client?.Containers != null)
                     {
-                        var containersToPrune = await dockerStrategy.Client.Containers.ListContainersAsync(
-                      new Docker.DotNet.Models.ContainersListParameters
-                      {
-                          All = true,
-                          Filters = new Dictionary<string, IDictionary<string, bool>>(StringComparer.Ordinal)
-                    {
-                  { "name", new Dictionary<string, bool>(StringComparer.Ordinal) { { prefix, true } } },
-                  { "status", new Dictionary<string, bool>(StringComparer.Ordinal) { { "exited", true }, { "dead", true }, { "created", true } } }
-                    }
-                      }, ct).ConfigureAwait(false);
-
-                        if (containersToPrune != null)
-                        {
-                            foreach (var container in containersToPrune)
-                            {
-                                if (container == null || string.IsNullOrEmpty(container.ID)) continue;
-                                var matchesPrefix = container.Names != null && container.Names.Any(n =>
-                                    n != null && (n.StartsWith(prefix, StringComparison.Ordinal) ||
-                                                 n.StartsWith($"/{prefix}", StringComparison.Ordinal)));
-                                if (!matchesPrefix) continue;
-                                var names = container.Names != null ? string.Join(", ", container.Names) : container.ID;
-                                try
-                                {
-                                    await dockerStrategy.Client.Containers.RemoveContainerAsync(container.ID, new Docker.DotNet.Models.ContainerRemoveParameters { Force = true }, ct).ConfigureAwait(false);
-                                    await Console.Out.WriteLineAsync($"[ContainerExtension] Reaped dangling container: {names}").ConfigureAwait(false);
-                                }
-                                catch (Exception ex)
-                                {
-                                    if (ct.IsCancellationRequested) return;
-                                    ContainerTelemetry.TrackError("ContainerExtensionModule", $"Failed to reap container {names}", ex);
-                                }
-                            }
-                        }
+                        await ContainerReaper.ReapLeftoverContainersAsync(dockerStrategy.Client.Containers, settingsService, ct).ConfigureAwait(false);
                     }
                 }
                 catch (Exception ex)
