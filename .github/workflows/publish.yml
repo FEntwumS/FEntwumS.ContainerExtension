@@ -63,6 +63,9 @@ jobs:
           path: ./publish
           format: spdx-json
           output-file: publish/sbom.spdx.json
+          # The release step below attaches publish/sbom.spdx.json. The action's own release upload
+          # would fetch its workflow artifact back and attach the same SBOM again under another name.
+          upload-release-assets: false
 
       # zip ships on the runner. Shelling out keeps a third-party action out of the release job,
       # which is the one holding contents, id-token and attestations write. The version travels via
