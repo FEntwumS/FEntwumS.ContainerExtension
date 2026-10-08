@@ -1,6 +1,6 @@
 # Configuration Guide
 
-All settings are registered under **Binary Management -> Container Engine** in OneWare Studio's settings panel.
+The extension's settings are under **Binary Management > Container Engine** in OneWare Studio's settings (**Extras > Settings**). The settings of each tool, its execution strategy and its container image, are under **Binary Management > Execution Strategy**.
 
 ## Settings Reference
 
@@ -61,7 +61,7 @@ All settings are registered under **Binary Management -> Container Engine** in O
 
 ## Per-Tool Image Overrides
 
-Each tool registered in OneWare Studio gets its own image override setting, dynamically created as `ContainerImage_{toolName}`. This allows using different images for different tools:
+Each tool registered in OneWare Studio gets its own image override setting, dynamically created as `ContainerImage_{toolName}` and shown as **Container Image for {tool}** under **Binary Management > Execution Strategy**. This allows using different images for different tools:
 
 ```text
 ContainerImage_ghdl          -> fentwums/oss-cad-suite:latest
