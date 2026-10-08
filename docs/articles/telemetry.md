@@ -124,15 +124,17 @@ docker run --rm \
 
 ### Orphan Containers After IDE Crash
 
-The extension automatically cleans up dangling containers when the IDE process exits (via `AppDomain.ProcessExit` hook). If containers remain:
+The extension automatically cleans up dangling containers when the IDE process exits (via `AppDomain.ProcessExit` hook). After a crash, with **Auto-Remove Containers** on, it removes the stopped containers that remain at its next start. It removes only its own: every container it creates carries the label `io.github.fentwums.container-extension=true`, and the name must start with the **Container Name Prefix**. To find or remove them by hand:
 
 ```bash
-# List containers with the extension's prefix
-docker ps -a --filter name=containerextension-
+# List the extension's containers
+docker ps -a --filter label=io.github.fentwums.container-extension=true
 
 # Remove them
-docker rm -f $(docker ps -aq --filter name=containerextension-)
+docker rm -f $(docker ps -aq --filter label=io.github.fentwums.container-extension=true)
 ```
+
+Containers of versions before 1.1.5 carry no label; list them by the prefix with `docker ps -a --filter name=containerextension-`, which also matches containers of other tools whose name contains it.
 
 ## Data protection
 

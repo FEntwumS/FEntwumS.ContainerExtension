@@ -790,6 +790,10 @@ internal static class DockerCommandBuilder
             sdkLog(command, $"[Docker SDK] Configured {command.PortMappings.Count} port mapping(s).");
         }
 
+        // Set last, so that no label from Extra Container Labels can drop or change it.
+        createParams.Labels ??= new Dictionary<string, string>(StringComparer.Ordinal);
+        createParams.Labels[ContainerExtensionModule.ContainerOwnerLabel] = "true";
+
         return createParams;
     }
 
