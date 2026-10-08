@@ -37,7 +37,7 @@ All settings are registered under **Binary Management -> Container Engine** in O
 
 | Setting | Type | Default | Description |
 | ------- | ---- | ------- | ----------- |
-| Auto-Remove Containers | CheckBox | On | Remove containers after execution |
+| Auto-Remove Containers | CheckBox | On | Remove containers after execution, and at the next start the stopped ones a crashed session left behind |
 | Network Mode | ComboBox | `bridge` | Docker network mode: `bridge`, `host`, `none` |
 | Container Name Prefix | Text | `containerextension-` | Prefix for generated container names |
 | Extra Container Labels | Text | *(empty)* | Space-separated `key=value` container labels for filtering |
