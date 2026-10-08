@@ -71,6 +71,15 @@ internal static partial class DockerConnectionFactory
                         uriText = "npipe://./pipe/" + uriText[@"\\.\pipe\".Length..].Replace('\\', '/');
                     }
 
+                    // Docker's own default address for the Windows pipe has four slashes,
+                    // npipe:////./pipe/docker_engine. The URI parser reads that form as an empty host and the
+                    // path //pipe/<name>, which Docker.DotNet rejects as no npipe URI, so creating the client
+                    // failed. Rewrite it to the npipe://./pipe/<name> form.
+                    if (uriText.StartsWith("npipe:////", StringComparison.OrdinalIgnoreCase))
+                    {
+                        uriText = "npipe://" + uriText["npipe:////".Length..];
+                    }
+
                     uri = new Uri(uriText);
                     if (uri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase))
                     {
