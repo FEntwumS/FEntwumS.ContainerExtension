@@ -148,11 +148,17 @@ internal static class ContainerReaper
 
     /// <summary>
     /// Removes, at startup, the stopped containers that an earlier session left behind: every exited, dead or
-    /// created container whose name starts with the Container Name Prefix. A failure to remove one is recorded
-    /// and the sweep goes on; a cancellation ends it.
+    /// created container whose name starts with the Container Name Prefix. With Auto-Remove off the user keeps
+    /// stopped containers on purpose, so nothing is removed. A failure to remove one is recorded and the sweep
+    /// goes on; a cancellation ends it.
     /// </summary>
     internal static async Task ReapLeftoverContainersAsync(IContainerOperations containers, ISettingsService? settings, CancellationToken ct)
     {
+        if (!settings.SafeGetSetting(ContainerExtensionModule.AutoRemoveSetting, true))
+        {
+            return;
+        }
+
         var prefix = settings.SafeGetSetting(ContainerExtensionModule.ContainerNamePrefixSetting, (string?)null);
         if (string.IsNullOrWhiteSpace(prefix))
         {

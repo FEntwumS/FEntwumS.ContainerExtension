@@ -35,6 +35,21 @@ public sealed class LeftoverContainerSweepTests
         Assert.Equal(new[] { "created", "dead", "exited" }, query.Filters["status"].Keys.Order(StringComparer.Ordinal));
     }
 
+    [Fact]
+    public async Task ReapLeftoverContainers_WithAutoRemoveOff_LeavesEveryContainer()
+    {
+        var settings = new MockSettingsService();
+        settings.SetSettingValue(ContainerExtensionModule.AutoRemoveSetting, false);
+        var operations = RecordingContainerOperations.Create(
+            Container("a1", "/containerextension-ghdl-120000000-1-abcd1234"));
+
+        await ContainerReaper.ReapLeftoverContainersAsync(operations, settings, TestContext.Current.CancellationToken);
+
+        var recorder = RecordingContainerOperations.Of(operations);
+        Assert.Empty(recorder.Removed);
+        Assert.Empty(recorder.Queries);
+    }
+
     private static ContainerListResponse Container(string id, string name)
         => new() { ID = id, Names = [name], Labels = new Dictionary<string, string>(StringComparer.Ordinal) };
 }
