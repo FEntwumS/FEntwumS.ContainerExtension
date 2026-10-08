@@ -223,10 +223,7 @@ internal static partial class DockerConnectionFactory
         }
         catch (Exception ex)
         {
-            var isOffline = ex is OperationCanceledException or System.Net.Sockets.SocketException ||
-                            ex.InnerException is System.Net.Sockets.SocketException ||
-                            (ex is HttpRequestException httpEx && (httpEx.InnerException is System.Net.Sockets.SocketException || httpEx.Message.Contains("connection refused", StringComparison.OrdinalIgnoreCase)));
-            if (!isOffline)
+            if (!IsDaemonOffline(ex))
             {
                 ContainerTelemetry.TrackError("DockerExecutionStrategy", "API version negotiation failed; falling back to 1.45", ex);
             }
@@ -238,4 +235,12 @@ internal static partial class DockerConnectionFactory
         }
         return apiVersion;
     }
+
+    // Whether a failed request shows only that no daemon answers, which is no error worth recording: a timeout
+    // or cancellation, a refused or missing socket, or a named pipe that nobody serves, whose connect gives up
+    // with a TimeoutException.
+    internal static bool IsDaemonOffline(Exception ex) =>
+        ex is OperationCanceledException or TimeoutException or System.Net.Sockets.SocketException ||
+        ex.InnerException is System.Net.Sockets.SocketException ||
+        (ex is HttpRequestException httpEx && (httpEx.InnerException is System.Net.Sockets.SocketException || httpEx.Message.Contains("connection refused", StringComparison.OrdinalIgnoreCase)));
 }

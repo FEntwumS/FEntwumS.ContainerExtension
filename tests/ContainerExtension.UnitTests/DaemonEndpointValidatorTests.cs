@@ -82,4 +82,21 @@ public sealed class DaemonEndpointValidatorTests
 
         await Assert.ThrowsAsync<TimeoutException>(() => client.System.PingAsync(cancellation.Token));
     }
+
+    [Fact]
+    public async Task SecureNamedPipeCredentials_PipeNobodyServes_ReadsAsAnOfflineDaemon()
+    {
+        // The API version negotiation records an error unless a failure reads as an offline daemon. A pipe that
+        // nobody serves is the offline daemon of a Windows host, so its failure must read so.
+        var endpoint = new Uri($"npipe://./pipe/missing-{Guid.NewGuid():N}");
+        using var configuration = new DockerClientConfiguration(endpoint, new DaemonEndpointValidator.SecureNamedPipeCredentials(endpoint));
+        using var client = configuration.CreateClient();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        cancellation.CancelAfter(TimeSpan.FromSeconds(5));
+
+        var failure = await Record.ExceptionAsync(() => client.System.GetVersionAsync(cancellation.Token));
+
+        Assert.NotNull(failure);
+        Assert.True(DockerConnectionFactory.IsDaemonOffline(failure), $"{failure.GetType()} should read as an offline daemon");
+    }
 }
