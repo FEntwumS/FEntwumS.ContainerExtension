@@ -39,6 +39,19 @@ internal sealed class ContainerRunner
         _daemonUri = daemonUri;
     }
 
+    /// <summary>
+    /// Whether a run pulls its image under the given pull policy. A build-only image is on no registry, so it is
+    /// never pulled, whatever the policy: a pull could only fail, or fetch an image that someone else has
+    /// published under that name.
+    /// </summary>
+    internal static bool ShouldPull(string image, string pullPolicy, bool imageExistsLocally) =>
+        !ContainerExtensionModule.IsBuildOnlyImage(image) && pullPolicy switch
+        {
+            "always" => true,
+            "never" => false,
+            _ => !imageExistsLocally
+        };
+
     internal async Task<string?> EnsureImageAsync(string image, ToolCommand command, CancellationToken ct)
     {
         string? imageDigest = null;
@@ -57,12 +70,12 @@ internal sealed class ContainerRunner
             imageExistsLocally = false;
         }
 
-        bool shouldPull = pullPolicy switch
+        bool shouldPull = ShouldPull(image, pullPolicy, imageExistsLocally);
+
+        if (!imageExistsLocally && ContainerExtensionModule.IsBuildOnlyImage(image))
         {
-            "always" => true,
-            "never" => false,
-            _ => !imageExistsLocally
-        };
+            throw new InvalidOperationException($"Image '{image}' not found locally; it is built, not pulled.");
+        }
 
         if (!imageExistsLocally && string.Equals(pullPolicy, "never", StringComparison.Ordinal))
         {

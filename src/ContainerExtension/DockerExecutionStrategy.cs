@@ -223,6 +223,12 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         }
         catch (DockerApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound) { /* Image not found locally, proceed to pull */ }
 
+        // A build-only image is on no registry, so there is nothing to pull (see ContainerRunner.ShouldPull).
+        if (ContainerExtensionModule.IsBuildOnlyImage(image))
+        {
+            return;
+        }
+
         var platform = _settingsService.SafeGetSetting<string>(ContainerExtensionModule.PlatformSetting, "auto")?.Trim();
         var pullParams = new ImagesCreateParameters { FromImage = image };
         if (!string.IsNullOrWhiteSpace(platform) && !string.Equals(platform, "auto", StringComparison.OrdinalIgnoreCase))

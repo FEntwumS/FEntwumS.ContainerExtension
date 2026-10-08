@@ -242,6 +242,19 @@ public sealed class ContainerExtensionTests : IDisposable
     }
 
     [Theory]
+    [InlineData(ContainerExtensionModule.OssCadSuiteImage, "if-not-present", false, false)]
+    [InlineData(ContainerExtensionModule.OssCadSuiteImage, "always", true, false)]
+    [InlineData("fentwums/oss-cad-suite:local", "always", false, false)]
+    [InlineData(ContainerExtensionModule.FallbackImage, "if-not-present", false, true)]
+    [InlineData(ContainerExtensionModule.FallbackImage, "if-not-present", true, false)]
+    [InlineData(ContainerExtensionModule.FallbackImage, "always", true, true)]
+    [InlineData(ContainerExtensionModule.FallbackImage, "never", false, false)]
+    public void ShouldPull_NeverPullsTheBuildOnlyToolchainImage(string image, string pullPolicy, bool existsLocally, bool pulls)
+    {
+        Assert.Equal(pulls, ContainerRunner.ShouldPull(image, pullPolicy, existsLocally));
+    }
+
+    [Theory]
     [InlineData("containerextension-", true)]
     [InlineData("my.prefix", true)]
     [InlineData("test_prefix", true)]
