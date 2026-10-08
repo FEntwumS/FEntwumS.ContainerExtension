@@ -4,6 +4,33 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2026-10-08
+
+Never pulls the locally built toolchain image from a registry, builds the pinned toolchain image under
+the default image's name and asks for it before the first containerized run, mounts the project
+writable for SymbiYosys, keeps the labels of the README's execution model diagram whole at every zoom,
+and corrects several statements of the documentation. OneWare Studio 1.0.40 or later is still required.
+
+### Fixed
+
+- The toolchain image `fentwums/oss-cad-suite`, which is built locally and published on no registry, is never pulled, whatever the pull policy. Before, a run whose copy was missing, and the pre-pull at every start, asked Docker Hub for it and failed, and under the pull policy `always` a run asked for it even when a locally built copy was there. A run whose copy is missing now fails with the hint to build it with Build Local Image.
+- Build Local Image builds the pinned version as `fentwums/oss-cad-suite:latest`, the image the Default Toolchain Image names out of the box, so Build alone lets a fresh host run its tools. Before, it built `fentwums/oss-cad-suite:local`, and the first run kept failing with the hint to build the image until Build & Set Default was used. A dated release is still built as `fentwums/oss-cad-suite:local`.
+- SymbiYosys gets the project mounted writable, so `sby` can create its work directory. Before, the mount was read-only unless the path to `sby` happened to match the name of another tool, and `sby -f Blink.sby` failed with "Read-only file system".
+
+### Changed
+
+- The toolchain image is built on a new digest of the Ubuntu base image, and Dependabot applies its default labels to its pull requests.
+
+### Tests
+
+- New tests cover the pull decision for the build-only image, a run whose build-only image is missing and the pre-pull of one, and the writable mount for `sby`; the SymbiYosys Docker tests call `sby` by its own name.
+
+### Documentation
+
+- The README's diagram of the execution model breaks its labels itself, so GitHub no longer cuts them off in Safari at page zooms such as 85% and 115%, and it names all six sources of the image in their order.
+- The package description, the README and the getting-started guide ask to build the toolchain image once before the first containerized run, and the guide no longer says that the extension pulls it.
+- The configuration and telemetry guides say which runs the telemetry records at each log level, what Allow Privileged Containers does, and that `ONEWARE_DOCKER_IMAGE` takes effect in the environment of OneWare Studio rather than in a `.env` file. The package description says that the native fallback is opt-in and how containers are cleaned up.
+
 ## [1.1.3] - 2026-10-07
 
 Creates the per-tool image setting of a tool registered after startup as soon as the tool registers,
