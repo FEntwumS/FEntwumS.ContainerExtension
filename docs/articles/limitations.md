@@ -23,12 +23,13 @@ only. On an Apple Silicon (arm64) host the container therefore runs under the da
 emulation layer (qemu via Rosetta/`binfmt`).
 
 The integration layer accommodates this through the **Image Platform** setting
-(`ContainerExtensionModule.PlatformSetting`, default `auto`), which is forwarded to both the pull and
-the run path. When set, it is attached to `ImagesCreateParameters.Platform` and to `--platform`
-on the reconstructed run command (`DockerExecutionStrategy.cs`); the pull path additionally retries
-without an explicit platform if the platform-pinned pull fails, falling back to the host
-architecture. The configuration guide documents setting **Image Platform** to `linux/amd64` on Apple
-Silicon for exactly this reason.
+(`ContainerExtensionModule.PlatformSetting`, default `auto`), which applies to pulls. When set, it is
+attached to `ImagesCreateParameters.Platform`, and the pull retries without an explicit platform if
+the platform-pinned pull fails, falling back to the host architecture. A container is created without
+a platform of its own, from the image as it was pulled. Of the copied `docker run` commands, only the
+one that **Copy Docker Run** builds from the settings before the first run of a session carries
+`--platform`; the commands reconstructed from a run do not. The configuration guide documents setting
+**Image Platform** to `linux/amd64` on Apple Silicon for exactly this reason.
 
 Impact on the evaluation: any overhead measured on an arm64 host that runs the amd64 image is
 dominated by instruction-level emulation, which is an artifact of the image-distribution situation,

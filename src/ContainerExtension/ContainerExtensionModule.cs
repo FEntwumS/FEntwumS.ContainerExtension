@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls.Templates;
+using ContainerExtension.Services.Docker;
 using ContainerExtension.ViewModels;
 using ContainerExtension.Views;
 using Microsoft.Extensions.DependencyInjection;
@@ -50,6 +51,9 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
 
     public const string PlatformSetting = "ContainerExtension_Platform";
     public const string ContainerNamePrefixSetting = "ContainerExtension_ContainerNamePrefix";
+    // Marks every container the extension creates, so that its startup sweep removes only those. The key
+    // follows Docker's reverse-DNS convention for labels of third-party tools, on the project's GitHub domain.
+    public const string ContainerOwnerLabel = "io.github.fentwums.container-extension";
     public const string DockerBlueHex = "#2496ED";
     public const string WhaleIconPath = "M13.983 11.078h2.119a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.119a.185.185 0 00-.185.185v1.888c0 .102.083.185.185.185m-2.954-5.43h2.118a.186.186 0 00.186-.186V3.574a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m0 2.716h2.118a.187.187 0 00.186-.186V6.29a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.887c0 .102.082.185.185.185m-2.93 0h2.12a.186.186 0 00.184-.186V6.29a.185.185 0 00-.185-.185H8.1a.185.185 0 00-.185.185v1.887c0 .102.083.185.185.185m-2.964 0h2.119a.186.186 0 00.185-.186V6.29a.185.185 0 00-.185-.185H5.136a.186.186 0 00-.186.185v1.887c0 .102.084.185.186.185m5.893 2.715h2.118a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m-2.93 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.083.185.185.185m-2.964 0h2.119a.185.185 0 00.185-.185V9.006a.185.185 0 00-.184-.186h-2.12a.186.186 0 00-.186.185v1.888c0 .102.084.185.186.185m-2.92 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.082.185.185.185M23.763 9.89c-.065-.051-.672-.51-1.954-.51-.338.001-.676.03-1.01.087-.248-1.7-1.653-2.534-1.716-2.566l-.344-.199-.198.337c-.135.227-.235.467-.294.717-.221-.061-.453-.092-.686-.092h-13.8v2.32c-.006 1.764.12 3.524.375 5.27.7 4.793 4.295 7.64 9.079 7.64 5.378 0 8.017-2.732 8.783-4.529.742.062 1.488.083 2.228.064l.278-.01.096-.282c.164-.492.316-1.127.359-1.9H24l-.185-.815c-.217-.96-.45-1.916-.85-2.827l-.058-.124";
     public const string CpuLimitSetting = "ContainerExtension_CpuLimit";
@@ -433,42 +437,9 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
 
                 try
                 {
-                    var prefix = settingsService.SafeGetSetting(ContainerNamePrefixSetting, (string?)null);
-                    if (!string.IsNullOrWhiteSpace(prefix) && dockerStrategy.Client?.Containers != null)
+                    if (dockerStrategy.Client?.Containers != null)
                     {
-                        var containersToPrune = await dockerStrategy.Client.Containers.ListContainersAsync(
-                      new Docker.DotNet.Models.ContainersListParameters
-                      {
-                          All = true,
-                          Filters = new Dictionary<string, IDictionary<string, bool>>(StringComparer.Ordinal)
-                    {
-                  { "name", new Dictionary<string, bool>(StringComparer.Ordinal) { { prefix, true } } },
-                  { "status", new Dictionary<string, bool>(StringComparer.Ordinal) { { "exited", true }, { "dead", true }, { "created", true } } }
-                    }
-                      }, ct).ConfigureAwait(false);
-
-                        if (containersToPrune != null)
-                        {
-                            foreach (var container in containersToPrune)
-                            {
-                                if (container == null || string.IsNullOrEmpty(container.ID)) continue;
-                                var matchesPrefix = container.Names != null && container.Names.Any(n =>
-                                    n != null && (n.StartsWith(prefix, StringComparison.Ordinal) ||
-                                                 n.StartsWith($"/{prefix}", StringComparison.Ordinal)));
-                                if (!matchesPrefix) continue;
-                                var names = container.Names != null ? string.Join(", ", container.Names) : container.ID;
-                                try
-                                {
-                                    await dockerStrategy.Client.Containers.RemoveContainerAsync(container.ID, new Docker.DotNet.Models.ContainerRemoveParameters { Force = true }, ct).ConfigureAwait(false);
-                                    await Console.Out.WriteLineAsync($"[ContainerExtension] Reaped dangling container: {names}").ConfigureAwait(false);
-                                }
-                                catch (Exception ex)
-                                {
-                                    if (ct.IsCancellationRequested) return;
-                                    ContainerTelemetry.TrackError("ContainerExtensionModule", $"Failed to reap container {names}", ex);
-                                }
-                            }
-                        }
+                        await ContainerReaper.ReapLeftoverContainersAsync(dockerStrategy.Client.Containers, settingsService, ct).ConfigureAwait(false);
                     }
                 }
                 catch (Exception ex)

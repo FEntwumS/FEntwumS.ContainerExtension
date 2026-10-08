@@ -4,6 +4,36 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.5] - 2026-10-08
+
+Gives up after 100 ms on a Windows named pipe that nobody serves, accepts Docker's own four-slash
+address of that pipe, removes at startup only the stopped containers it created itself, stops reading
+a registry or GitHub answer at its size cap, attaches the SBOM to a release once, and corrects several
+statements of the documentation. OneWare Studio 1.0.40 or later is still required.
+
+### Fixed
+
+- On Windows, connecting to the Docker named pipe gives up after 100 ms, the default of Docker.DotNet, whose pipe opener the extension replaces with its own. Before, the extension's opener waited without a limit, so a request to a pipe that nobody serves, as when Docker Desktop is not running, waited until it timed out, after 100 s by default. The API version negotiation now treats that timeout like a refused connection, as a daemon that does not answer, and no longer records it as an error.
+- `npipe:////./pipe/docker_engine`, Docker's own default address of the Windows pipe, with four slashes, is accepted in `DOCKER_HOST` and in the Custom Daemon Socket setting. Before, Docker.DotNet rejected the four slashes, so the Docker client was not created and the extension had no connection.
+- At startup the extension removes only the stopped containers it created itself, and only with Auto-Remove Containers on. Every container it creates now carries the label `io.github.fentwums.container-extension=true`, set after the Extra Container Labels so that none of them can change it, and the startup sweep takes only containers with that label whose name starts with the Container Name Prefix. Before, it force-removed every exited, dead or created container whose name started with the prefix, also with Auto-Remove Containers off and also when another tool had created it. Containers of earlier versions carry no label and are left alone.
+- The registry and GitHub clients stop reading an answer at their cap of 8 MiB. Before, the whole answer was read into memory, decompressed, before the cap was checked, so a small compressed answer that unpacks huge was held in memory in full before it was refused.
+
+### Changed
+
+- The publish workflow attaches the SBOM to a release once, as `sbom.spdx.json`. Before, the SBOM action attached it a second time under its artifact name, as on 1.1.2 and 1.1.3; for 1.1.4 that second attach failed and stopped the workflow before the release step, so the release assets came from a run started by hand.
+
+### Tests
+
+- New tests cover the connect limit of the named-pipe opener and how its timeout is read, the four-slash pipe address, the startup sweep with its Auto-Remove check and its label filter, the label on every created container whatever the Extra Container Labels say, and the capped read; a Docker test checks that the sweep removes the extension's container and leaves one without the label.
+
+### Documentation
+
+- The configuration guide and the getting-started guide place the settings of each tool, its execution strategy and its container image, under Binary Management > Execution Strategy; the configuration guide put them under Container Engine.
+- The configuration guide says what Container Runtime Path does: empty, it means `docker` from the `PATH`, and only the dashboard's terminal commands and the copied `docker run` commands use it, while runs reach the daemon through its socket or pipe. Before, it said the path was detected automatically.
+- The README says that on Windows hosts, as on rootless runtimes, `--user` is left out and the image's default user applies, and that the paths a tool is given are mapped into the container, instead of promising an unmodified tool.
+- The configuration and limitations guides say that Image Platform applies to pulls only; the limitations guide adds that the commands reconstructed from a run carry no `--platform`, and the example command in the telemetry guide no longer shows one.
+- The configuration and telemetry guides describe the startup sweep and the label, and the commands for finding the extension's containers by hand filter by the label.
+
 ## [1.1.4] - 2026-10-08
 
 Never pulls the locally built toolchain image from a registry, builds the pinned toolchain image under

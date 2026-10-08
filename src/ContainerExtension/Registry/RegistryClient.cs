@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using ContainerExtension.Services;
 
 namespace ContainerExtension.Registry;
 
@@ -301,7 +302,7 @@ public static partial class RegistryClient
             using var reqClone = await CloneHttpRequestMessageAsync(request).ConfigureAwait(false);
             try
             {
-                var response = await HttpClient.SendAsync(reqClone, ct).ConfigureAwait(false);
+                var response = await CappedHttpResponse.SendAsync(HttpClient, reqClone, ct).ConfigureAwait(false);
                 if (attempt < maxAttempts)
                 {
                     if (response.StatusCode == (System.Net.HttpStatusCode)429)
@@ -996,28 +997,9 @@ public static partial class RegistryClient
     // only AFTER parsing, so the parse itself must be bounded).
     private const long MaxRegistryResponseBytes = 8 * 1024 * 1024;
 
-    private static async Task<Stream> ReadCappedAsync(HttpResponseMessage response, CancellationToken ct)
-    {
-        if (response.Content.Headers.ContentLength is > MaxRegistryResponseBytes)
-        {
-            throw new RegistryConnectionException("Registry response exceeds the maximum allowed size.");
-        }
-        using var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        var buffer = new MemoryStream();
-        var chunk = new byte[81920];
-        int read;
-        while ((read = await source.ReadAsync(chunk, ct).ConfigureAwait(false)) > 0)
-        {
-            if (buffer.Length + read > MaxRegistryResponseBytes)
-            {
-                await buffer.DisposeAsync().ConfigureAwait(false);
-                throw new RegistryConnectionException("Registry response exceeds the maximum allowed size.");
-            }
-            await buffer.WriteAsync(chunk.AsMemory(0, read), ct).ConfigureAwait(false);
-        }
-        buffer.Position = 0;
-        return buffer;
-    }
+    private static Task<Stream> ReadCappedAsync(HttpResponseMessage response, CancellationToken ct)
+        => CappedHttpResponse.ReadAsync(response, MaxRegistryResponseBytes,
+            () => new RegistryConnectionException("Registry response exceeds the maximum allowed size."), ct);
 
     private static string ScrubSecrets(string input)
     {

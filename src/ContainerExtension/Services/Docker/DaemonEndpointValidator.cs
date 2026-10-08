@@ -317,6 +317,13 @@ internal static partial class DaemonEndpointValidator
     [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("ReflectionAnalysis", "IL2075")]
     internal sealed class SecureNamedPipeCredentials : global::Docker.DotNet.Credentials
     {
+        /// <summary>
+        /// How long the opener waits for the pipe. Docker.DotNet's own opener, which this one replaces, honours
+        /// <see cref="global::Docker.DotNet.DockerClientConfiguration.NamedPipeConnectTimeout"/>, whose default
+        /// this is. Without a limit, a pipe that nobody serves held every request until the request timed out.
+        /// </summary>
+        internal static readonly TimeSpan ConnectTimeout = TimeSpan.FromMilliseconds(100);
+
         private readonly Uri _endpoint;
 
         public SecureNamedPipeCredentials(Uri endpoint)
@@ -392,7 +399,7 @@ internal static partial class DaemonEndpointValidator
 
             try
             {
-                await pipe.ConnectAsync(token).ConfigureAwait(false);
+                await pipe.ConnectAsync(ConnectTimeout, token).ConfigureAwait(false);
                 // Verify the server on the SAME handle that carries traffic, not just the throwaway probe
                 // in VerifyWindowsNamedPipeAsync — otherwise a squatter that lost the probe race could still
                 // win the data connection. Fail open on any ambiguity (unreadable handle/pid) to match the
