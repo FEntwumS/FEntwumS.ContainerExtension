@@ -49,13 +49,16 @@ If the search finds nothing, first add the manifest link
 ## Your First Containerized Build
 
 1. Open an FPGA project in OneWare Studio (e.g., a VHDL project)
-2. In any tool's settings, switch the **Execution Strategy** from `NativeExecutionStrategy` to `DockerExecutionStrategy` (OneWare lists the raw strategy keys)
-3. Run the tool (e.g., GHDL Analyze) - the extension will:
-   - Pull the required image if not cached locally
+2. Build the toolchain image once: in the Container Dashboard, choose **Build Local Image**, keep the pinned
+   version and click **Build**. The build runs in OneWare's terminal and produces
+   `fentwums/oss-cad-suite:latest`, the default image for all tools; it is on no registry, so no pull can fetch it
+3. In any tool's settings, switch the **Execution Strategy** from `NativeExecutionStrategy` to `DockerExecutionStrategy` (OneWare lists the raw strategy keys)
+4. Run the tool (e.g., GHDL Analyze) - the extension will:
+   - Pull the tool's image if it comes from a registry and is not cached yet
    - Mount your project directory into the container
    - Execute the tool inside the container
    - Stream output back to the IDE
-4. View execution details in the Container Dashboard's **Execution History** section
+5. View execution details in the Container Dashboard's **Execution History** section
 
 ## Dashboard Features
 

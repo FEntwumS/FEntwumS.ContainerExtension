@@ -30,7 +30,9 @@ thesis was submitted.
 
 OneWare Studio 1.0.40 or later is required; the plugin implements the tool-execution strategy interface
 that OneWare introduced in 1.0.40. A running container engine (Docker, Podman, OrbStack, or Colima) is
-required for containerized execution.
+required for containerized execution. Containerized runs use the toolchain image
+`fentwums/oss-cad-suite:latest`, which is on no registry: build it once with Build Local Image in the
+Container Dashboard, or with [`docker/build_oss_cad_suite.sh`](docker/build_oss_cad_suite.sh).
 
 ## Repository layout
 
@@ -51,17 +53,22 @@ The runtime design (the execution-strategy integration, the container lifecycle,
 The plugin coordinates execution through a hybrid strategy:
 
 ```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
 flowchart TD
-    A[OneWare runs an FPGA tool] -->|dispatches to the selected IToolExecutionStrategy| B[DockerExecutionStrategy]
-    B --> C{Container engine reachable?}
-    C -->|yes| D[Resolve image<br/>env var → per-tool → default → built-in fallback]
-    D --> E[Map project into /workspace · inject host UID/GID<br/>cap-drop ALL · no-new-privileges · PID cap]
-    E --> F[Run the unmodified tool in the container<br/>tini as PID 1 · non-root host UID/GID]
-    C -->|no, native fallback enabled| G[Run the tool from the host PATH]
-    C -->|no, fallback disabled| H[Fail: daemon unreachable]
+    A[OneWare runs an FPGA tool] -->|dispatches to the selected<br/>IToolExecutionStrategy| B[DockerExecutionStrategy]
+    B --> C{Container engine<br/>reachable?}
+    C -->|yes| D[Resolve image<br/>env var → per-call → per-tool →<br/>plugin → default → built-in fallback]
+    D --> E[Map project into /workspace<br/>inject host UID/GID<br/>cap-drop ALL · no-new-privileges<br/>PID cap]
+    E --> F[Run the unmodified tool<br/>in the container<br/>tini as PID 1 · non-root host UID/GID]
+    C -->|no, native fallback enabled| G[Run the tool<br/>from the host PATH]
+    C -->|no, fallback disabled| H[Fail: daemon<br/>unreachable]
     F --> I[Stream stdout/stderr to the IDE<br/>same working dir and exit code]
     G --> I
-    I --> J[Record JSON Lines telemetry at the configured level]
+    I --> J[Record JSON Lines telemetry<br/>at the configured level]
 ```
 
 - **Containerized (opt-in per tool):** each tool's *Execution Strategy* setting defaults to native; selecting

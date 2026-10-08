@@ -242,6 +242,19 @@ public sealed class ContainerExtensionTests : IDisposable
     }
 
     [Theory]
+    [InlineData(ContainerExtensionModule.OssCadSuiteImage, "if-not-present", false, false)]
+    [InlineData(ContainerExtensionModule.OssCadSuiteImage, "always", true, false)]
+    [InlineData("fentwums/oss-cad-suite:local", "always", false, false)]
+    [InlineData(ContainerExtensionModule.FallbackImage, "if-not-present", false, true)]
+    [InlineData(ContainerExtensionModule.FallbackImage, "if-not-present", true, false)]
+    [InlineData(ContainerExtensionModule.FallbackImage, "always", true, true)]
+    [InlineData(ContainerExtensionModule.FallbackImage, "never", false, false)]
+    public void ShouldPull_NeverPullsTheBuildOnlyToolchainImage(string image, string pullPolicy, bool existsLocally, bool pulls)
+    {
+        Assert.Equal(pulls, ContainerRunner.ShouldPull(image, pullPolicy, existsLocally));
+    }
+
+    [Theory]
     [InlineData("containerextension-", true)]
     [InlineData("my.prefix", true)]
     [InlineData("test_prefix", true)]
@@ -633,6 +646,22 @@ public sealed class ContainerExtensionTests : IDisposable
             ToolName = "vvp",
             WorkingDirectory = "/workspace/dir",
             CommandArguments = new List<ICommandArgument> { new TestCommandArgument("Verilog_Blink_tb.vvp") }
+        };
+        var param = DockerCommandBuilder.BuildContainerParameters("img", command, null!, null, null, (c, l) => { });
+        Assert.Contains(param.HostConfig.Binds, b => b.EndsWith(":/workspace", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BuildContainerParameters_BindsWorkspaceWritableForSby()
+    {
+        // SymbiYosys creates its work directory beside the .sby file, and its usual call carries no output flag
+        // that would tell so.
+        var command = new ToolCommand
+        {
+            Executable = "sby",
+            ToolName = "sby",
+            WorkingDirectory = "/workspace/dir",
+            CommandArguments = new List<ICommandArgument> { new TestCommandArgument("-f"), new TestCommandArgument("Blink.sby") }
         };
         var param = DockerCommandBuilder.BuildContainerParameters("img", command, null!, null, null, (c, l) => { });
         Assert.Contains(param.HostConfig.Binds, b => b.EndsWith(":/workspace", StringComparison.Ordinal));

@@ -469,7 +469,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
             var command = new ToolCommand
             {
-                Executable = "yosys/sby", // force read-write mount via path trick
+                Executable = "sby",
                 ToolName = "sby",
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "Blink.sby")
@@ -500,7 +500,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
             var command = new ToolCommand
             {
-                Executable = "yosys/sby", // force read-write mount via path trick
+                Executable = "sby",
                 ToolName = "sby",
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "Blink.sby")
@@ -529,7 +529,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
             var command = new ToolCommand
             {
-                Executable = "yosys/sby", // force read-write mount via path trick
+                Executable = "sby",
                 ToolName = "sby",
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "Blink.sby", "bmc")
@@ -553,7 +553,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
             var command = new ToolCommand
             {
-                Executable = "yosys/sby", // force read-write mount via path trick
+                Executable = "sby",
                 ToolName = "sby",
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "Blink.sby")
@@ -577,7 +577,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
             var command = new ToolCommand
             {
-                Executable = "yosys/sby", // force read-write mount via path trick
+                Executable = "sby",
                 ToolName = "sby",
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "Blink.sby")
@@ -1136,7 +1136,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
         var command = new ToolCommand
         {
-            Executable = "yosys/sby", // force read-write mount via path trick
+            Executable = "sby",
             ToolName = "sby",
             WorkingDirectory = Directory.GetCurrentDirectory(),
             CommandArguments = BuildArgs("-f", "missing_config.sby")
@@ -1160,7 +1160,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
             var command = new ToolCommand
             {
-                Executable = "yosys/sby", // force read-write mount via path trick
+                Executable = "sby",
                 ToolName = "sby",
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "bad.sby")
@@ -1186,7 +1186,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
             var command = new ToolCommand
             {
-                Executable = "yosys/sby", // force read-write mount via path trick
+                Executable = "sby",
                 ToolName = "sby",
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "config.sby")
@@ -1211,7 +1211,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
             var command = new ToolCommand
             {
-                Executable = "yosys/sby", // force read-write mount via path trick
+                Executable = "sby",
                 ToolName = "sby",
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "Blink.sby")
@@ -1238,7 +1238,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
             var command = new ToolCommand
             {
-                Executable = "yosys/sby", // force read-write mount via path trick
+                Executable = "sby",
                 ToolName = "sby",
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "empty.sby")
@@ -1550,7 +1550,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
             var command = new ToolCommand
             {
-                Executable = "yosys/sby", // force read-write mount via path trick
+                Executable = "sby",
                 ToolName = "sby",
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "Blink.sby")
@@ -1740,7 +1740,7 @@ public sealed class DockerExecutionE2ETests : IDisposable
 
             var command = new ToolCommand
             {
-                Executable = "yosys/sby", // force read-write mount via path trick
+                Executable = "sby",
                 ToolName = "sby",
                 WorkingDirectory = tempDir,
                 CommandArguments = BuildArgs("-f", "Blink.sby")

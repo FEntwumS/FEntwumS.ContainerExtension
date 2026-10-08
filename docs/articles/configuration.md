@@ -46,7 +46,7 @@ All settings are registered under **Binary Management -> Container Engine** in O
 
 | Setting | Type | Default | Description |
 | ------- | ---- | ------- | ----------- |
-| Allow Privileged Containers | CheckBox | Off | Run containers with elevated (`--privileged`) capabilities. Keep off unless a tool requires direct hardware access |
+| Allow Privileged Containers | CheckBox | Off | While off, a run fails if its tool arguments or the Extra Container Labels contain `--privileged`. Turning it on lifts only this check: the extension never starts a container privileged, so all capabilities stay dropped and `no-new-privileges` and the PID limit still apply |
 | Bypass Named Pipe Security Check | CheckBox | On | Windows only. Skips the named-pipe server-process trust verification. On by default because the check produces false positives on common non-default daemon setups (WSL2 relays, rootless/remote engines); uncheck it on a hardened Windows host to re-enable the impersonation guard |
 | Allow Native Fallback | CheckBox | Off | If the Docker daemon is unreachable, execute the tool natively from the host `PATH` instead of failing. **Note:** native execution bypasses container isolation |
 
@@ -54,7 +54,7 @@ All settings are registered under **Binary Management -> Container Engine** in O
 
 | Setting | Type | Default | Description |
 | ------- | ---- | ------- | ----------- |
-| Log Level | ComboBox | `Errors Only` | `Off`, `Errors Only`, `Info`, `Verbose`. Defaults to `Errors Only` (privacy-by-default); `Verbose` adds SDK messages and stack traces |
+| Log Level | ComboBox | `Errors Only` | `Off`, `Errors Only`, `Info`, `Verbose`. Defaults to `Errors Only` (privacy-by-default); `Verbose` adds SDK messages and stack traces. It also decides which runs the telemetry records: see [Telemetry](telemetry.md#execution-telemetry) |
 | Show Timestamps | CheckBox | On | Prepend `HH:mm:ss.fff` to SDK log messages |
 | Telemetry Retention | ComboBox | `25` | Max entries: `None`, `25`, `50`, `100`, `250`, `500`, `1000`, `Unlimited`. Defaults to `25` (privacy-by-default); `None` opts out and **purges** existing history |
 | Dashboard Refresh | ComboBox | `Manual` | Auto-refresh: `Manual`, `2s`, `5s`, `10s`, `15s`, `30s`, `60s`, `120s` |
@@ -92,8 +92,7 @@ The extension automatically loads environment variables from a `.env` file in yo
 
 ```env
 # .env file in your project root
-ONEWARE_DOCKER_IMAGE=ghcr.io/custom/image:v2.0
 MY_LICENSE_KEY=abc123
 ```
 
-These variables are injected into the container alongside the tool command.
+These variables are injected into the container alongside the tool command. They do not reach the extension itself, so `ONEWARE_DOCKER_IMAGE`, which overrides the image of every run, takes effect only in the environment OneWare Studio is started with.
