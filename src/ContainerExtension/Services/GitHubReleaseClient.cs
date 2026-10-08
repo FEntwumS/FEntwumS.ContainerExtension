@@ -112,7 +112,7 @@ internal static class GitHubReleaseClient
 
         try
         {
-            using var response = await client.SendAsync(request, ct).ConfigureAwait(false);
+            using var response = await CappedHttpResponse.SendAsync(client, request, ct).ConfigureAwait(false);
             ThrowIfRateLimited(response);
             // Surface a missing repository/release distinctly; otherwise the HttpRequestException
             // from EnsureSuccessStatusCode is rewrapped by Translate as a generic connectivity failure.
@@ -154,7 +154,7 @@ internal static class GitHubReleaseClient
 
         try
         {
-            using var response = await client.SendAsync(request, ct).ConfigureAwait(false);
+            using var response = await CappedHttpResponse.SendAsync(client, request, ct).ConfigureAwait(false);
             ThrowIfRateLimited(response);
             response.EnsureSuccessStatusCode();
 
@@ -197,7 +197,7 @@ internal static class GitHubReleaseClient
 
         try
         {
-            using var response = await client.SendAsync(request, ct).ConfigureAwait(false);
+            using var response = await CappedHttpResponse.SendAsync(client, request, ct).ConfigureAwait(false);
             ThrowIfRateLimited(response);
             response.EnsureSuccessStatusCode();
 

@@ -7,12 +7,21 @@ using System.Threading.Tasks;
 namespace ContainerExtension.Services;
 
 /// <summary>
-/// Reads the body of an HTTP answer up to a cap, for the registry and GitHub clients, whose answers are small
-/// JSON documents. A body that declares or reaches more than the cap fails with the caller's own exception, so
-/// that a hostile or misbehaving server cannot make the extension allocate without bound.
+/// Sends the requests of the registry and GitHub clients, whose answers are small JSON documents, and reads
+/// each body up to a cap. A body that declares or reaches more than the cap fails with the caller's own
+/// exception, so that a hostile or misbehaving server cannot make the extension allocate without bound.
 /// </summary>
 internal static class CappedHttpResponse
 {
+    /// <summary>
+    /// Sends <paramref name="request"/> and returns once the headers are in, leaving the body to
+    /// <see cref="ReadAsync"/>. By default HttpClient reads the whole body into memory, decompressed, before
+    /// SendAsync returns, so the cap would be checked only after the allocation it is meant to prevent. The
+    /// client's timeout then covers the headers only; the callers bound the whole exchange with their tokens.
+    /// </summary>
+    internal static Task<HttpResponseMessage> SendAsync(HttpClient client, HttpRequestMessage request, CancellationToken ct)
+        => client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+
     internal static async Task<Stream> ReadAsync(HttpResponseMessage response, long maxBytes, Func<Exception> tooLarge, CancellationToken ct)
     {
         if (response.Content.Headers.ContentLength > maxBytes)

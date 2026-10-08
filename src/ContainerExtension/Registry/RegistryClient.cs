@@ -302,7 +302,7 @@ public static partial class RegistryClient
             using var reqClone = await CloneHttpRequestMessageAsync(request).ConfigureAwait(false);
             try
             {
-                var response = await HttpClient.SendAsync(reqClone, ct).ConfigureAwait(false);
+                var response = await CappedHttpResponse.SendAsync(HttpClient, reqClone, ct).ConfigureAwait(false);
                 if (attempt < maxAttempts)
                 {
                     if (response.StatusCode == (System.Net.HttpStatusCode)429)

@@ -45,7 +45,31 @@ public sealed class CappedHttpResponseTests
             () => CappedHttpResponse.ReadAsync(response, Cap, TooLarge, TestContext.Current.CancellationToken));
     }
 
+    [Fact]
+    public async Task SendAsync_ThenReadAsync_ReadsABodyPastTheCapOnlyUpToTheCap()
+    {
+        // The body is 64 times the cap and declares no length. Unless the request asks only for the headers,
+        // HttpClient reads it all into memory before SendAsync returns, and the cap comes too late.
+        var body = new CountingZeroStream(64 * Cap);
+        using var client = new HttpClient(new FixedAnswerHandler(() => new StreamContent(body)));
+        using var request = new HttpRequestMessage(HttpMethod.Get, "https://registry.example/v2/tags/list");
+
+        using var response = await CappedHttpResponse.SendAsync(client, request, TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => CappedHttpResponse.ReadAsync(response, Cap, TooLarge, TestContext.Current.CancellationToken));
+
+        // The read stops within one chunk of 80 KiB past the cap.
+        Assert.True(body.BytesRead <= Cap + 81920, $"{body.BytesRead} bytes were read for a cap of {Cap}");
+    }
+
     private static InvalidDataException TooLarge() => new("The answer exceeds the cap.");
+}
+
+/// <summary>Answers every request with status 200 and a body from the given factory, without a network.</summary>
+internal sealed class FixedAnswerHandler(Func<HttpContent> content) : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = content(), RequestMessage = request });
 }
 
 /// <summary>
