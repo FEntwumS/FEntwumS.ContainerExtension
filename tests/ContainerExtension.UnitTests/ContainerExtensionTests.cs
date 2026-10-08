@@ -639,6 +639,22 @@ public sealed class ContainerExtensionTests : IDisposable
     }
 
     [Fact]
+    public void BuildContainerParameters_BindsWorkspaceWritableForSby()
+    {
+        // SymbiYosys creates its work directory beside the .sby file, and its usual call carries no output flag
+        // that would tell so.
+        var command = new ToolCommand
+        {
+            Executable = "sby",
+            ToolName = "sby",
+            WorkingDirectory = "/workspace/dir",
+            CommandArguments = new List<ICommandArgument> { new TestCommandArgument("-f"), new TestCommandArgument("Blink.sby") }
+        };
+        var param = DockerCommandBuilder.BuildContainerParameters("img", command, null!, null, null, (c, l) => { });
+        Assert.Contains(param.HostConfig.Binds, b => b.EndsWith(":/workspace", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void BuildContainerParameters_CommandWithSpecialCharacters_ArePassedAsArgvTokensUnquoted()
     {
         var command = new ToolCommand

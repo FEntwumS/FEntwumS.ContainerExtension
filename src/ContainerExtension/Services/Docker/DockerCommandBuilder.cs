@@ -44,6 +44,7 @@ internal static class DockerCommandBuilder
             return false;
         }
         if (exe.Contains("yosys", StringComparison.OrdinalIgnoreCase) ||
+            exe.Contains("sby", StringComparison.OrdinalIgnoreCase) ||
             exe.Contains("ghdl", StringComparison.OrdinalIgnoreCase) ||
             exe.Contains("nvc", StringComparison.OrdinalIgnoreCase) ||
             exe.Contains("iverilog", StringComparison.OrdinalIgnoreCase) ||
