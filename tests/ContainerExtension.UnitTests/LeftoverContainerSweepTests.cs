@@ -1,19 +1,23 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 using ContainerExtension.Services.Docker;
 using Docker.DotNet;
 using Docker.DotNet.Models;
+using OneWare.Essentials.ToolEngine;
 using Xunit;
 
 namespace ContainerExtension.UnitTests;
 
 /// <summary>
 /// Coverage for the startup sweep of <see cref="ContainerReaper"/>, which removes the stopped containers that
-/// an earlier session left behind. The container operations are a recording stand-in, so the tests see what
-/// the sweep asks the daemon for and what it removes, without a daemon.
+/// an earlier session left behind, and for the label that marks a container as the extension's. In the unit
+/// tests the container operations are a recording stand-in, so they see what the sweep asks the daemon for and
+/// what it removes; one test runs the sweep against the daemon and is skipped in CI.
 /// </summary>
 public sealed class LeftoverContainerSweepTests
 {
@@ -22,8 +26,8 @@ public sealed class LeftoverContainerSweepTests
     {
         // The daemon's name filter matches anywhere in the name, so it also returns the second container.
         var operations = RecordingContainerOperations.Create(
-            Container("a1", "/containerextension-ghdl-120000000-1-abcd1234"),
-            Container("b2", "/my-containerextension-db"));
+            Container("a1", "/containerextension-ghdl-120000000-1-abcd1234", ownedByTheExtension: true),
+            Container("b2", "/my-containerextension-db", ownedByTheExtension: true));
 
         await ContainerReaper.ReapLeftoverContainersAsync(operations, new MockSettingsService(), TestContext.Current.CancellationToken);
 
@@ -33,6 +37,19 @@ public sealed class LeftoverContainerSweepTests
         Assert.True(query.All);
         Assert.Equal(new[] { "containerextension-" }, query.Filters["name"].Keys);
         Assert.Equal(new[] { "created", "dead", "exited" }, query.Filters["status"].Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(new[] { "io.github.fentwums.container-extension=true" }, query.Filters["label"].Keys);
+    }
+
+    [Fact]
+    public async Task ReapLeftoverContainers_LeavesAContainerWithoutTheExtensionsLabel()
+    {
+        // Another tool's container, or one of an earlier version of the extension, under a name with the prefix.
+        var operations = RecordingContainerOperations.Create(
+            Container("c3", "/containerextension-postgres", ownedByTheExtension: false));
+
+        await ContainerReaper.ReapLeftoverContainersAsync(operations, new MockSettingsService(), TestContext.Current.CancellationToken);
+
+        Assert.Empty(RecordingContainerOperations.Of(operations).Removed);
     }
 
     [Fact]
@@ -41,7 +58,7 @@ public sealed class LeftoverContainerSweepTests
         var settings = new MockSettingsService();
         settings.SetSettingValue(ContainerExtensionModule.AutoRemoveSetting, false);
         var operations = RecordingContainerOperations.Create(
-            Container("a1", "/containerextension-ghdl-120000000-1-abcd1234"));
+            Container("a1", "/containerextension-ghdl-120000000-1-abcd1234", ownedByTheExtension: true));
 
         await ContainerReaper.ReapLeftoverContainersAsync(operations, settings, TestContext.Current.CancellationToken);
 
@@ -50,8 +67,94 @@ public sealed class LeftoverContainerSweepTests
         Assert.Empty(recorder.Queries);
     }
 
-    private static ContainerListResponse Container(string id, string name)
-        => new() { ID = id, Names = [name], Labels = new Dictionary<string, string>(StringComparer.Ordinal) };
+    [Fact]
+    public void BuildContainerParameters_LabelsTheContainerAsTheExtensions_WhateverTheExtraLabelsSay()
+    {
+        var settings = new MockSettingsService();
+        settings.SetSettingValue(ContainerExtensionModule.ExtraFlagsSetting, "io.github.fentwums.container-extension=false team=fpga");
+        var command = new ToolCommand
+        {
+            Executable = "ghdl",
+            ToolName = "test",
+            WorkingDirectory = "/workspace/dir",
+            CommandArguments = new List<ICommandArgument> { new TestCommandArgument("-a"), new TestCommandArgument("file.vhd") }
+        };
+
+        var parameters = DockerCommandBuilder.BuildContainerParameters("test_image:latest", command, settings, "1000", "1000", (_, _) => { });
+
+        Assert.Equal("true", parameters.Labels["io.github.fentwums.container-extension"]);
+        Assert.Equal("fpga", parameters.Labels["team"]);
+    }
+
+    [FactIfNoCI]
+    public async Task ReapLeftoverContainers_AgainstTheDaemon_RemovesTheExtensionsContainerAndLeavesTheOther()
+    {
+        // Both containers stay in the state "created", which the sweep covers, and carry a prefix of this test
+        // alone, so the sweep cannot touch any other container on the daemon. The extension's container comes
+        // from the builder that every run uses; the other one has the prefix but no label.
+        var ct = TestContext.Current.CancellationToken;
+        var prefix = $"sweeptest-{Guid.NewGuid().ToString("N")[..8]}-";
+        var settings = new MockSettingsService();
+        settings.SetSettingValue(ContainerExtensionModule.ContainerNamePrefixSetting, prefix);
+        var connection = await DockerConnectionFactory.CreateAsync(settings, ct);
+        using var client = connection.Client ?? throw new InvalidOperationException("No Docker daemon is reachable.");
+        using var provider = connection.ConnectionProvider;
+        var workDir = Directory.CreateTempSubdirectory("sweeptest").FullName;
+        var command = new ToolCommand
+        {
+            Executable = "echo",
+            ToolName = "echo",
+            WorkingDirectory = workDir,
+            CommandArguments = new List<ICommandArgument> { new TestCommandArgument("left-behind") }
+        };
+        var created = new List<string>();
+        try
+        {
+            var extensions = await client.Containers.CreateContainerAsync(
+                DockerCommandBuilder.BuildContainerParameters("busybox:latest", command, settings, null, null, (_, _) => { }), ct);
+            created.Add(extensions.ID);
+            var other = await client.Containers.CreateContainerAsync(
+                new CreateContainerParameters { Image = "busybox:latest", Name = prefix + "other", Cmd = ["true"] }, ct);
+            created.Add(other.ID);
+
+            await ContainerReaper.ReapLeftoverContainersAsync(client.Containers, settings, ct);
+
+            var left = await client.Containers.ListContainersAsync(new ContainersListParameters
+            {
+                All = true,
+                Filters = new Dictionary<string, IDictionary<string, bool>>(StringComparer.Ordinal)
+                {
+                    { "name", new Dictionary<string, bool>(StringComparer.Ordinal) { { prefix, true } } },
+                },
+            }, ct);
+            Assert.Equal(new[] { other.ID }, left.Select(c => c.ID));
+        }
+        finally
+        {
+            foreach (var id in created)
+            {
+                try
+                {
+                    await client.Containers.RemoveContainerAsync(id, new ContainerRemoveParameters { Force = true }, CancellationToken.None);
+                }
+                catch (DockerContainerNotFoundException)
+                {
+                    // The sweep removed it.
+                }
+            }
+            Directory.Delete(workDir, true);
+        }
+    }
+
+    private static ContainerListResponse Container(string id, string name, bool ownedByTheExtension)
+        => new()
+        {
+            ID = id,
+            Names = [name],
+            Labels = ownedByTheExtension
+                ? new Dictionary<string, string>(StringComparer.Ordinal) { ["io.github.fentwums.container-extension"] = "true" }
+                : new Dictionary<string, string>(StringComparer.Ordinal),
+        };
 }
 
 /// <summary>

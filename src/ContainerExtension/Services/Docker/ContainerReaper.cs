@@ -148,9 +148,11 @@ internal static class ContainerReaper
 
     /// <summary>
     /// Removes, at startup, the stopped containers that an earlier session left behind: every exited, dead or
-    /// created container whose name starts with the Container Name Prefix. With Auto-Remove off the user keeps
-    /// stopped containers on purpose, so nothing is removed. A failure to remove one is recorded and the sweep
-    /// goes on; a cancellation ends it.
+    /// created container that carries <see cref="ContainerExtensionModule.ContainerOwnerLabel"/> and whose name
+    /// starts with the Container Name Prefix. A container without the label stays, whatever its name: it belongs
+    /// to another tool or to an earlier version of the extension. With Auto-Remove off the user keeps stopped
+    /// containers on purpose, so nothing is removed. A failure to remove one is recorded and the sweep goes on;
+    /// a cancellation ends it.
     /// </summary>
     internal static async Task ReapLeftoverContainersAsync(IContainerOperations containers, ISettingsService? settings, CancellationToken ct)
     {
@@ -172,6 +174,7 @@ internal static class ContainerReaper
             {
                 { "name", new Dictionary<string, bool>(StringComparer.Ordinal) { { prefix, true } } },
                 { "status", new Dictionary<string, bool>(StringComparer.Ordinal) { { "exited", true }, { "dead", true }, { "created", true } } },
+                { "label", new Dictionary<string, bool>(StringComparer.Ordinal) { { $"{ContainerExtensionModule.ContainerOwnerLabel}=true", true } } },
             },
         }, ct).ConfigureAwait(false);
         if (leftovers == null)
@@ -185,7 +188,10 @@ internal static class ContainerReaper
             var matchesPrefix = container.Names != null && container.Names.Any(n =>
                 n != null && (n.StartsWith(prefix, StringComparison.Ordinal) ||
                              n.StartsWith($"/{prefix}", StringComparison.Ordinal)));
-            if (!matchesPrefix) continue;
+            var ownedByTheExtension = container.Labels != null
+                && container.Labels.TryGetValue(ContainerExtensionModule.ContainerOwnerLabel, out var owner)
+                && string.Equals(owner, "true", StringComparison.Ordinal);
+            if (!matchesPrefix || !ownedByTheExtension) continue;
             var names = container.Names != null ? string.Join(", ", container.Names) : container.ID;
             try
             {
