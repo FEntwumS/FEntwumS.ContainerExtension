@@ -8,7 +8,7 @@ The extension's settings are under **Binary Management > Container Engine** in O
 
 | Setting | Type | Default | Description |
 | ------- | ---- | ------- | ----------- |
-| Container Runtime Path | File Path | *(auto-detect)* | Absolute path to `docker` or `podman` CLI. Leave empty for auto-detection |
+| Container Runtime Path | File Path | *(empty)* | Absolute path to the `docker` or `podman` CLI that the dashboard's terminal commands and the copied `docker run` commands use; empty means `docker` from the `PATH`. Runs do not use it: they reach the daemon through its socket or pipe |
 | Custom Daemon Socket | Text (validated) | *(auto-detect)* | Override `DOCKER_HOST`. Accepts `unix://`, `tcp://`, `npipe://` |
 
 ### Image Management
