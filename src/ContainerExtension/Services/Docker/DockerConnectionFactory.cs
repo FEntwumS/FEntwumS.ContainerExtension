@@ -174,7 +174,8 @@ internal static partial class DockerConnectionFactory
             }
 
             using var config = uri.Scheme.Equals("npipe", StringComparison.OrdinalIgnoreCase)
-                ? new DockerClientConfiguration(uri, new DaemonEndpointValidator.SecureNamedPipeCredentials(uri))
+                ? new DockerClientConfiguration(uri, new DaemonEndpointValidator.SecureNamedPipeCredentials(uri),
+                    namedPipeConnectTimeout: DaemonEndpointValidator.SecureNamedPipeCredentials.ConnectTimeout)
                 : new DockerClientConfiguration(uri);
             var apiVersion = await NegotiateApiVersionAsync(config, ct).ConfigureAwait(false);
 
