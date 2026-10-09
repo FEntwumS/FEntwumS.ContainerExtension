@@ -30,29 +30,54 @@ internal static class DockerCommandBuilder
     private static readonly Dictionary<string, (List<string>? vars, DateTime lastWrite, DateTime lastAccess)> EnvCache = new(StringComparer.Ordinal);
     private static readonly System.Threading.Lock EnvCacheLock = new();
 
+    // Whether a tool gets the project writable is decided by its file name, never by the folders it lies in: every
+    // tool of a toolchain that OneWare installed lies under a folder named Packages.
+
+    // Programmers and the waveform viewer only read the project, whatever their flags mean.
+    private static readonly HashSet<string> ReadOnlyTools = new(StringComparer.Ordinal)
+    {
+        "openfpgaloader", "iceprog", "black-iceprog", "iceprogduino", "icesprog", "openocd", "dfu-util", "ujprog", "fujprog", "gtkwave",
+    };
+
+    // Tools that write into the project without an output flag the argument scan recognizes: through a file argument
+    // (prjoxide pack, vcd2fst, hex2bin), a flag of their own (icepll -f, icetime -j, ecpbram -g) or a work directory.
+    private static readonly HashSet<string> WritingTools = new(StringComparer.Ordinal)
+    {
+        "eqy", "scy", "nvc", "vvp", "prjoxide", "icepll", "ecppll", "gowin_pll", "ecpbram", "icetime",
+        "vcd2fst", "vcd2lxt", "vcd2lxt2", "vcd2vzt", "bin2hex", "hex2bin",
+    };
+
+    // Families of writing tools: yosys-smtbmc, nextpnr-ice40, sby-gui, mcy-dash, ghdl1-llvm, iverilog-vpi, verilator_bin.
+    private static readonly string[] WritingToolPrefixes = ["yosys", "nextpnr-", "sby", "mcy", "ghdl", "iverilog", "verilator"];
+
+    // The packers and unpackers of every family (icepack, ecpunpack, gowin_pack, gmpack), since "unpack" ends in it too.
+    private const string WritingToolSuffix = "pack";
+
+    /// <summary>
+    /// The file name of a tool's executable, lowercased and without <c>.exe</c>. Splits at both separators, since a
+    /// Windows path keeps its backslashes on every system.
+    /// </summary>
+    internal static string ToolFileName(string executable)
+    {
+        var name = executable[(executable.LastIndexOfAny(['/', '\\']) + 1)..].ToLowerInvariant();
+        return name.EndsWith(".exe", StringComparison.Ordinal) ? name[..^4] : name;
+    }
+
+    private static bool IsWritingTool(string name) =>
+        WritingTools.Contains(name) ||
+        name.EndsWith(WritingToolSuffix, StringComparison.Ordinal) ||
+        Array.Exists(WritingToolPrefixes, prefix => name.StartsWith(prefix, StringComparison.Ordinal));
+
     private static bool ToolRequiresWriteAccess(ToolCommand command)
     {
-        var exe = command.Executable ?? command.ToolName ?? "";
-        if (exe.Contains("openfpgaloader", StringComparison.OrdinalIgnoreCase) ||
-            exe.Contains("iceprog", StringComparison.OrdinalIgnoreCase) ||
-            exe.Contains("icesprog", StringComparison.OrdinalIgnoreCase) ||
-            exe.Contains("openocd", StringComparison.OrdinalIgnoreCase) ||
-            exe.Contains("dfu-util", StringComparison.OrdinalIgnoreCase) ||
-            exe.Contains("ujprog", StringComparison.OrdinalIgnoreCase) ||
-            exe.Contains("gtkwave", StringComparison.OrdinalIgnoreCase))
+        // The tool's name in OneWare counts like the file name: OneWare runs the model that Verilator built, under the
+        // file name simulation, as the tool verilator, and the model writes its waveform into the project.
+        string[] names = [ToolFileName(command.Executable ?? ""), ToolFileName(command.ToolName ?? "")];
+        if (Array.Exists(names, ReadOnlyTools.Contains))
         {
             return false;
         }
-        if (exe.Contains("yosys", StringComparison.OrdinalIgnoreCase) ||
-            exe.Contains("sby", StringComparison.OrdinalIgnoreCase) ||
-            exe.Contains("ghdl", StringComparison.OrdinalIgnoreCase) ||
-            exe.Contains("nvc", StringComparison.OrdinalIgnoreCase) ||
-            exe.Contains("iverilog", StringComparison.OrdinalIgnoreCase) ||
-            exe.Contains("vvp", StringComparison.OrdinalIgnoreCase) ||
-            exe.Contains("verilator", StringComparison.OrdinalIgnoreCase) ||
-            exe.Contains("apicula", StringComparison.OrdinalIgnoreCase) ||
-            exe.Contains("nextpnr", StringComparison.OrdinalIgnoreCase) ||
-            exe.Contains("pack", StringComparison.OrdinalIgnoreCase))
+        if (Array.Exists(names, IsWritingTool))
         {
             return true;
         }
