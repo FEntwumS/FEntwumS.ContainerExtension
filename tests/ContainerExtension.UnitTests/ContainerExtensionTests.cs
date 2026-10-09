@@ -255,6 +255,24 @@ public sealed class ContainerExtensionTests : IDisposable
     }
 
     [Theory]
+    // Auto-Remove off: the user keeps the container, on the named pipe as well.
+    [InlineData(false, true, true, false, false)]
+    [InlineData(false, true, false, false, false)]
+    [InlineData(false, true, true, true, false)]
+    [InlineData(false, false, false, false, false)]
+    // Auto-Remove on, named pipe: the daemon does not remove the container, so the run does, however it ended.
+    [InlineData(true, true, true, false, true)]
+    [InlineData(true, true, false, false, true)]
+    // Auto-Remove on, socket: the daemon removes a container that ran to completion.
+    [InlineData(true, false, true, false, false)]
+    [InlineData(true, false, false, false, true)]
+    [InlineData(true, false, true, true, true)]
+    public void ShouldRemoveAtEnd_FollowsAutoRemoveOnEveryEndpoint(bool autoRemove, bool namedPipe, bool ranToCompletion, bool cancelled, bool removes)
+    {
+        Assert.Equal(removes, ContainerRunner.ShouldRemoveAtEnd(autoRemove, namedPipe, ranToCompletion, cancelled));
+    }
+
+    [Theory]
     [InlineData("containerextension-", true)]
     [InlineData("my.prefix", true)]
     [InlineData("test_prefix", true)]
