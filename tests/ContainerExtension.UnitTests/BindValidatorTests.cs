@@ -51,4 +51,47 @@ public sealed class BindValidatorTests
     {
         BindValidator.ValidateBinds(null);
     }
+
+    // udisks2 mounts removable drives under /run/media/<user>/ on Linux; /run around it stays blocked.
+    [Fact]
+    public void ValidateBinds_ProjectOnRemovableMedia_IsAllowed()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("The Unix list of blocked host paths does not apply on Windows.");
+        }
+        var binds = new List<string> { "/run/media/user/USB/project:/workspace" };
+
+        BindValidator.ValidateBinds(binds);
+
+        Assert.StartsWith("/run/media/user/USB/project:", binds[0], StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("/run/docker.sock")]
+    [InlineData("/run/user/1000/docker.sock")]
+    [InlineData("/run/media")]
+    [InlineData("/run/mediaextra/project")]
+    public void ValidateBinds_RunOutsideRemovableMedia_IsBlocked(string hostPath)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("The Unix list of blocked host paths does not apply on Windows.");
+        }
+        var binds = new List<string> { $"{hostPath}:/workspace" };
+
+        Assert.Throws<DockerExecutionException>(() => BindValidator.ValidateBinds(binds));
+    }
+
+    [Theory]
+    [InlineData("/run/media/user/USB/project", true)]
+    [InlineData("/run/media/user", true)]
+    [InlineData("/run/media/", false)]
+    [InlineData("/run/media", false)]
+    [InlineData("/run/mediaextra/project", false)]
+    [InlineData("/run/user/1000/docker.sock", false)]
+    public void IsUnderRemovableMedia_TakesOnlyPathsBelowTheMediaRoot(string canonicalPath, bool expected)
+    {
+        Assert.Equal(expected, BindValidator.IsUnderRemovableMedia(canonicalPath));
+    }
 }
