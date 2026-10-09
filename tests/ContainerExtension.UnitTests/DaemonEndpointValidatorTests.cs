@@ -14,8 +14,9 @@ namespace ContainerExtension.UnitTests;
 /// system utilities that defeats PATH hijacking. The checks of who serves a daemon's named pipe and who
 /// owns its socket need a live endpoint and have no automated test; the hardening-challenge suite only
 /// checks the impersonation level of the pipe client that SecureStreamOpenerAsync opens. The socket
-/// probe's handling of a cancellation runs against a socket the test listens on itself, and a request
-/// through the secure pipe credentials against a pipe that nobody serves.
+/// probe's handling of a cancellation runs against a socket the test listens on itself, and both a request
+/// through the secure pipe credentials and the probe of the pipe check against a pipe that nobody serves;
+/// the failure for each result of that check needs no pipe.
 /// </summary>
 public sealed class DaemonEndpointValidatorTests
 {
@@ -98,5 +99,51 @@ public sealed class DaemonEndpointValidatorTests
 
         Assert.NotNull(failure);
         Assert.True(DockerConnectionFactory.IsDaemonOffline(failure), $"{failure.GetType()} should read as an offline daemon");
+    }
+
+    [Fact]
+    public async Task ProbeNamedPipeServer_PipeNobodyServes_ReadsAsNotServed()
+    {
+        // As when Docker Desktop is not running: the connect gives up, which says nothing about who would serve the pipe.
+        var check = await DaemonEndpointValidator.ProbeNamedPipeServerAsync($"missing-{Guid.NewGuid():N}", 200, TestContext.Current.CancellationToken);
+
+        Assert.Equal(DaemonEndpointValidator.NamedPipeCheck.NotServed, check);
+    }
+
+    [Fact]
+    public async Task ProbeNamedPipeServer_CancelledByTheCaller_ThrowsInsteadOfReadingAsUntrusted()
+    {
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => DaemonEndpointValidator.ProbeNamedPipeServerAsync($"missing-{Guid.NewGuid():N}", 200, cancellation.Token));
+    }
+
+    [Fact]
+    public void NamedPipeCheckFailure_NotServed_PointsToTheRuntimeAndNotToTheBypass()
+    {
+        var failure = DaemonEndpointValidator.NamedPipeCheckFailure(DaemonEndpointValidator.NamedPipeCheck.NotServed, "docker_engine");
+
+        Assert.NotNull(failure);
+        Assert.Contains("'docker_engine'", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("Start Docker Desktop", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("bypass", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void NamedPipeCheckFailure_Untrusted_PointsToTheBypass()
+    {
+        var failure = DaemonEndpointValidator.NamedPipeCheckFailure(DaemonEndpointValidator.NamedPipeCheck.Untrusted, "docker_engine");
+
+        Assert.NotNull(failure);
+        Assert.Contains("Insecure named pipe connection detected for 'docker_engine'", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("'Bypass Named Pipe Security Check'", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NamedPipeCheckFailure_Trusted_StopsNothing()
+    {
+        Assert.Null(DaemonEndpointValidator.NamedPipeCheckFailure(DaemonEndpointValidator.NamedPipeCheck.Trusted, "docker_engine"));
     }
 }

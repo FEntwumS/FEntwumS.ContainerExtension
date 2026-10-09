@@ -176,9 +176,10 @@ internal static partial class DockerConnectionFactory
                 {
                     pipeName = "docker_engine";
                 }
-                if (!await DaemonEndpointValidator.VerifyWindowsNamedPipeAsync(pipeName, settings.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false), ct: ct).ConfigureAwait(false))
+                var pipeCheck = await DaemonEndpointValidator.VerifyWindowsNamedPipeAsync(pipeName, settings.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false), ct: ct).ConfigureAwait(false);
+                if (DaemonEndpointValidator.NamedPipeCheckFailure(pipeCheck, pipeName) is { } pipeFailure)
                 {
-                    throw new DockerExecutionException($"Insecure named pipe connection detected for '{pipeName}'. Connection aborted. If this is a false positive, you can bypass this check in OneWare Studio Settings under 'Binary Management' -> 'Container Engine' -> check 'Bypass Named Pipe Security Check'.");
+                    throw pipeFailure;
                 }
             }
 

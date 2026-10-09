@@ -1117,10 +1117,11 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 {
                     pipeName = "docker_engine";
                 }
-                if (!await Services.Docker.DaemonEndpointValidator.VerifyWindowsNamedPipeAsync(pipeName, _settingsService.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false), ct: ct).ConfigureAwait(false))
+                var pipeCheck = await Services.Docker.DaemonEndpointValidator.VerifyWindowsNamedPipeAsync(pipeName, _settingsService.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false), ct: ct).ConfigureAwait(false);
+                if (Services.Docker.DaemonEndpointValidator.NamedPipeCheckFailure(pipeCheck, pipeName) is { } pipeFailure)
                 {
                     isDockerOffline = true;
-                    dockerConnectionEx = new DockerExecutionException($"Insecure or unreachable named pipe connection detected for '{pipeName}'. If this is a false positive, you can bypass this check in OneWare Studio Settings under 'Binary Management' -> 'Container Engine' -> check 'Bypass Named Pipe Security Check'.");
+                    dockerConnectionEx = pipeFailure;
                 }
             }
             else
