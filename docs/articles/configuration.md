@@ -46,7 +46,6 @@ The extension's settings are under **Binary Management > Container Engine** in O
 
 | Setting | Type | Default | Description |
 | ------- | ---- | ------- | ----------- |
-| Allow Privileged Containers | CheckBox | Off | While off, a run fails if its tool arguments or the Extra Container Labels contain `--privileged`. Turning it on lifts only this check: the extension never starts a container privileged, so all capabilities stay dropped and `no-new-privileges` and the PID limit still apply |
 | Bypass Named Pipe Security Check | CheckBox | On | Windows only. Skips the named-pipe server-process trust verification. On by default because the check produces false positives on common non-default daemon setups (WSL2 relays, rootless/remote engines); uncheck it on a hardened Windows host to re-enable the impersonation guard |
 | Allow Native Fallback | CheckBox | Off | If the Docker daemon is unreachable, execute the tool natively from the host `PATH` instead of failing. **Note:** native execution bypasses container isolation |
 

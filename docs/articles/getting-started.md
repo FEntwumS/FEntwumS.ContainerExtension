@@ -75,6 +75,6 @@ The Container Dashboard provides:
 
 ## Next Steps
 
-- [Configuration Guide](configuration.md) - Fine-tune all 19 settings
+- [Configuration Guide](configuration.md) - Fine-tune all 18 settings
 - [Telemetry & Troubleshooting](telemetry.md) - Debug execution issues
 - [Architecture Overview](architecture.md) - Understand the internal design

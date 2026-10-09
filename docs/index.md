@@ -7,7 +7,7 @@ Developed as part of the Master's thesis *Design and Implementation of a Modular
 ## Documentation
 
 - [Getting Started](articles/getting-started.md) - Installation, first run, first containerized build
-- [Configuration Guide](articles/configuration.md) - All 19 settings explained
+- [Configuration Guide](articles/configuration.md) - All 18 settings explained
 - [Telemetry & Troubleshooting](articles/telemetry.md) - Debug execution issues, data protection
 - [Architecture Overview](articles/architecture.md) - Internal design and component diagram
 - [Limitations and Threats to Validity](articles/limitations.md) - Scope, known limits, emulation overhead

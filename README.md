@@ -84,8 +84,8 @@ flowchart TD
 ## Security
 
 - Containers run as the host UID/GID via `--user`, except on rootless runtimes and Windows hosts, where
-  the image's default user applies (`oneware` in the toolchain image); `tini` as PID 1. The default
-  (non-privileged) path drops all capabilities (`--cap-drop=ALL`), forbids privilege escalation
+  the image's default user applies (`oneware` in the toolchain image); `tini` as PID 1. Every container
+  drops all capabilities (`--cap-drop=ALL`), forbids privilege escalation
   (`--security-opt no-new-privileges`), and caps the task count as a fork-bomb backstop.
 - Host paths that escape the mounted workspace are remapped to an in-workspace sentinel rather than
   their real location; an explicit device/library allowlist is the only pass-through. The behaviour is
