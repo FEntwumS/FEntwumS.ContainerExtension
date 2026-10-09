@@ -102,7 +102,7 @@ flowchart TD
 
 | Runtime | Endpoint | Notes |
 |---|---|---|
-| Docker | `/var/run/docker.sock`, `~/.docker/run/docker.sock` | Probed first |
+| Docker | `/var/run/docker.sock`, `~/.docker/run/docker.sock`; on Linux also `~/.docker/desktop/docker.sock` (Docker Desktop) and `/run/user/{uid}/docker.sock` (rootless) | Probed first |
 | Podman | `/run/user/{uid}/podman/podman.sock`, podman-machine | Rootless |
 | OrbStack / Colima | per-runtime sockets | Probed via a priority list |
 | Custom | `Custom Daemon Socket` setting | Overrides probing |
