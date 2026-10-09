@@ -4,6 +4,34 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.6] - 2026-10-09
+
+Tells a Windows named pipe that nobody serves from an untrusted one and says to start the runtime,
+builds the connection to the daemon anew when the start fell short, keeps the container on the named
+pipe when Auto-Remove Containers is off, finds the Linux sockets of Docker Desktop and rootless
+Docker, and reads an IPv6 loopback daemon address as this machine. OneWare Studio 1.0.40 or later is
+still required.
+
+### Fixed
+
+- On Windows, with Bypass Named Pipe Security Check off, a Docker named pipe that nobody serves, as when Docker Desktop is not running, stops the connection with a message to start Docker Desktop, or the runtime that should serve the pipe. Before, the check failed such a pipe like one that an untrusted process serves, and the message reported an insecure named pipe and pointed to the bypass. An untrusted server keeps that message, now the same at startup and before a run, and a cancellation by the caller no longer reads as an untrusted server; which servers the check trusts is unchanged.
+- With Bypass Named Pipe Security Check on, as by default, a run whose connect to a named pipe that nobody serves gives up adds a hint to start Docker Desktop, or the runtime that should serve the pipe. Before, it said no more than `TimeoutException: The operation has timed out.`
+- Before a run, a ping and a refresh of the dashboard, the extension builds its connection to the daemon anew when it has none or no daemon answered its version request at startup; it takes the new connection where there was none, or when a daemon answered it. Before, the connection from startup stayed for the whole session: without one, as on Windows with the named pipe check on and Docker Desktop not yet running, every run failed until OneWare Studio restarted, and with the fallback API version and the socket path the probe had guessed, a daemon started later at another path, or one older than that version, was never reached. A ping without a connection, or one that runs out of its time while the connection is built anew, now reads as no daemon, so the startup check keeps trying.
+- When no API version comes back from the daemon, the client falls back to 1.44 in both cases, no answer and an answer without a version; for no answer it used 1.45, which a daemon of API 1.44 rejects as too new.
+- On the Windows named pipe, a run keeps its container at the end when Auto-Remove Containers is off, as on a socket. Before, it removed the container at the end in every case: on the pipe the run streams its output through the logs endpoint, so Auto-Remove is off at the daemon and the run removes the container itself.
+- On Linux, without a socket set, the probe also tries `~/.docker/desktop/docker.sock` of Docker Desktop for Linux and `/run/user/<uid>/docker.sock` of rootless Docker, after the system-wide socket and before the other runtimes, with the same owner check and liveness probe as every other candidate. Before, both needed `DOCKER_HOST` or the Custom Daemon Socket setting, which bypass the probe and its check of the socket's owner.
+- A loopback daemon address such as `http://[::1]:2375` on IPv6 counts as this machine: plain http to it stays http, and it draws no warning about a remote daemon. Before, the IPv6 loopback did not match, since `Uri.Host` keeps its brackets, so http to it was raised to https, the TLS handshake with the daemon failed, and the extension stayed offline.
+
+### Tests
+
+- New tests cover the three results of the named-pipe check and their messages, the hint after a connect that gives up, with a run of a tool against a pipe that nobody serves, the fallback API version, a connection built anew before a run and before a ping against a stand-in daemon that starts later, the decision to remove a container at the end of a run, the Linux socket candidates and the loopback check.
+
+### Documentation
+
+- The troubleshooting section of the telemetry guide names how a run on Windows without Docker Desktop fails, with the named pipe check on and with the bypass.
+- The getting-started guide says that a daemon started only after OneWare Studio is reached by the next run or refresh of the dashboard, without a restart.
+- The README names the Linux sockets of Docker Desktop and rootless Docker in its table of supported runtimes.
+
 ## [1.1.5] - 2026-10-08
 
 Gives up after 100 ms on a Windows named pipe that nobody serves, accepts Docker's own four-slash
