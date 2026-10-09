@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -41,6 +42,26 @@ public sealed class DaemonEndpointValidatorTests
         var resolved = DaemonEndpointValidator.ResolveTrustedUnixBinary("stat");
         // stat is a coreutils/BSD staple present on every supported POSIX host.
         Assert.True(File.Exists(resolved), $"expected a real binary at '{resolved}'");
+    }
+
+    [Fact]
+    public void UnixSocketCandidates_OnLinux_IncludeTheSocketsOfDockerDesktopAndRootlessDocker()
+    {
+        var paths = DaemonEndpointValidator.UnixSocketCandidates("/home/dev", "1000", linux: true).Select(c => c.path).ToList();
+
+        Assert.Contains(Path.Combine("/home/dev", ".docker/desktop/docker.sock"), paths);
+        Assert.Contains("/run/user/1000/docker.sock", paths);
+        // The system-wide socket stays the first one tried.
+        Assert.Equal("/var/run/docker.sock", paths[0]);
+    }
+
+    [Fact]
+    public void UnixSocketCandidates_ElsewhereThanLinux_LeaveTheLinuxSocketsOut()
+    {
+        var paths = DaemonEndpointValidator.UnixSocketCandidates("/Users/dev", "501", linux: false).Select(c => c.path).ToList();
+
+        Assert.DoesNotContain(Path.Combine("/Users/dev", ".docker/desktop/docker.sock"), paths);
+        Assert.DoesNotContain("/run/user/501/docker.sock", paths);
     }
 
     [Fact]

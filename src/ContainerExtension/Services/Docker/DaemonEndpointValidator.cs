@@ -424,21 +424,36 @@ internal static partial class DaemonEndpointValidator
     }
 #pragma warning restore S3011
 
+    /// <summary>
+    /// The sockets the probe tries, in order, each with the runtime it belongs to. On Linux, Docker Desktop and
+    /// Docker in rootless mode each serve a socket of the user, and neither creates /var/run/docker.sock.
+    /// </summary>
+    internal static IReadOnlyList<(string path, string name)> UnixSocketCandidates(string home, string uid, bool linux)
+    {
+        var candidates = new List<(string path, string name)>
+        {
+            ("/var/run/docker.sock", "docker"),
+            (Path.Combine(home, ".docker/run/docker.sock"), "docker (user)"),
+        };
+        if (linux)
+        {
+            candidates.Add((Path.Combine(home, ".docker/desktop/docker.sock"), "docker (desktop)"));
+            candidates.Add(($"/run/user/{uid}/docker.sock", "docker (rootless)"));
+        }
+        candidates.Add(($"/run/user/{uid}/podman/podman.sock", "podman"));
+        candidates.Add((Path.Combine(home, ".colima/default/docker.sock"), "colima"));
+        candidates.Add((Path.Combine(home, ".local/share/containers/podman/machine/podman.sock"), "podman (machine)"));
+        candidates.Add((Path.Combine(home, ".orbstack/run/docker.sock"), "orbstack"));
+        return candidates;
+    }
+
     internal static async Task<(Uri uri, string runtime)> ProbeUnixSocketAsync(CancellationToken ct = default)
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         await EnsureUnixIdsLoadedAsync(ct).ConfigureAwait(false);
         var uid = _cachedUid ?? "1000";
 
-        var candidates = new (string path, string name)[]
-        {
-            ("/var/run/docker.sock",                          "docker"),
-            (Path.Combine(home, ".docker/run/docker.sock"),              "docker (user)"),
-            ($"/run/user/{uid}/podman/podman.sock",                  "podman"),
-            (Path.Combine(home, ".colima/default/docker.sock"),            "colima"),
-            (Path.Combine(home, ".local/share/containers/podman/machine/podman.sock"), "podman (machine)"),
-            (Path.Combine(home, ".orbstack/run/docker.sock"),             "orbstack"),
-        };
+        var candidates = UnixSocketCandidates(home, uid, OperatingSystem.IsLinux());
 
         foreach (var (path, name) in candidates)
         {
@@ -466,7 +481,7 @@ internal static partial class DaemonEndpointValidator
 
         // If no candidate is active/live, see if any candidate file exists on disk
         // Checked in reverse order to prefer specific runtimes (orbstack, colima, podman) over generic defaults.
-        for (int i = candidates.Length - 1; i >= 0; i--)
+        for (int i = candidates.Count - 1; i >= 0; i--)
         {
             var (path, name) = candidates[i];
             if (File.Exists(path))
@@ -485,7 +500,7 @@ internal static partial class DaemonEndpointValidator
         }
 
         // If files are deleted when offline, check if the parent directories exist (specific to user home)
-        for (int i = candidates.Length - 1; i >= 0; i--)
+        for (int i = candidates.Count - 1; i >= 0; i--)
         {
             var (path, name) = candidates[i];
             if (!string.IsNullOrEmpty(home) && path.Contains(home, StringComparison.Ordinal))
