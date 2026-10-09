@@ -17,6 +17,13 @@ namespace ContainerExtension.Services.Docker;
 internal static partial class DockerConnectionFactory
 {
     /// <summary>
+    /// The API version of a client whose daemon did not say which it speaks: no daemon answered the version
+    /// request, or its answer carried no version. Of the two versions used for this before, 1.44 and 1.45, it is
+    /// the one more daemons accept.
+    /// </summary>
+    internal static readonly System.Version FallbackApiVersion = new(1, 44);
+
+    /// <summary>
     /// Outcome of a connection attempt. <see cref="Client"/> and the managers are non-null only on success;
     /// on failure they are null while <see cref="DetectedRuntime"/> and <see cref="DaemonUri"/> still reflect
     /// whatever was resolved before the failure, so the dashboard can report the intended runtime/endpoint.
@@ -27,7 +34,14 @@ internal static partial class DockerConnectionFactory
         DockerClient? Client,
         DockerConnectionProvider? ConnectionProvider,
         DockerImageManager? ImageManager,
-        DockerContainerManager? ContainerManager);
+        DockerContainerManager? ContainerManager)
+    {
+        /// <summary>
+        /// Whether a daemon answered the version request while the connection was built. Without an answer the
+        /// client uses <see cref="FallbackApiVersion"/> and may point at a socket that nobody serves yet.
+        /// </summary>
+        internal bool DaemonAnswered { get; init; }
+    }
 
     [GeneratedRegex(@"^[a-zA-Z0-9][-a-zA-Z0-9.]*(?::\d{1,5})?$", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]
     private static partial Regex HostOnlyRegex();
@@ -52,9 +66,7 @@ internal static partial class DockerConnectionFactory
                 {
                     if (uriText.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
                     {
-                        bool isLocal = uriText.Contains("localhost", StringComparison.OrdinalIgnoreCase) ||
-                                       uriText.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
-                                       uriText.Contains("[::1]", StringComparison.Ordinal);
+                        bool isLocal = Uri.TryCreate(uriText, UriKind.Absolute, out var textUri) && IsLoopbackHost(textUri.Host);
                         if (!isLocal)
                         {
                             await Console.Out.WriteLineAsync("[WARN] Insecure HTTP custom daemon socket requested. Upgrading to https://").ConfigureAwait(false);
@@ -83,10 +95,7 @@ internal static partial class DockerConnectionFactory
                     uri = new Uri(uriText);
                     if (uri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase))
                     {
-                        bool isLocal = uri.Host != null && (
-                                       uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-                                       uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
-                                       uri.Host.Equals("::1", StringComparison.Ordinal));
+                        bool isLocal = IsLoopbackHost(uri.Host);
                         if (!isLocal)
                         {
                             await Console.Out.WriteLineAsync("[WARN] Insecure HTTP custom daemon socket scheme. Upgrading to HTTPS.").ConfigureAwait(false);
@@ -114,9 +123,7 @@ internal static partial class DockerConnectionFactory
                             throw new UriFormatException("Invalid remote daemon hostname.");
                         }
 
-                        if (!uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) &&
-                            !uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) &&
-                            !uri.Host.Equals("::1", StringComparison.Ordinal))
+                        if (!IsLoopbackHost(uri.Host))
                         {
                             var warningMsg = $"[SECURITY WARNING] Connecting to a remote Docker daemon at '{uri.Host}'. Outbound traffic may expose credentials.";
                             await Console.Error.WriteLineAsync(warningMsg).ConfigureAwait(false);
@@ -155,7 +162,11 @@ internal static partial class DockerConnectionFactory
                     {
                         uri = new Uri("unix:///var/run/docker.sock");
                         runtime = "docker (default)";
-                        ContainerTelemetry.TrackError("DockerExecutionStrategy", "ProbeUnixSocket failed, falling back to default", ex);
+                        // A cancellation by the caller is no fault of the probe.
+                        if (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                        {
+                            ContainerTelemetry.TrackError("DockerExecutionStrategy", "ProbeUnixSocket failed, falling back to default", ex);
+                        }
                     }
                 }
             }
@@ -176,9 +187,10 @@ internal static partial class DockerConnectionFactory
                 {
                     pipeName = "docker_engine";
                 }
-                if (!await DaemonEndpointValidator.VerifyWindowsNamedPipeAsync(pipeName, settings.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false), ct: ct).ConfigureAwait(false))
+                var pipeCheck = await DaemonEndpointValidator.VerifyWindowsNamedPipeAsync(pipeName, settings.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false), ct: ct).ConfigureAwait(false);
+                if (DaemonEndpointValidator.NamedPipeCheckFailure(pipeCheck, pipeName) is { } pipeFailure)
                 {
-                    throw new DockerExecutionException($"Insecure named pipe connection detected for '{pipeName}'. Connection aborted. If this is a false positive, you can bypass this check in OneWare Studio Settings under 'Binary Management' -> 'Container Engine' -> check 'Bypass Named Pipe Security Check'.");
+                    throw pipeFailure;
                 }
             }
 
@@ -186,20 +198,24 @@ internal static partial class DockerConnectionFactory
                 ? new DockerClientConfiguration(uri, new DaemonEndpointValidator.SecureNamedPipeCredentials(uri),
                     namedPipeConnectTimeout: DaemonEndpointValidator.SecureNamedPipeCredentials.ConnectTimeout)
                 : new DockerClientConfiguration(uri);
-            var apiVersion = await NegotiateApiVersionAsync(config, ct).ConfigureAwait(false);
+            var (apiVersion, daemonAnswered) = await NegotiateApiVersionAsync(config, ct).ConfigureAwait(false);
 
             client = config.CreateClient(apiVersion);
             connectionProvider = new DockerConnectionProvider(client);
             var imageManager = new DockerImageManager(client, settings);
             var containerManager = new DockerContainerManager(client);
 
-            return new Connection(runtime, uri, client, connectionProvider, imageManager, containerManager);
+            return new Connection(runtime, uri, client, connectionProvider, imageManager, containerManager) { DaemonAnswered = daemonAnswered };
         }
         catch (Exception ex)
         {
             connectionProvider?.Dispose();
             client?.Dispose();
-            ContainerTelemetry.TrackError("DockerExecutionStrategy", "Asynchronous daemon connection initialization failed", ex);
+            // A cancellation by the caller is no fault of the connection.
+            if (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                ContainerTelemetry.TrackError("DockerExecutionStrategy", "Asynchronous daemon connection initialization failed", ex);
+            }
             return new Connection(runtime, uri, null, null, null, null);
         }
     }
@@ -207,15 +223,18 @@ internal static partial class DockerConnectionFactory
     // Ask the daemon for its API version, bounded by a short timeout, and fall back to a safe default on any
     // genuine failure. A cold daemon can need well over the first-connect budget, so this is bounded at 3 s
     // (honouring shutdown) rather than misnegotiating a healthy-but-slow daemon down to the fallback version.
-    private static async Task<System.Version> NegotiateApiVersionAsync(DockerClientConfiguration config, CancellationToken ct)
+    // Also says whether a daemon answered at all.
+    private static async Task<(System.Version Version, bool DaemonAnswered)> NegotiateApiVersionAsync(DockerClientConfiguration config, CancellationToken ct)
     {
-        System.Version apiVersion = new System.Version(1, 44);
+        System.Version apiVersion = FallbackApiVersion;
+        var daemonAnswered = false;
         var tempClient = config.CreateClient();
         try
         {
             using var verCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             verCts.CancelAfter(TimeSpan.FromSeconds(3));
             var version = await tempClient.System.GetVersionAsync(verCts.Token).ConfigureAwait(false);
+            daemonAnswered = true;
             var apiVerStr = version?.APIVersion;
             if (!string.IsNullOrEmpty(apiVerStr))
             {
@@ -232,17 +251,20 @@ internal static partial class DockerConnectionFactory
         }
         catch (Exception ex)
         {
+            // A daemon that answers with an error status answers all the same; building the connection anew would not
+            // change its answer.
+            daemonAnswered = ex is DockerApiException;
             if (!IsDaemonOffline(ex))
             {
-                ContainerTelemetry.TrackError("DockerExecutionStrategy", "API version negotiation failed; falling back to 1.45", ex);
+                ContainerTelemetry.TrackError("DockerExecutionStrategy", $"API version negotiation failed; falling back to {FallbackApiVersion}", ex);
             }
-            apiVersion = new System.Version(1, 45);
+            apiVersion = FallbackApiVersion;
         }
         finally
         {
             tempClient.Dispose();
         }
-        return apiVersion;
+        return (apiVersion, daemonAnswered);
     }
 
     // Whether a failed request shows only that no daemon answers, which is no error worth recording: a timeout
@@ -252,4 +274,16 @@ internal static partial class DockerConnectionFactory
         ex is OperationCanceledException or TimeoutException or System.Net.Sockets.SocketException ||
         ex.InnerException is System.Net.Sockets.SocketException ||
         (ex is HttpRequestException httpEx && (httpEx.InnerException is System.Net.Sockets.SocketException || httpEx.Message.Contains("connection refused", StringComparison.OrdinalIgnoreCase)));
+
+    // Whether a daemon address names this machine: localhost or a loopback address. Uri.Host keeps the brackets of an
+    // IPv6 address, which IPAddress.TryParse accepts; a name that merely starts like a loopback address is no loopback.
+    internal static bool IsLoopbackHost(string? host)
+    {
+        if (string.IsNullOrEmpty(host))
+        {
+            return false;
+        }
+        return host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || (System.Net.IPAddress.TryParse(host, out var ip) && System.Net.IPAddress.IsLoopback(ip));
+    }
 }

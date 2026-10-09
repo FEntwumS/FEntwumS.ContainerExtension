@@ -98,16 +98,47 @@ internal static partial class DaemonEndpointValidator
         return PipeServerTrust.Untrusted;
     }
 
-    internal static async Task<bool> VerifyWindowsNamedPipeAsync(string pipeName, bool bypassCheck, int timeoutMs = 200, CancellationToken ct = default)
+    /// <summary>What the check of the process behind a Docker named pipe found.</summary>
+    internal enum NamedPipeCheck
+    {
+        /// <summary>A trusted process serves the pipe, or the check does not apply: not on Windows, or bypassed.</summary>
+        Trusted,
+
+        /// <summary>A process serves the pipe that the check does not trust.</summary>
+        Untrusted,
+
+        /// <summary>No process serves the pipe within the wait, as when Docker Desktop is not running.</summary>
+        NotServed,
+    }
+
+    internal static async Task<NamedPipeCheck> VerifyWindowsNamedPipeAsync(string pipeName, bool bypassCheck, int timeoutMs = 200, CancellationToken ct = default)
     {
         if (!OperatingSystem.IsWindows())
         {
-            return true;
+            return NamedPipeCheck.Trusted;
         }
         if (bypassCheck)
         {
-            return true;
+            return NamedPipeCheck.Trusted;
         }
+        return await ProbeNamedPipeServerAsync(pipeName, timeoutMs, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The exception that stops a connection after the check of its named pipe, or null when a trusted process
+    /// serves the pipe. A pipe that nobody serves points to the runtime, an untrusted server to the bypass setting.
+    /// </summary>
+    internal static DockerExecutionException? NamedPipeCheckFailure(NamedPipeCheck check, string pipeName) => check switch
+    {
+        NamedPipeCheck.NotServed => new DockerExecutionException($"No process serves the Docker named pipe '{pipeName}'. Start Docker Desktop, or the container runtime that should serve this pipe, and try again."),
+        NamedPipeCheck.Untrusted => new DockerExecutionException($"Insecure named pipe connection detected for '{pipeName}'. Connection aborted. If this is a false positive, you can bypass this check in OneWare Studio Settings under 'Binary Management' -> 'Container Engine' -> check 'Bypass Named Pipe Security Check'."),
+        _ => null,
+    };
+
+    // Connects to the pipe and classifies the process that serves it; the caller decides whether the check applies.
+    // A connect that gives up says only that nobody serves the pipe, never that its server is untrusted.
+    internal static async Task<NamedPipeCheck> ProbeNamedPipeServerAsync(string pipeName, int timeoutMs, CancellationToken ct)
+    {
         var connectTime = DateTime.Now;
         try
         {
@@ -130,11 +161,11 @@ internal static partial class DaemonEndpointValidator
                     }
                     catch (ArgumentException)
                     {
-                        return false;
+                        return NamedPipeCheck.Untrusted;
                     }
                     catch (PlatformNotSupportedException)
                     {
-                        return true; // Fail-open on platforms that do not support process by ID lookups
+                        return NamedPipeCheck.Trusted; // Fail-open on platforms that do not support process by ID lookups
                     }
 
                     if (process != null)
@@ -148,7 +179,7 @@ internal static partial class DaemonEndpointValidator
                                     var startTime = process.StartTime;
                                     if (startTime > connectTime.AddMilliseconds(500))
                                     {
-                                        return false; // PID reuse detected: process started after pipe connection
+                                        return NamedPipeCheck.Untrusted; // PID reuse detected: process started after pipe connection
                                     }
 
                                     var name = process.ProcessName;
@@ -169,13 +200,13 @@ internal static partial class DaemonEndpointValidator
                                     var trust = GetPipeServerTrust(pid);
                                     if (trust == PipeServerTrust.Elevated)
                                     {
-                                        return true;
+                                        return NamedPipeCheck.Trusted;
                                     }
                                     if (trust == PipeServerTrust.CurrentUser)
                                     {
                                         if (isNameWhitelisted)
                                         {
-                                            return true;
+                                            return NamedPipeCheck.Trusted;
                                         }
                                         // The whitelist is a gate here, not merely advisory: a current-user
                                         // process whose name matches no known runtime could be a pipe squatter.
@@ -192,43 +223,48 @@ internal static partial class DaemonEndpointValidator
                                 {
                                     // Name/start-time were unreadable (access denied); fall back to the token
                                     // classification alone, staying lenient (elevated or current-user) as before.
-                                    return GetPipeServerTrust(pid) != PipeServerTrust.Untrusted;
+                                    return GetPipeServerTrust(pid) != PipeServerTrust.Untrusted ? NamedPipeCheck.Trusted : NamedPipeCheck.Untrusted;
                                 }
                                 catch (PlatformNotSupportedException)
                                 {
-                                    return true;
+                                    return NamedPipeCheck.Trusted;
                                 }
                                 catch (InvalidOperationException)
                                 {
-                                    return false;
+                                    return NamedPipeCheck.Untrusted;
                                 }
                             }
                         }
                     }
                 }
-                return false;
+                return NamedPipeCheck.Untrusted;
             }
-            return false;
+            return NamedPipeCheck.Untrusted;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // A cancellation by the caller says nothing about the pipe.
+            throw;
         }
         catch (FileNotFoundException)
         {
-            return true;
+            return NamedPipeCheck.NotServed;
         }
         catch (IOException ex) when (ex.InnerException is FileNotFoundException)
         {
-            return true;
+            return NamedPipeCheck.NotServed;
         }
         catch (TimeoutException)
         {
-            return false;
+            return NamedPipeCheck.NotServed;
         }
         catch (IOException)
         {
-            return false;
+            return NamedPipeCheck.Untrusted;
         }
         catch
         {
-            return false;
+            return NamedPipeCheck.Untrusted;
         }
     }
 
@@ -424,21 +460,36 @@ internal static partial class DaemonEndpointValidator
     }
 #pragma warning restore S3011
 
+    /// <summary>
+    /// The sockets the probe tries, in order, each with the runtime it belongs to. On Linux, Docker Desktop and
+    /// Docker in rootless mode each serve a socket of the user, and neither creates /var/run/docker.sock.
+    /// </summary>
+    internal static IReadOnlyList<(string path, string name)> UnixSocketCandidates(string home, string uid, bool linux)
+    {
+        var candidates = new List<(string path, string name)>
+        {
+            ("/var/run/docker.sock", "docker"),
+            (Path.Combine(home, ".docker/run/docker.sock"), "docker (user)"),
+        };
+        if (linux)
+        {
+            candidates.Add((Path.Combine(home, ".docker/desktop/docker.sock"), "docker (desktop)"));
+            candidates.Add(($"/run/user/{uid}/docker.sock", "docker (rootless)"));
+        }
+        candidates.Add(($"/run/user/{uid}/podman/podman.sock", "podman"));
+        candidates.Add((Path.Combine(home, ".colima/default/docker.sock"), "colima"));
+        candidates.Add((Path.Combine(home, ".local/share/containers/podman/machine/podman.sock"), "podman (machine)"));
+        candidates.Add((Path.Combine(home, ".orbstack/run/docker.sock"), "orbstack"));
+        return candidates;
+    }
+
     internal static async Task<(Uri uri, string runtime)> ProbeUnixSocketAsync(CancellationToken ct = default)
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         await EnsureUnixIdsLoadedAsync(ct).ConfigureAwait(false);
         var uid = _cachedUid ?? "1000";
 
-        var candidates = new (string path, string name)[]
-        {
-            ("/var/run/docker.sock",                          "docker"),
-            (Path.Combine(home, ".docker/run/docker.sock"),              "docker (user)"),
-            ($"/run/user/{uid}/podman/podman.sock",                  "podman"),
-            (Path.Combine(home, ".colima/default/docker.sock"),            "colima"),
-            (Path.Combine(home, ".local/share/containers/podman/machine/podman.sock"), "podman (machine)"),
-            (Path.Combine(home, ".orbstack/run/docker.sock"),             "orbstack"),
-        };
+        var candidates = UnixSocketCandidates(home, uid, OperatingSystem.IsLinux());
 
         foreach (var (path, name) in candidates)
         {
@@ -466,7 +517,7 @@ internal static partial class DaemonEndpointValidator
 
         // If no candidate is active/live, see if any candidate file exists on disk
         // Checked in reverse order to prefer specific runtimes (orbstack, colima, podman) over generic defaults.
-        for (int i = candidates.Length - 1; i >= 0; i--)
+        for (int i = candidates.Count - 1; i >= 0; i--)
         {
             var (path, name) = candidates[i];
             if (File.Exists(path))
@@ -485,7 +536,7 @@ internal static partial class DaemonEndpointValidator
         }
 
         // If files are deleted when offline, check if the parent directories exist (specific to user home)
-        for (int i = candidates.Length - 1; i >= 0; i--)
+        for (int i = candidates.Count - 1; i >= 0; i--)
         {
             var (path, name) = candidates[i];
             if (!string.IsNullOrEmpty(home) && path.Contains(home, StringComparison.Ordinal))

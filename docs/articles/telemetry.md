@@ -57,6 +57,8 @@ The Container Dashboard's **Execution History** section shows up to 50 entries w
 
 **Symptoms**: "Daemon not reachable" in the dashboard, red connection status.
 
+On Windows, a run without Docker Desktop fails with `No process serves the Docker named pipe 'docker_engine'`. With **Bypass Named Pipe Security Check** on, as by default, it fails with `TimeoutException: The operation has timed out.` and a hint to start Docker Desktop.
+
 **Solutions**:
 
 1. Ensure Docker Desktop (or Podman/Colima/OrbStack) is **running**

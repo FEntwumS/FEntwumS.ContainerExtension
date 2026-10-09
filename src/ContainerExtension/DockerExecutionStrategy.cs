@@ -79,6 +79,14 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     private ContainerRunner? _runner;
     private readonly NativeFallbackExecutor _nativeFallback;
 
+    // Whether a daemon answered the version request of the current connection. Written last when a connection is
+    // adopted, so a reader that sees true sees the whole connection.
+    private bool _daemonAnswered;
+    // Serializes building the connection anew before a run.
+    private readonly SemaphoreSlim _reconnectGate = new(1, 1);
+    // Connections that a newer one replaced. A run in flight may still use one, so they live as long as the strategy.
+    private readonly ConcurrentQueue<Services.Docker.DockerConnectionFactory.Connection> _replacedConnections = new();
+
     /// <summary>
     /// Where a foreground run's output and errors go when the caller passes no handler for them.
     /// Replaceable so tests can observe it without a running host.
@@ -125,6 +133,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         {
             armReaper(_client);
             _runner = new ContainerRunner(_client, _settingsService, _console, _daemonUri!);
+            Volatile.Write(ref _daemonAnswered, conn.DaemonAnswered);
         }
         catch (Exception ex)
         {
@@ -134,6 +143,89 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             _client = null;
             ContainerTelemetry.TrackError("DockerExecutionStrategy", "Asynchronous daemon connection initialization failed", ex);
         }
+    }
+
+    // Before a run, a ping or a refresh of the dashboard: when the connection built at startup failed, or no daemon
+    // answered its version request, build it anew, so that a daemon started after OneWare is reached without a
+    // restart, with the API version it speaks. A new connection replaces the current one only when it is better: a
+    // client where there was none, or one whose daemon answered.
+    internal async Task EnsureConnectedAsync(CancellationToken ct)
+    {
+        ThrowIfDisposed();
+        await EnsureInitializedAsync(ct).ConfigureAwait(false);
+        if (Volatile.Read(ref _daemonAnswered))
+        {
+            return;
+        }
+        // Linked to the strategy, so that Dispose stops a connection being built and every caller waiting for one.
+        using var buildCts = CancellationTokenSource.CreateLinkedTokenSource(ct, _strategyCts.Token);
+        var token = buildCts.Token;
+        await _reconnectGate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            if (Volatile.Read(ref _daemonAnswered))
+            {
+                return;
+            }
+            var conn = await Services.Docker.DockerConnectionFactory.CreateAsync(_settingsService, token).ConfigureAwait(false);
+            if (conn.Client == null)
+            {
+                token.ThrowIfCancellationRequested();
+                return;
+            }
+            if ((_client != null && !conn.DaemonAnswered) || token.IsCancellationRequested || Volatile.Read(ref _disposed) == 1)
+            {
+                DisposeConnection(conn);
+                token.ThrowIfCancellationRequested();
+                return;
+            }
+            ReplaceConnection(conn);
+        }
+        finally
+        {
+            _reconnectGate.Release();
+        }
+    }
+
+    // Makes a newly built connection the current one. The connection it replaces is kept, not disposed, since a run in
+    // flight may still use its client; teardown of tracked containers moves to the new client without reaping them.
+    private void ReplaceConnection(Services.Docker.DockerConnectionFactory.Connection conn)
+    {
+        var client = conn.Client!;
+        ContainerRunner runner;
+        try
+        {
+            runner = new ContainerRunner(client, _settingsService, _console, conn.DaemonUri!);
+            ContainerReaper.HandOver(_client, client);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            ContainerReaper.Disarm(client);
+            DisposeConnection(conn);
+            ContainerTelemetry.TrackError("DockerExecutionStrategy", "Daemon reconnection failed", ex);
+            return;
+        }
+        var replaced = new Services.Docker.DockerConnectionFactory.Connection(_detectedRuntime, _daemonUri, _client, _connectionProvider, _imageManager, _containerManager);
+        _detectedRuntime = conn.DetectedRuntime;
+        _daemonUri = conn.DaemonUri;
+        _connectionProvider = conn.ConnectionProvider;
+        _imageManager = conn.ImageManager;
+        _containerManager = conn.ContainerManager;
+        _runner = runner;
+        _client = client;
+        if (replaced.Client != null)
+        {
+            _replacedConnections.Enqueue(replaced);
+        }
+        Volatile.Write(ref _daemonAnswered, conn.DaemonAnswered);
+    }
+
+    private static void DisposeConnection(Services.Docker.DockerConnectionFactory.Connection conn)
+    {
+        conn.ImageManager?.Dispose();
+        conn.ContainerManager?.Dispose();
+        conn.ConnectionProvider?.Dispose();
+        conn.Client?.Dispose();
     }
 
     public string GetRuntimePath()
@@ -475,6 +567,13 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             // Ignore cancel/dispose errors
         }
 
+        // A connection being built stops with the cancellation above; wait until it is done, so that it is not taken
+        // over after the connections below are released.
+        if (!_reconnectGate.Wait(TimeSpan.FromSeconds(5), CancellationToken.None))
+        {
+            ContainerTelemetry.TrackError("DockerExecutionStrategy", "A daemon connection was still being built when the strategy was disposed", null);
+        }
+
         // Reap this client's tracked containers and release the process-exit hooks it may own.
         ContainerReaper.Disarm(_client);
 
@@ -482,6 +581,12 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         _containerManager?.Dispose();
         _connectionProvider?.Dispose();
         _client?.Dispose();
+        while (_replacedConnections.TryDequeue(out var replaced))
+        {
+            ContainerReaper.Disarm(replaced.Client);
+            DisposeConnection(replaced);
+        }
+        _reconnectGate.Dispose();
         _strategyLock.Dispose();
         ContainerTelemetry.Shutdown();
     }
@@ -497,9 +602,10 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     }
 
     /// <summary>
-    /// The hint lines a failed run adds below its error line, chosen by the failure's message and type.
+    /// The hint lines a failed run adds below its error line, chosen by the failure's message and type, and for a
+    /// daemon on a Windows named pipe by a connect that gave up.
     /// </summary>
-    internal static string FailureHints(Exception ex, string image)
+    internal static string FailureHints(Exception ex, string image, bool namedPipe = false)
     {
         var hints = "";
         // A registry that refuses a pull says "pull access denied", which says nothing about local permissions.
@@ -534,7 +640,27 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         {
             hints += $"\n  Hint: A host port conflict was detected. Please check if another container or service is using the same port, or configure a different host port mapping.";
         }
+        // With Bypass Named Pipe Security Check on, a pipe that nobody serves is only found by the connect, which
+        // gives up with a TimeoutException, as when Docker Desktop is not running.
+        if (namedPipe && IsConnectTimeout(ex))
+        {
+            hints += "\n  Hint: No process serves the Docker named pipe. Start Docker Desktop, or the container runtime that should serve the pipe, and try again.";
+        }
         return hints;
+    }
+
+    // Whether the failure, or one it wraps, is a connect that gave up. A regular expression that ran out of time is a
+    // TimeoutException too, and no connect.
+    private static bool IsConnectTimeout(Exception ex)
+    {
+        for (Exception? current = ex; current != null; current = current.InnerException)
+        {
+            if (current is TimeoutException and not System.Text.RegularExpressions.RegexMatchTimeoutException)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static string ScrubUserPaths(string? input)
@@ -709,8 +835,23 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     public async ValueTask<bool> PingAsync(CancellationToken ct = default)
     {
         ThrowIfDisposed();
-        await EnsureInitializedAsync(ct).ConfigureAwait(false);
-        return await ConnectionProvider.PingAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await EnsureConnectedAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested && Volatile.Read(ref _disposed) == 0)
+        {
+            // The ping ran out of its time while the connection was built anew: like a ping that times out, no daemon
+            // answered in time.
+            return false;
+        }
+        return await PingCurrentConnectionAsync(ct).ConfigureAwait(false);
+    }
+
+    // Pings over the connection as it is, without building it anew; without a connection no daemon can answer.
+    private async ValueTask<bool> PingCurrentConnectionAsync(CancellationToken ct)
+    {
+        return _connectionProvider is { } provider && await provider.PingAsync(ct).ConfigureAwait(false);
     }
 
     public async Task<SystemInfoResponse?> GetSystemInfoAsync(CancellationToken ct = default)
@@ -1004,6 +1145,8 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             // linked-CTS construction below, where reading _strategyCts.Token would otherwise throw an
             // ObjectDisposedException outside any try.
             strategyToken = _strategyCts.Token;
+            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(strategyToken, cancellationToken);
+            await EnsureConnectedAsync(connectCts.Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is ObjectDisposedException or OperationCanceledException)
         {
@@ -1093,7 +1236,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                     // the fallback; genuine cancellation (OperationCanceledException) still propagates.
                     try
                     {
-                        if (!await PingAsync(ct).ConfigureAwait(false))
+                        if (!await PingCurrentConnectionAsync(ct).ConfigureAwait(false))
                         {
                             isDockerOffline = true;
                             dockerConnectionEx = new DockerExecutionException($"Docker socket at '{socketPath}' is listening, but the daemon API is not responding.");
@@ -1117,17 +1260,18 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 {
                     pipeName = "docker_engine";
                 }
-                if (!await Services.Docker.DaemonEndpointValidator.VerifyWindowsNamedPipeAsync(pipeName, _settingsService.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false), ct: ct).ConfigureAwait(false))
+                var pipeCheck = await Services.Docker.DaemonEndpointValidator.VerifyWindowsNamedPipeAsync(pipeName, _settingsService.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false), ct: ct).ConfigureAwait(false);
+                if (Services.Docker.DaemonEndpointValidator.NamedPipeCheckFailure(pipeCheck, pipeName) is { } pipeFailure)
                 {
                     isDockerOffline = true;
-                    dockerConnectionEx = new DockerExecutionException($"Insecure or unreachable named pipe connection detected for '{pipeName}'. If this is a false positive, you can bypass this check in OneWare Studio Settings under 'Binary Management' -> 'Container Engine' -> check 'Bypass Named Pipe Security Check'.");
+                    dockerConnectionEx = pipeFailure;
                 }
             }
             else
             {
                 try
                 {
-                    var live = await PingAsync(ct).ConfigureAwait(false);
+                    var live = await PingCurrentConnectionAsync(ct).ConfigureAwait(false);
                     if (!live)
                     {
                         isDockerOffline = true;
@@ -1210,7 +1354,9 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             _console.SdkLog(command, $"[Docker SDK] WorkingDir = {createParams.WorkingDir}, Binds = [{string.Join(", ", createParams.HostConfig?.Binds ?? [])}]", RankInfo);
 
             _console.SdkLog(command, $"[Docker SDK] Ensuring image '{image}' is available...", RankInfo);
-            imageDigest = await _runner!.EnsureImageAsync(image, command, ct).ConfigureAwait(false);
+            // One runner for the whole run, even if a connection built anew meanwhile replaces the current one.
+            var runner = _runner!;
+            imageDigest = await runner.EnsureImageAsync(image, command, ct).ConfigureAwait(false);
             _console.SdkLog(command, $"[Docker SDK] Image ready. Digest = {imageDigest ?? "(none)"}", RankInfo);
 
             reconstructedDockerRun = Services.Docker.DockerRunCommandFormatter.Reconstruct(createParams, GetRuntimePath());
@@ -1218,7 +1364,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             _console.SdkLog(command, $"[Docker SDK] Equivalent CLI: {reconstructedDockerRun}", RankInfo);
 
             _console.SdkLog(command, $"[Docker SDK] Creating and starting container...", RankInfo);
-            var result = await _runner.RunContainerAsync(createParams, command, ct, verdict).ConfigureAwait(false);
+            var result = await runner.RunContainerAsync(createParams, command, ct, verdict).ConfigureAwait(false);
             exitCode = result.exitCode;
             wasCancelled = result.wasCancelled;
             resourceProfile = result.profile;
@@ -1262,7 +1408,8 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         catch (Exception ex)
         {
             errorMessage = ScrubUserPaths(ex.Message);
-            var err = ScrubUserPaths($"[Docker SDK Error] {ex.GetType().Name}: {ex.Message}") + FailureHints(ex, image);
+            var namedPipe = _daemonUri?.Scheme.Equals("npipe", StringComparison.OrdinalIgnoreCase) == true;
+            var err = ScrubUserPaths($"[Docker SDK Error] {ex.GetType().Name}: {ex.Message}") + FailureHints(ex, image, namedPipe);
             SafeInvoke(() => command.ErrorHandler?.Invoke(err));
             var friendlyEx = new DockerExecutionException(errorMessage, ex);
             ContainerTelemetry.TrackError("DockerExecutionStrategy", $"ExecuteAsync failed for '{executable}'", friendlyEx);

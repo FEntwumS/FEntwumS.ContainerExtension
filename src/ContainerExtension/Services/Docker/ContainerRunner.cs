@@ -52,6 +52,15 @@ internal sealed class ContainerRunner
             _ => !imageExistsLocally
         };
 
+    /// <summary>
+    /// Whether a run removes its container itself at the end. Only with Auto-Remove on: the daemon then removes a
+    /// container that ran to completion, except on the named pipe, where Auto-Remove is off at the daemon so that
+    /// the log stream, opened after the start, can drain; a run that stopped short or was cancelled is removed
+    /// either way. With Auto-Remove off the user keeps the container, on every endpoint.
+    /// </summary>
+    internal static bool ShouldRemoveAtEnd(bool autoRemove, bool useLogsStreaming, bool ranToCompletion, bool cancelled) =>
+        autoRemove && (useLogsStreaming || !ranToCompletion || cancelled);
+
     internal async Task<string?> EnsureImageAsync(string image, ToolCommand command, CancellationToken ct)
     {
         string? imageDigest = null;
@@ -595,10 +604,11 @@ internal sealed class ContainerRunner
             // rethrown, so ranToCompletion is still set — without the wasCancelled clause the
             // container would be untracked here yet never force-removed, leaking it if the
             // fire-and-forget cancel-time stop also failed. Harmless 404 if Docker already reaped
-            // it. Containers the user explicitly opted to keep (auto-remove off) are left untouched.
-            // On the npipe logs-streaming path auto-remove was forced off (above) so the log stream
-            // could drain, so that container is always force-removed here regardless of outcome.
-            if (useLogsStreaming || (autoRemove && (!ranToCompletion || Volatile.Read(ref wasCancelledFlag) != 0)))
+            // it. Containers the user explicitly opted to keep (auto-remove off) are left untouched,
+            // on the npipe logs-streaming path too: there auto-remove was forced off at the daemon
+            // (above) so the log stream could drain, so with Auto-Remove on that container is
+            // force-removed here regardless of outcome.
+            if (ShouldRemoveAtEnd(autoRemove, useLogsStreaming, ranToCompletion, Volatile.Read(ref wasCancelledFlag) != 0))
             {
                 try
                 {
