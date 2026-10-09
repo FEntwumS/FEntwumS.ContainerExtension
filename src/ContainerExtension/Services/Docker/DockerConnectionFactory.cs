@@ -17,6 +17,13 @@ namespace ContainerExtension.Services.Docker;
 internal static partial class DockerConnectionFactory
 {
     /// <summary>
+    /// The API version of a client whose daemon did not say which it speaks: no daemon answered the version
+    /// request, or its answer carried no version. Of the two versions used for this before, 1.44 and 1.45, it is
+    /// the one more daemons accept.
+    /// </summary>
+    internal static readonly System.Version FallbackApiVersion = new(1, 44);
+
+    /// <summary>
     /// Outcome of a connection attempt. <see cref="Client"/> and the managers are non-null only on success;
     /// on failure they are null while <see cref="DetectedRuntime"/> and <see cref="DaemonUri"/> still reflect
     /// whatever was resolved before the failure, so the dashboard can report the intended runtime/endpoint.
@@ -209,7 +216,7 @@ internal static partial class DockerConnectionFactory
     // (honouring shutdown) rather than misnegotiating a healthy-but-slow daemon down to the fallback version.
     private static async Task<System.Version> NegotiateApiVersionAsync(DockerClientConfiguration config, CancellationToken ct)
     {
-        System.Version apiVersion = new System.Version(1, 44);
+        System.Version apiVersion = FallbackApiVersion;
         var tempClient = config.CreateClient();
         try
         {
@@ -234,9 +241,9 @@ internal static partial class DockerConnectionFactory
         {
             if (!IsDaemonOffline(ex))
             {
-                ContainerTelemetry.TrackError("DockerExecutionStrategy", "API version negotiation failed; falling back to 1.45", ex);
+                ContainerTelemetry.TrackError("DockerExecutionStrategy", $"API version negotiation failed; falling back to {FallbackApiVersion}", ex);
             }
-            apiVersion = new System.Version(1, 45);
+            apiVersion = FallbackApiVersion;
         }
         finally
         {
