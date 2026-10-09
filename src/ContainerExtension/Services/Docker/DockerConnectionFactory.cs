@@ -34,7 +34,14 @@ internal static partial class DockerConnectionFactory
         DockerClient? Client,
         DockerConnectionProvider? ConnectionProvider,
         DockerImageManager? ImageManager,
-        DockerContainerManager? ContainerManager);
+        DockerContainerManager? ContainerManager)
+    {
+        /// <summary>
+        /// Whether a daemon answered the version request while the connection was built. Without an answer the
+        /// client uses <see cref="FallbackApiVersion"/> and may point at a socket that nobody serves yet.
+        /// </summary>
+        internal bool DaemonAnswered { get; init; }
+    }
 
     [GeneratedRegex(@"^[a-zA-Z0-9][-a-zA-Z0-9.]*(?::\d{1,5})?$", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]
     private static partial Regex HostOnlyRegex();
@@ -162,7 +169,11 @@ internal static partial class DockerConnectionFactory
                     {
                         uri = new Uri("unix:///var/run/docker.sock");
                         runtime = "docker (default)";
-                        ContainerTelemetry.TrackError("DockerExecutionStrategy", "ProbeUnixSocket failed, falling back to default", ex);
+                        // A cancellation by the caller is no fault of the probe.
+                        if (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                        {
+                            ContainerTelemetry.TrackError("DockerExecutionStrategy", "ProbeUnixSocket failed, falling back to default", ex);
+                        }
                     }
                 }
             }
@@ -193,20 +204,24 @@ internal static partial class DockerConnectionFactory
                 ? new DockerClientConfiguration(uri, new DaemonEndpointValidator.SecureNamedPipeCredentials(uri),
                     namedPipeConnectTimeout: DaemonEndpointValidator.SecureNamedPipeCredentials.ConnectTimeout)
                 : new DockerClientConfiguration(uri);
-            var apiVersion = await NegotiateApiVersionAsync(config, ct).ConfigureAwait(false);
+            var (apiVersion, daemonAnswered) = await NegotiateApiVersionAsync(config, ct).ConfigureAwait(false);
 
             client = config.CreateClient(apiVersion);
             connectionProvider = new DockerConnectionProvider(client);
             var imageManager = new DockerImageManager(client, settings);
             var containerManager = new DockerContainerManager(client);
 
-            return new Connection(runtime, uri, client, connectionProvider, imageManager, containerManager);
+            return new Connection(runtime, uri, client, connectionProvider, imageManager, containerManager) { DaemonAnswered = daemonAnswered };
         }
         catch (Exception ex)
         {
             connectionProvider?.Dispose();
             client?.Dispose();
-            ContainerTelemetry.TrackError("DockerExecutionStrategy", "Asynchronous daemon connection initialization failed", ex);
+            // A cancellation by the caller is no fault of the connection.
+            if (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                ContainerTelemetry.TrackError("DockerExecutionStrategy", "Asynchronous daemon connection initialization failed", ex);
+            }
             return new Connection(runtime, uri, null, null, null, null);
         }
     }
@@ -214,15 +229,18 @@ internal static partial class DockerConnectionFactory
     // Ask the daemon for its API version, bounded by a short timeout, and fall back to a safe default on any
     // genuine failure. A cold daemon can need well over the first-connect budget, so this is bounded at 3 s
     // (honouring shutdown) rather than misnegotiating a healthy-but-slow daemon down to the fallback version.
-    private static async Task<System.Version> NegotiateApiVersionAsync(DockerClientConfiguration config, CancellationToken ct)
+    // Also says whether a daemon answered at all.
+    private static async Task<(System.Version Version, bool DaemonAnswered)> NegotiateApiVersionAsync(DockerClientConfiguration config, CancellationToken ct)
     {
         System.Version apiVersion = FallbackApiVersion;
+        var daemonAnswered = false;
         var tempClient = config.CreateClient();
         try
         {
             using var verCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             verCts.CancelAfter(TimeSpan.FromSeconds(3));
             var version = await tempClient.System.GetVersionAsync(verCts.Token).ConfigureAwait(false);
+            daemonAnswered = true;
             var apiVerStr = version?.APIVersion;
             if (!string.IsNullOrEmpty(apiVerStr))
             {
@@ -239,6 +257,9 @@ internal static partial class DockerConnectionFactory
         }
         catch (Exception ex)
         {
+            // A daemon that answers with an error status answers all the same; building the connection anew would not
+            // change its answer.
+            daemonAnswered = ex is DockerApiException;
             if (!IsDaemonOffline(ex))
             {
                 ContainerTelemetry.TrackError("DockerExecutionStrategy", $"API version negotiation failed; falling back to {FallbackApiVersion}", ex);
@@ -249,7 +270,7 @@ internal static partial class DockerConnectionFactory
         {
             tempClient.Dispose();
         }
-        return apiVersion;
+        return (apiVersion, daemonAnswered);
     }
 
     // Whether a failed request shows only that no daemon answers, which is no error worth recording: a timeout

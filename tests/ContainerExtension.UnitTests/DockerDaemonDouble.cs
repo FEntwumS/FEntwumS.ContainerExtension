@@ -20,13 +20,15 @@ internal sealed class DockerDaemonDouble : IDisposable
 {
     private readonly TcpListener _listener;
     private readonly string? _apiVersion;
+    private readonly string _versionStatus;
     private readonly CancellationTokenSource _stop = new();
     private readonly ConcurrentQueue<string> _paths = new();
     private readonly Task _accepting;
 
-    private DockerDaemonDouble(int port, string? apiVersion)
+    private DockerDaemonDouble(int port, string? apiVersion, string versionStatus)
     {
         _apiVersion = apiVersion;
+        _versionStatus = versionStatus;
         _listener = new TcpListener(IPAddress.Loopback, port);
         _listener.Start();
         _accepting = AcceptAsync();
@@ -35,8 +37,11 @@ internal sealed class DockerDaemonDouble : IDisposable
     /// <summary>The paths of the requests received so far, in order.</summary>
     public IReadOnlyCollection<string> Paths => _paths;
 
-    /// <summary>Starts a stand-in daemon on <paramref name="port"/> that reports <paramref name="apiVersion"/>.</summary>
-    public static DockerDaemonDouble Start(int port, string? apiVersion) => new(port, apiVersion);
+    /// <summary>
+    /// Starts a stand-in daemon on <paramref name="port"/> that reports <paramref name="apiVersion"/>, with
+    /// <paramref name="versionStatus"/> as the status of its answer to the version request.
+    /// </summary>
+    public static DockerDaemonDouble Start(int port, string? apiVersion, string versionStatus = "200 OK") => new(port, apiVersion, versionStatus);
 
     /// <summary>A port on 127.0.0.1 that nothing listens on, so a connection to it is refused until a double starts there.</summary>
     public static int FreePort()
@@ -83,7 +88,7 @@ internal sealed class DockerDaemonDouble : IDisposable
                 _paths.Enqueue(path);
 
                 var (status, body) = path.EndsWith("/version", StringComparison.Ordinal)
-                    ? ("200 OK", _apiVersion is null ? "{}" : $"{{\"ApiVersion\":\"{_apiVersion}\",\"Version\":\"27.0.0\"}}")
+                    ? (_versionStatus, _apiVersion is null ? "{}" : $"{{\"ApiVersion\":\"{_apiVersion}\",\"Version\":\"27.0.0\"}}")
                     : path.EndsWith("/_ping", StringComparison.Ordinal)
                         ? ("200 OK", "OK")
                         : ("404 Not Found", "{\"message\":\"not served by the double\"}");
