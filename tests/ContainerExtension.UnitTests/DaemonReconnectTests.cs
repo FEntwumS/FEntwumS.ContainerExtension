@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using ContainerExtension;
 using OneWare.Essentials.ToolEngine;
@@ -97,6 +98,53 @@ public sealed class DaemonReconnectTests : IDisposable
         await strategy.ExecuteAsync(EchoCommand(), TestContext.Current.CancellationToken);
 
         Assert.Single(daemon.Paths, path => path == "/version");
+    }
+
+    [Fact]
+    public async Task PingAsync_DaemonStartedAfterTheStrategy_AnswersOverItsApiVersion()
+    {
+        // The dashboard and the startup check of the extension ask by a ping whether the daemon answers.
+        var port = DockerDaemonDouble.FreePort();
+        using var provider = ProviderFor($"http://127.0.0.1:{port}");
+        using var strategy = new DockerExecutionStrategy(provider);
+        await strategy.EnsureInitializedAsync(TestContext.Current.CancellationToken);
+        using var daemon = DockerDaemonDouble.Start(port, "1.47");
+
+        var alive = await strategy.PingAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(alive);
+        Assert.Contains("/v1.47/_ping", daemon.Paths);
+    }
+
+    [Fact]
+    public async Task PingAsync_RunningOutOfTimeWhileBuildingAnew_ReadsAsNoDaemon()
+    {
+        // A daemon that takes connections but never answers, as one that is still starting: building the connection
+        // anew outlasts the ping, which must read as no daemon, as a ping that times out does, and not throw.
+        var port = DockerDaemonDouble.FreePort();
+        using var provider = ProviderFor($"http://127.0.0.1:{port}");
+        using var strategy = new DockerExecutionStrategy(provider);
+        await strategy.EnsureInitializedAsync(TestContext.Current.CancellationToken);
+        using var silent = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port);
+        silent.Start();
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        budget.CancelAfter(TimeSpan.FromMilliseconds(500));
+
+        var alive = await strategy.PingAsync(budget.Token);
+
+        Assert.False(alive);
+    }
+
+    [Fact]
+    public async Task PingAsync_WithoutConnection_ReadsAsNoDaemon()
+    {
+        using var provider = ProviderFor("ftp://127.0.0.1:1");
+        using var strategy = new DockerExecutionStrategy(provider);
+        await strategy.EnsureInitializedAsync(TestContext.Current.CancellationToken);
+
+        var alive = await strategy.PingAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(alive);
     }
 
     private static E2ETestServiceProvider ProviderFor(string daemonSocket)

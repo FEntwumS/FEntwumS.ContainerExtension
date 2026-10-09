@@ -145,10 +145,10 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         }
     }
 
-    // Before a run: when the connection built at startup failed, or no daemon answered its version request, build it
-    // anew, so that a daemon started after OneWare is reached without a restart, with the API version it speaks. A new
-    // connection replaces the current one only when it is better: a client where there was none, or one whose daemon
-    // answered.
+    // Before a run, a ping or a refresh of the dashboard: when the connection built at startup failed, or no daemon
+    // answered its version request, build it anew, so that a daemon started after OneWare is reached without a
+    // restart, with the API version it speaks. A new connection replaces the current one only when it is better: a
+    // client where there was none, or one whose daemon answered.
     internal async Task EnsureConnectedAsync(CancellationToken ct)
     {
         ThrowIfDisposed();
@@ -814,8 +814,23 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     public async ValueTask<bool> PingAsync(CancellationToken ct = default)
     {
         ThrowIfDisposed();
-        await EnsureInitializedAsync(ct).ConfigureAwait(false);
-        return await ConnectionProvider.PingAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await EnsureConnectedAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested && Volatile.Read(ref _disposed) == 0)
+        {
+            // The ping ran out of its time while the connection was built anew: like a ping that times out, no daemon
+            // answered in time.
+            return false;
+        }
+        return await PingCurrentConnectionAsync(ct).ConfigureAwait(false);
+    }
+
+    // Pings over the connection as it is, without building it anew; without a connection no daemon can answer.
+    private async ValueTask<bool> PingCurrentConnectionAsync(CancellationToken ct)
+    {
+        return _connectionProvider is { } provider && await provider.PingAsync(ct).ConfigureAwait(false);
     }
 
     public async Task<SystemInfoResponse?> GetSystemInfoAsync(CancellationToken ct = default)
@@ -1200,7 +1215,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                     // the fallback; genuine cancellation (OperationCanceledException) still propagates.
                     try
                     {
-                        if (!await PingAsync(ct).ConfigureAwait(false))
+                        if (!await PingCurrentConnectionAsync(ct).ConfigureAwait(false))
                         {
                             isDockerOffline = true;
                             dockerConnectionEx = new DockerExecutionException($"Docker socket at '{socketPath}' is listening, but the daemon API is not responding.");
@@ -1234,7 +1249,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             {
                 try
                 {
-                    var live = await PingAsync(ct).ConfigureAwait(false);
+                    var live = await PingCurrentConnectionAsync(ct).ConfigureAwait(false);
                     if (!live)
                     {
                         isDockerOffline = true;
