@@ -1026,6 +1026,17 @@ public partial class DockerDiagnosticsView : UserControl
             // Read settings snapshot (always available, synchronous)
             var settings = _strategy.GetActiveSettingsSummary();
 
+            // A connection that failed or fell back at startup is built anew first, so the dashboard comes online once
+            // the daemon runs; a fault here shows as offline like any failed query below.
+            try
+            {
+                await _strategy.EnsureConnectedAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                ContainerTelemetry.TrackError("DockerDiagnosticsView", "RefreshAllAsync_Reconnect", ex);
+            }
+
             // Run all API queries in parallel directly, avoiding redundant Ping call
             var infoTask = _strategy.GetSystemInfoAsync(ct);
             var containersTask = _strategy.ListContainersAsync(ct);

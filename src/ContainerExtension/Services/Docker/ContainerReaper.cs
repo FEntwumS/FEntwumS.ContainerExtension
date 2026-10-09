@@ -47,6 +47,21 @@ internal static class ContainerReaper
     }
 
     /// <summary>
+    /// Hands teardown from <paramref name="previous"/> to <paramref name="next"/> when a connection replaces
+    /// another, without reaping: runs of the previous client may still be in flight, and their containers are
+    /// reaped through the next one. Arms <paramref name="next"/> when nobody owns teardown yet; leaves another
+    /// owner alone.
+    /// </summary>
+    internal static void HandOver(DockerClient? previous, DockerClient next)
+    {
+        if (previous != null && Interlocked.CompareExchange(ref _clientForCleanup, next, previous) == previous)
+        {
+            return;
+        }
+        TryArm(next);
+    }
+
+    /// <summary>
     /// Disposal counterpart of <see cref="TryArm"/>: if <paramref name="client"/> is the current owner,
     /// unregisters the handlers and reaps its tracked containers with the still-valid client, then re-enables
     /// reaping so a later owner can still clean up on exit. A null or non-owning client is a no-op.

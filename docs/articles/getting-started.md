@@ -42,7 +42,7 @@ If the search finds nothing, first add the manifest link
 ## First Run
 
 1. **Launch OneWare Studio** - The plugin loads automatically
-2. **Health Check** - On startup, the extension verifies Docker daemon connectivity in the background
+2. **Health Check** - On startup, the extension verifies Docker daemon connectivity in the background. If the daemon starts only after OneWare Studio, the next run or refresh of the dashboard connects to it, without a restart
 3. **Open the Dashboard** - Choose **View > Tool Windows > Container Dashboard** (or run the *Container Dashboard* command). It opens as a right-pinned dockable panel with a whale icon
 4. **Verify Connection** - The dashboard shows daemon health, Docker version, and OS info
 
