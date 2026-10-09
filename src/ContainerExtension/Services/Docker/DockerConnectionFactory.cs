@@ -66,9 +66,7 @@ internal static partial class DockerConnectionFactory
                 {
                     if (uriText.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
                     {
-                        bool isLocal = uriText.Contains("localhost", StringComparison.OrdinalIgnoreCase) ||
-                                       uriText.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
-                                       uriText.Contains("[::1]", StringComparison.Ordinal);
+                        bool isLocal = Uri.TryCreate(uriText, UriKind.Absolute, out var textUri) && IsLoopbackHost(textUri.Host);
                         if (!isLocal)
                         {
                             await Console.Out.WriteLineAsync("[WARN] Insecure HTTP custom daemon socket requested. Upgrading to https://").ConfigureAwait(false);
@@ -97,10 +95,7 @@ internal static partial class DockerConnectionFactory
                     uri = new Uri(uriText);
                     if (uri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase))
                     {
-                        bool isLocal = uri.Host != null && (
-                                       uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-                                       uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
-                                       uri.Host.Equals("::1", StringComparison.Ordinal));
+                        bool isLocal = IsLoopbackHost(uri.Host);
                         if (!isLocal)
                         {
                             await Console.Out.WriteLineAsync("[WARN] Insecure HTTP custom daemon socket scheme. Upgrading to HTTPS.").ConfigureAwait(false);
@@ -128,9 +123,7 @@ internal static partial class DockerConnectionFactory
                             throw new UriFormatException("Invalid remote daemon hostname.");
                         }
 
-                        if (!uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) &&
-                            !uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) &&
-                            !uri.Host.Equals("::1", StringComparison.Ordinal))
+                        if (!IsLoopbackHost(uri.Host))
                         {
                             var warningMsg = $"[SECURITY WARNING] Connecting to a remote Docker daemon at '{uri.Host}'. Outbound traffic may expose credentials.";
                             await Console.Error.WriteLineAsync(warningMsg).ConfigureAwait(false);
@@ -281,4 +274,16 @@ internal static partial class DockerConnectionFactory
         ex is OperationCanceledException or TimeoutException or System.Net.Sockets.SocketException ||
         ex.InnerException is System.Net.Sockets.SocketException ||
         (ex is HttpRequestException httpEx && (httpEx.InnerException is System.Net.Sockets.SocketException || httpEx.Message.Contains("connection refused", StringComparison.OrdinalIgnoreCase)));
+
+    // Whether a daemon address names this machine: localhost or a loopback address. Uri.Host keeps the brackets of an
+    // IPv6 address, which IPAddress.TryParse accepts; a name that merely starts like a loopback address is no loopback.
+    internal static bool IsLoopbackHost(string? host)
+    {
+        if (string.IsNullOrEmpty(host))
+        {
+            return false;
+        }
+        return host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || (System.Net.IPAddress.TryParse(host, out var ip) && System.Net.IPAddress.IsLoopback(ip));
+    }
 }
