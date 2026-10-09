@@ -29,11 +29,12 @@ public sealed class ActiveConfigLayoutTests
                 $"Setting '{key}' is emitted by GetActiveSettingsSummary but absent from ActiveConfigLayout.Groups, so it is never shown in the dashboard."));
     }
 
+    // No container starts privileged, so the panel has no privileged mode to show.
     [Fact]
-    public void ActiveConfigPanel_ShowsPrivilegedModeToggle()
+    public void ActiveConfigPanel_ShowsNoPrivilegedMode()
     {
         var displayedKeys = ActiveConfigLayout.Groups.SelectMany(g => g.Keys);
 
-        Assert.Contains(ContainerExtensionModule.SettingsKeyAllowPrivileged, displayedKeys);
+        Assert.DoesNotContain(displayedKeys, key => key.Contains("Privileged", StringComparison.OrdinalIgnoreCase));
     }
 }

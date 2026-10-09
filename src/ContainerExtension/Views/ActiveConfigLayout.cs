@@ -16,6 +16,6 @@ internal static class ActiveConfigLayout
         ("CONTAINER INFO",   [ ContainerExtensionModule.SettingsKeyAutoRemove, ContainerExtensionModule.SettingsKeyNamePrefix, ContainerExtensionModule.SettingsKeyExtraLabels ]),
         ("LOGGING CONFIG",   [ ContainerExtensionModule.SettingsKeyLogLevel, ContainerExtensionModule.SettingsKeyTimestamps ]),
         ("DASHBOARD DATA",   [ ContainerExtensionModule.SettingsKeyDashboardRefresh, ContainerExtensionModule.SettingsKeyRetention ]),
-        ("ADVANCED PATHS",   [ ContainerExtensionModule.SettingsKeyRuntimePath, ContainerExtensionModule.SettingsKeyAllowPrivileged, ContainerExtensionModule.SettingsKeyBypassNamedPipeCheck, ContainerExtensionModule.SettingsKeyAllowNativeFallback ]),
+        ("ADVANCED PATHS",   [ ContainerExtensionModule.SettingsKeyRuntimePath, ContainerExtensionModule.SettingsKeyBypassNamedPipeCheck, ContainerExtensionModule.SettingsKeyAllowNativeFallback ]),
     ];
 }
