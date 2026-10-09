@@ -497,9 +497,10 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     }
 
     /// <summary>
-    /// The hint lines a failed run adds below its error line, chosen by the failure's message and type.
+    /// The hint lines a failed run adds below its error line, chosen by the failure's message and type, and for a
+    /// daemon on a Windows named pipe by a connect that gave up.
     /// </summary>
-    internal static string FailureHints(Exception ex, string image)
+    internal static string FailureHints(Exception ex, string image, bool namedPipe = false)
     {
         var hints = "";
         // A registry that refuses a pull says "pull access denied", which says nothing about local permissions.
@@ -534,7 +535,27 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         {
             hints += $"\n  Hint: A host port conflict was detected. Please check if another container or service is using the same port, or configure a different host port mapping.";
         }
+        // With Bypass Named Pipe Security Check on, a pipe that nobody serves is only found by the connect, which
+        // gives up with a TimeoutException, as when Docker Desktop is not running.
+        if (namedPipe && IsConnectTimeout(ex))
+        {
+            hints += "\n  Hint: No process serves the Docker named pipe. Start Docker Desktop, or the container runtime that should serve the pipe, and try again.";
+        }
         return hints;
+    }
+
+    // Whether the failure, or one it wraps, is a connect that gave up. A regular expression that ran out of time is a
+    // TimeoutException too, and no connect.
+    private static bool IsConnectTimeout(Exception ex)
+    {
+        for (Exception? current = ex; current != null; current = current.InnerException)
+        {
+            if (current is TimeoutException and not System.Text.RegularExpressions.RegexMatchTimeoutException)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static string ScrubUserPaths(string? input)
@@ -1117,10 +1138,11 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 {
                     pipeName = "docker_engine";
                 }
-                if (!await Services.Docker.DaemonEndpointValidator.VerifyWindowsNamedPipeAsync(pipeName, _settingsService.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false), ct: ct).ConfigureAwait(false))
+                var pipeCheck = await Services.Docker.DaemonEndpointValidator.VerifyWindowsNamedPipeAsync(pipeName, _settingsService.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false), ct: ct).ConfigureAwait(false);
+                if (Services.Docker.DaemonEndpointValidator.NamedPipeCheckFailure(pipeCheck, pipeName) is { } pipeFailure)
                 {
                     isDockerOffline = true;
-                    dockerConnectionEx = new DockerExecutionException($"Insecure or unreachable named pipe connection detected for '{pipeName}'. If this is a false positive, you can bypass this check in OneWare Studio Settings under 'Binary Management' -> 'Container Engine' -> check 'Bypass Named Pipe Security Check'.");
+                    dockerConnectionEx = pipeFailure;
                 }
             }
             else
@@ -1262,7 +1284,8 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         catch (Exception ex)
         {
             errorMessage = ScrubUserPaths(ex.Message);
-            var err = ScrubUserPaths($"[Docker SDK Error] {ex.GetType().Name}: {ex.Message}") + FailureHints(ex, image);
+            var namedPipe = _daemonUri?.Scheme.Equals("npipe", StringComparison.OrdinalIgnoreCase) == true;
+            var err = ScrubUserPaths($"[Docker SDK Error] {ex.GetType().Name}: {ex.Message}") + FailureHints(ex, image, namedPipe);
             SafeInvoke(() => command.ErrorHandler?.Invoke(err));
             var friendlyEx = new DockerExecutionException(errorMessage, ex);
             ContainerTelemetry.TrackError("DockerExecutionStrategy", $"ExecuteAsync failed for '{executable}'", friendlyEx);
