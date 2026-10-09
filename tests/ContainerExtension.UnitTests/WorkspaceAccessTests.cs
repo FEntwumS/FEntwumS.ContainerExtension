@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using ContainerExtension;
 using ContainerExtension.Services.Docker;
@@ -9,8 +10,11 @@ namespace ContainerExtension.UnitTests;
 
 /// <summary>
 /// Whether a run mounts the project writable: the tool's file name and output flags decide, never the folders the tool
-/// lies in.
+/// lies in, unless a <c>docker.workspace</c> of the call or of the tool names rw or ro. Joins the telemetry collection
+/// because the strategy tests construct a <see cref="DockerExecutionStrategy"/>, whose background initialization
+/// touches the process-global telemetry sink.
 /// </summary>
+[Collection("TelemetryTests")]
 public sealed class WorkspaceAccessTests
 {
     private static ToolCommand Command(string executable, params string[] arguments) => new()
@@ -21,9 +25,9 @@ public sealed class WorkspaceAccessTests
         CommandArguments = arguments.Select(argument => (ICommandArgument)new TestCommandArgument(argument)).ToList()
     };
 
-    private static bool MountsWritable(ToolCommand command)
+    private static bool MountsWritable(ToolCommand command, bool? workspaceWritable = null)
     {
-        var parameters = DockerCommandBuilder.BuildContainerParameters("img", command, null!, null, null, (_, _) => { });
+        var parameters = DockerCommandBuilder.BuildContainerParameters("img", command, null!, null, null, (_, _) => { }, workspaceWritable: workspaceWritable);
         if (parameters.HostConfig.Binds.Any(bind => bind.EndsWith(":/workspace:ro", StringComparison.Ordinal)))
         {
             return false;
@@ -112,4 +116,68 @@ public sealed class WorkspaceAccessTests
         Assert.False(MountsWritable(Command("some-unknown-tool", "in.txt")));
         Assert.True(MountsWritable(Command("some-unknown-tool", "-o", "out.txt")));
     }
+
+    [Fact]
+    public void WorkspaceAccessGiven_OverridesTheToolName()
+    {
+        Assert.True(MountsWritable(Command("icebram"), workspaceWritable: true));
+        Assert.False(MountsWritable(Command("yosys"), workspaceWritable: false));
+    }
+
+    [Theory]
+    [InlineData("rw", true)]
+    [InlineData(" RO ", false)]
+    public void ResolveWorkspaceAccess_TakesTheValueOfTheCall(string access, bool writable)
+    {
+        using var provider = ProviderWithToolAccess("ro");
+        using var strategy = new DockerExecutionStrategy(provider);
+        var command = new ToolCommand
+        {
+            Executable = "icebram",
+            ToolName = "icebram",
+            WorkingDirectory = "/workspace/dir",
+            CommandArguments = new List<ICommandArgument>(),
+            StrategyConfigurationOverrides = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [ContainerExtensionModule.StrategyConfigurationWorkspaceKey] = access
+            }
+        };
+
+        Assert.Equal(writable, strategy.ResolveWorkspaceAccess(command));
+    }
+
+    [Fact]
+    public void ResolveWorkspaceAccess_TakesTheValueOfTheTool_WhenTheCallNamesNone()
+    {
+        using var provider = ProviderWithToolAccess("rw");
+        using var strategy = new DockerExecutionStrategy(provider);
+
+        Assert.True(strategy.ResolveWorkspaceAccess(Command("icebram")));
+    }
+
+    [Fact]
+    public void ResolveWorkspaceAccess_WithoutAValue_LeavesTheDecisionToTheToolName()
+    {
+        using var provider = new TestServiceProvider();
+        using var strategy = new DockerExecutionStrategy(provider);
+
+        Assert.Null(strategy.ResolveWorkspaceAccess(Command("icebram")));
+    }
+
+    [Fact]
+    public void ResolveWorkspaceAccess_RejectsAValueOtherThanRwOrRo()
+    {
+        using var provider = ProviderWithToolAccess("writable");
+        using var strategy = new DockerExecutionStrategy(provider);
+
+        var error = Assert.Throws<DockerExecutionException>(() => strategy.ResolveWorkspaceAccess(Command("icebram")));
+        Assert.Contains("tool 'icebram'", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("writable", error.Message, StringComparison.Ordinal);
+    }
+
+    private static TestServiceProvider ProviderWithToolAccess(string access) => new()
+    {
+        ToolService = new StrategyConfigurationToolService()
+            .WithConfiguration("icebram", ContainerExtensionModule.StrategyConfigurationWorkspaceKey, access)
+    };
 }

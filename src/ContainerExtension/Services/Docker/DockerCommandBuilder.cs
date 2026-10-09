@@ -168,7 +168,8 @@ internal static class DockerCommandBuilder
       string? gid,
       Action<ToolCommand, string> sdkLog,
       double? remoteCpuCores = null,
-      bool isRootless = false)
+      bool isRootless = false,
+      bool? workspaceWritable = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(image);
         ArgumentNullException.ThrowIfNull(command);
@@ -504,7 +505,8 @@ internal static class DockerCommandBuilder
         var autoRemove = settingsService.SafeGetSetting(ContainerExtensionModule.AutoRemoveSetting, true);
         var networkMode = settingsService.SafeGetSetting(ContainerExtensionModule.NetworkModeSetting, "bridge");
 
-        var bindSuffix = ToolRequiresWriteAccess(command) ? "" : ":ro";
+        // A docker.workspace of the call or of the tool decides first; without one, the tool's name and flags do.
+        var bindSuffix = (workspaceWritable ?? ToolRequiresWriteAccess(command)) ? "" : ":ro";
 
         var createParams = new CreateContainerParameters
         {
