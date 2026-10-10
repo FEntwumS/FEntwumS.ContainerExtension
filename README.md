@@ -90,7 +90,9 @@ flowchart TD
 - Host paths that escape the mounted workspace are remapped to an in-workspace sentinel rather than
   their real location; an explicit device/library allowlist is the only pass-through. The behaviour is
   pinned by an adversarial path-containment test corpus that runs in CI.
-- Mount allow-listing rejects binds of critical host paths (`/etc`, `/proc`, `/sys`, the Docker socket, …).
+- Mount allow-listing rejects binds of critical host paths (`/etc`, `/proc`, `/sys`, `/run`, the Docker
+  socket, …); on Linux a project on a removable drive under `/run/media/`, where udisks2 mounts it, may
+  be bound.
 - The registry client is HTTPS-only, scopes forwarded credentials to the matching host, and rejects
   references that resolve to loopback or internal addresses (SSRF defense).
 - Supply chain: `NuGetAudit`, an SBOM and OIDC build attestations on releases, and CodeQL plus Trivy
