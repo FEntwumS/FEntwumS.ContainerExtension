@@ -76,6 +76,8 @@ public sealed class ContainerExtensionModule : OneWareModuleBase, IDisposable
     // The key OneWare's tool engine uses by convention for a container image in a tool's strategy
     // configuration or in the overrides of a single call.
     public const string StrategyConfigurationImageKey = "docker.image";
+    // The key for a tool's access to the project in the same places: rw mounts it writable, ro read-only.
+    public const string StrategyConfigurationWorkspaceKey = "docker.workspace";
     public const string FallbackImage = "hdlc/ghdl:yosys";
 
     // The project's own full-flow toolchain image (built locally via "Build Local Image" or
