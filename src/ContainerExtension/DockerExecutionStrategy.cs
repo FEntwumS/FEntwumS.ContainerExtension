@@ -288,8 +288,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 [ContainerExtensionModule.SettingsKeyRetention] = _settingsService.SafeGetSetting(ContainerExtensionModule.TelemetryRetentionSetting, "25"),
                 [ContainerExtensionModule.SettingsKeyRuntimePath] = _settingsService.SafeGetSetting(ContainerExtensionModule.DockerRuntimePathSetting, "") is var r && string.IsNullOrWhiteSpace(r) ? "docker (PATH)" : r,
                 [ContainerExtensionModule.SettingsKeyBypassNamedPipeCheck] = _settingsService.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false) ? "Bypassed" : "Active",
-                [ContainerExtensionModule.SettingsKeyAllowNativeFallback] = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowNativeFallbackSetting, false) ? "Enabled" : "Disabled",
-                [ContainerExtensionModule.SettingsKeyAllowPrivileged] = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowPrivilegedSetting, false) ? "Allowed" : "Disabled"
+                [ContainerExtensionModule.SettingsKeyAllowNativeFallback] = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowNativeFallbackSetting, false) ? "Enabled" : "Disabled"
             };
         }
         finally
@@ -997,6 +996,41 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         return image;
     }
 
+    /// <summary>
+    /// Picks the workspace access for a run from the first source that names one, in the order of
+    /// <see cref="ResolveImage"/>: the call's own <c>docker.workspace</c>, then the one the tool's plugin declares (with
+    /// any override OneWare keeps for it). <c>rw</c> mounts the project writable and <c>ro</c> read-only; without
+    /// either, null lets the tool's name and output flags decide.
+    /// </summary>
+    internal bool? ResolveWorkspaceAccess(ToolCommand command)
+    {
+        var toolName = command.ToolName ?? string.Empty;
+
+        if (command.StrategyConfigurationOverrides.TryGetValue(ContainerExtensionModule.StrategyConfigurationWorkspaceKey, out var callAccess)
+            && !string.IsNullOrWhiteSpace(callAccess))
+            return ParseWorkspaceAccess(callAccess, "this call");
+
+        // Optional: a host without a tool service, such as the tests, declares no configuration per tool.
+        if (_serviceProvider.GetService(typeof(IToolService)) is IToolService toolService
+            && toolService.GetStrategyConfiguration(toolName).TryGetValue(ContainerExtensionModule.StrategyConfigurationWorkspaceKey, out var toolAccess)
+            && !string.IsNullOrWhiteSpace(toolAccess))
+            return ParseWorkspaceAccess(toolAccess, $"tool '{toolName}'");
+
+        return null;
+    }
+
+    // The message leaves the value out, as for an image reference that fails its check.
+    private static bool ParseWorkspaceAccess(string access, string owner)
+    {
+        return access.Trim().ToLowerInvariant() switch
+        {
+            "rw" => true,
+            "ro" => false,
+            _ => throw new DockerExecutionException(
+                $"The {ContainerExtensionModule.StrategyConfigurationWorkspaceKey} of {owner} must be rw or ro."),
+        };
+    }
+
     private CreateContainerParameters BuildContainerParameters(string image, ToolCommand command)
     {
         var sysInfo = ConnectionProvider.CachedSystemInfo;
@@ -1014,7 +1048,8 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
           Services.Docker.DaemonEndpointValidator.CachedGid,
           (cmd, msg) => _console.SdkLog(cmd, msg),
           remoteCpuCores,
-          isRootless);
+          isRootless,
+          ResolveWorkspaceAccess(command));
     }
 
     /// <summary>
@@ -1323,30 +1358,6 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
 
             _console.SdkLog(command, $"[Docker SDK] Building container parameters...", RankInfo);
             var createParams = BuildContainerParameters(image, command);
-
-            var allowPrivileged = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowPrivilegedSetting, false);
-            if (!allowPrivileged)
-            {
-                if (createParams.HostConfig?.Privileged == true)
-                {
-                    throw new DockerExecutionException("Privileged container execution is blocked by settings.");
-                }
-                var extraFlags = _settingsService.SafeGetSetting(ContainerExtensionModule.ExtraFlagsSetting, "");
-                if (extraFlags.Contains("--privileged", StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new DockerExecutionException("Privileged container execution via extra flags is blocked by settings.");
-                }
-                if (command.Arguments != null)
-                {
-                    foreach (var arg in command.Arguments)
-                    {
-                        if (arg != null && arg.Contains("--privileged", StringComparison.OrdinalIgnoreCase))
-                        {
-                            throw new DockerExecutionException("Privileged container execution via tool arguments is blocked by settings.");
-                        }
-                    }
-                }
-            }
 
             Services.Docker.BindValidator.ValidateBinds(createParams.HostConfig?.Binds);
 

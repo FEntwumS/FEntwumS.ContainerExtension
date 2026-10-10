@@ -33,6 +33,7 @@ internal static class BindValidator
             blockedPaths = new[]
             {
                 "/etc",
+                "/run",
                 "/var/run",
                 "/var/run/docker.sock",
                 "/var/run/containerd",
@@ -101,8 +102,14 @@ internal static class BindValidator
                 }
                 binds[i] = reconstructed;
 
+                var onRemovableMedia = IsUnderRemovableMedia(fullPath);
                 foreach (var blocked in blockedForms)
                 {
+                    if (onRemovableMedia && string.Equals(blocked, "/run", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
                     if (string.Equals(fullPath, blocked, StringComparison.OrdinalIgnoreCase))
                     {
                         throw new DockerExecutionException($"Mounting critical host path '{hostPath}' is blocked for security reasons.");
@@ -129,6 +136,15 @@ internal static class BindValidator
             }
         }
     }
+
+    // udisks2 mounts removable drives under /run/media/<user>/ on Linux, and only file systems, so a project on a USB
+    // stick may be bound although /run stays blocked with every socket under it. Compared on the canonical path, so
+    // no symlink or ".." leads out of it unnoticed; the root itself is not below it.
+    private const string RemovableMediaRoot = "/run/media/";
+
+    internal static bool IsUnderRemovableMedia(string canonicalPath) =>
+        canonicalPath.Length > RemovableMediaRoot.Length
+        && canonicalPath.StartsWith(RemovableMediaRoot, StringComparison.Ordinal);
 
     // Split a Docker bind spec "HOST:CONTAINER[:OPTIONS]" into its components. A leading Windows
     // drive-letter colon (e.g. "C:\path") is treated as part of the host path rather than the

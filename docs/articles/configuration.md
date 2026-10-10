@@ -46,7 +46,6 @@ The extension's settings are under **Binary Management > Container Engine** in O
 
 | Setting | Type | Default | Description |
 | ------- | ---- | ------- | ----------- |
-| Allow Privileged Containers | CheckBox | Off | While off, a run fails if its tool arguments or the Extra Container Labels contain `--privileged`. Turning it on lifts only this check: the extension never starts a container privileged, so all capabilities stay dropped and `no-new-privileges` and the PID limit still apply |
 | Bypass Named Pipe Security Check | CheckBox | On | Windows only. Skips the named-pipe server-process trust verification. On by default because the check produces false positives on common non-default daemon setups (WSL2 relays, rootless/remote engines); uncheck it on a hardened Windows host to re-enable the impersonation guard |
 | Allow Native Fallback | CheckBox | Off | If the Docker daemon is unreachable, execute the tool natively from the host `PATH` instead of failing. **Note:** native execution bypasses container isolation |
 
@@ -85,6 +84,16 @@ When the extension needs to determine which image to use, it checks (in order):
 ```
 
 Steps 2 and 4 come from OneWare's tool engine. A plugin declares `docker.image` for its tool in the strategy configuration of its `ToolContext`, and OneWare applies its own stored override of that value on top. A caller can override it for a single run with `WithStrategyConfiguration("docker.image", ...)`, which reaches the extension as `ToolCommand.StrategyConfigurationOverrides`. Both values pass the same format check as the image settings, and a value that fails it fails the run with a message naming its source. At the `Info` log level the run log shows the resolved image and where it came from.
+
+## Workspace Access
+
+Each run mounts the project directory at `/workspace` in the container, writable for a tool that writes there and read-only for every other tool. The extension decides by two names, the file name of the tool's executable and the tool's name in OneWare, never by the folders the executable lies in. Both are compared in lower case and without `.exe`, and when one names a read-only tool and the other a writing one, read-only wins. So the model that Verilator built, which OneWare runs from `build/sim/verilator/<bench>/simulation` as the tool `verilator`, may write its waveform.
+
+- Read-only, whatever their flags mean: the programmers `openFPGALoader`, `iceprog`, `black-iceprog`, `iceprogduino`, `icesprog`, `openocd`, `dfu-util`, `ujprog` and `fujprog`, and `gtkwave`.
+- Writable, whatever their flags mean: every tool whose name starts with `yosys`, `nextpnr-`, `sby`, `mcy`, `ghdl`, `iverilog` or `verilator`, every tool whose name ends in `pack`, the unpackers included, and `eqy`, `scy`, `nvc`, `vvp`, `prjoxide`, `icepll`, `ecppll`, `gowin_pll`, `ecpbram`, `icetime`, `vcd2fst`, `vcd2lxt`, `vcd2lxt2`, `vcd2vzt`, `bin2hex` and `hex2bin`, which can write through a flag or a file argument of their own.
+- Any other tool: writable only when one of its arguments is an output flag the extension recognizes (`-o`, `-w`, `-a`, `-e`, `-r`, `--output`, `--write`) or contains a redirection (`>`).
+
+A tool that needs another access sets `docker.workspace` to `rw` or `ro`, in upper or lower case, in the same places as `docker.image`: a caller for a single run with `WithStrategyConfiguration("docker.workspace", ...)`, a plugin for its tool in the strategy configuration of its `ToolContext`, with OneWare's stored override on top. The value of the call comes first. Any other value fails the run with a message naming its source.
 
 ## Environment Variables
 

@@ -87,7 +87,7 @@ resource limits, I/O streaming, and telemetry. The following are explicit non-go
 - **A formal security proof of the host daemon.** The implementation hardens the *client* boundary —
   named-pipe server-process trust verification on Windows, socket-owner checks on Unix, critical-path
   bind blocking, workspace path containment that remaps out-of-tree paths to an in-workspace sentinel,
-  a non-privileged default (`--cap-drop=ALL`, `--security-opt no-new-privileges`, a PID-count cap),
+  unprivileged containers only (`--cap-drop=ALL`, `--security-opt no-new-privileges`, a PID-count cap),
   SSRF gating on registry hosts, and telemetry credential scrubbing — but it does not, and
   cannot, prove the host container daemon trustworthy. A compromised or misconfigured daemon is
   outside the trust model. The native-fallback path is opt-in and explicitly documented as bypassing

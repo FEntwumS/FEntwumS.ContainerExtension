@@ -169,10 +169,6 @@ public partial class DockerDiagnosticsView
         var autoRemoveCheckBox = new CheckBox { Content = "Auto-Remove Containers on Completion", IsChecked = autoRemoveSetting, FontSize = 12 };
         formPanel.Children.Add(CreateFormItem("Auto-Remove Containers", "Automatically delete containers once the executable process exits.", autoRemoveCheckBox));
 
-        var allowPrivileged = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowPrivilegedSetting, false);
-        var allowPrivilegedCheckBox = new CheckBox { Content = "Allow Privileged Containers", IsChecked = allowPrivileged, FontSize = 12 };
-        formPanel.Children.Add(CreateFormItem("Allow Privileged Mode", "Runs containers with privileged capabilities (required in some complex mounting setups).", allowPrivilegedCheckBox));
-
         var namePrefix = _settingsService.SafeGetSetting(ContainerExtensionModule.ContainerNamePrefixSetting, "containerextension-");
         var prefixTextBox = new TextBox { Text = namePrefix, FontSize = 12, MinHeight = 28, VerticalContentAlignment = VerticalAlignment.Center };
         formPanel.Children.Add(CreateFormItem("Container Name Prefix", "Prefix assigned to all containers spawned by this extension.", prefixTextBox));
@@ -340,7 +336,6 @@ public partial class DockerDiagnosticsView
             timeoutSlider.Value = 0;
 
             autoRemoveCheckBox.IsChecked = true;
-            allowPrivilegedCheckBox.IsChecked = false;
             prefixTextBox.Text = "containerextension-";
             extraFlagsTextBox.Text = "";
 
@@ -438,7 +433,6 @@ public partial class DockerDiagnosticsView
                 (ContainerExtensionModule.CpuLimitSetting, Math.Round(cpuSlider.Value * 2.0) / 2.0),
                 (ContainerExtensionModule.TimeoutSetting, Math.Round(timeoutSlider.Value)),
                 (ContainerExtensionModule.AutoRemoveSetting, autoRemoveCheckBox.IsChecked == true),
-                (ContainerExtensionModule.AllowPrivilegedSetting, allowPrivilegedCheckBox.IsChecked == true),
                 (ContainerExtensionModule.ContainerNamePrefixSetting, prefixTextBox.Text?.Trim() ?? ""),
                 (ContainerExtensionModule.ExtraFlagsSetting, extraFlagsTextBox.Text?.Trim() ?? ""),
                 (ContainerExtensionModule.LogLevelSetting, logLevelComboBox.SelectedItem as string ?? ""),
