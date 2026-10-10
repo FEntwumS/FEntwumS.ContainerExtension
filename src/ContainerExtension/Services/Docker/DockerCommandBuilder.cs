@@ -679,13 +679,20 @@ internal static class DockerCommandBuilder
                                     sdkLog(command, $"[Docker SDK] Warning: ignoring invalid port-range mapping '{portMappingStr}'.");
                                     continue;
                                 }
-                                var rangeCount = Math.Min(hostEnd - hostStart, guestEnd - guestStart);
-                                if (rangeCount > maxRange)
+                                // A range holds one port more than the difference of its ends, and both sides must hold
+                                // as many, or the mapping would publish other ports than the ones it names.
+                                if (hostEnd - hostStart != guestEnd - guestStart)
+                                {
+                                    sdkLog(command, $"[Docker SDK] Warning: ignoring port-range mapping '{portMappingStr}': the host and container ranges differ in length.");
+                                    continue;
+                                }
+                                var portCount = hostEnd - hostStart + 1;
+                                if (portCount > maxRange)
                                 {
                                     sdkLog(command, $"[Docker SDK] Warning: port-range mapping '{portMappingStr}' exceeds {maxRange} ports; truncating.");
-                                    rangeCount = maxRange;
+                                    portCount = maxRange;
                                 }
-                                for (int r = 0; r <= rangeCount; r++)
+                                for (int r = 0; r < portCount; r++)
                                 {
                                     var hp = (hostStart + r).ToString(System.Globalization.CultureInfo.InvariantCulture);
                                     var gp = (guestStart + r).ToString(System.Globalization.CultureInfo.InvariantCulture);
