@@ -288,8 +288,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 [ContainerExtensionModule.SettingsKeyRetention] = _settingsService.SafeGetSetting(ContainerExtensionModule.TelemetryRetentionSetting, "25"),
                 [ContainerExtensionModule.SettingsKeyRuntimePath] = _settingsService.SafeGetSetting(ContainerExtensionModule.DockerRuntimePathSetting, "") is var r && string.IsNullOrWhiteSpace(r) ? "docker (PATH)" : r,
                 [ContainerExtensionModule.SettingsKeyBypassNamedPipeCheck] = _settingsService.SafeGetSetting(ContainerExtensionModule.BypassNamedPipeCheckSetting, false) ? "Bypassed" : "Active",
-                [ContainerExtensionModule.SettingsKeyAllowNativeFallback] = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowNativeFallbackSetting, false) ? "Enabled" : "Disabled",
-                [ContainerExtensionModule.SettingsKeyAllowPrivileged] = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowPrivilegedSetting, false) ? "Allowed" : "Disabled"
+                [ContainerExtensionModule.SettingsKeyAllowNativeFallback] = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowNativeFallbackSetting, false) ? "Enabled" : "Disabled"
             };
         }
         finally
@@ -1323,30 +1322,6 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
 
             _console.SdkLog(command, $"[Docker SDK] Building container parameters...", RankInfo);
             var createParams = BuildContainerParameters(image, command);
-
-            var allowPrivileged = _settingsService.SafeGetSetting(ContainerExtensionModule.AllowPrivilegedSetting, false);
-            if (!allowPrivileged)
-            {
-                if (createParams.HostConfig?.Privileged == true)
-                {
-                    throw new DockerExecutionException("Privileged container execution is blocked by settings.");
-                }
-                var extraFlags = _settingsService.SafeGetSetting(ContainerExtensionModule.ExtraFlagsSetting, "");
-                if (extraFlags.Contains("--privileged", StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new DockerExecutionException("Privileged container execution via extra flags is blocked by settings.");
-                }
-                if (command.Arguments != null)
-                {
-                    foreach (var arg in command.Arguments)
-                    {
-                        if (arg != null && arg.Contains("--privileged", StringComparison.OrdinalIgnoreCase))
-                        {
-                            throw new DockerExecutionException("Privileged container execution via tool arguments is blocked by settings.");
-                        }
-                    }
-                }
-            }
 
             Services.Docker.BindValidator.ValidateBinds(createParams.HostConfig?.Binds);
 
