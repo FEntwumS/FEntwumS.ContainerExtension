@@ -4,6 +4,41 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-10-10
+
+Removes the Allow Privileged Containers setting, since no container ever started privileged, decides
+by the tool's names whether a run may write to the project and lets `docker.workspace` set that
+access, binds a project on a removable drive under `/run/media` on Linux, checks image references
+against Docker's grammar, and publishes exactly the ports a port range names. OneWare Studio 1.0.40
+or later is still required.
+
+### Added
+
+- `docker.workspace` sets a tool's access to the project, `rw` or `ro` in upper or lower case, in the same places as `docker.image`: for a single run with `WithStrategyConfiguration("docker.workspace", ...)`, or for a tool in the strategy configuration its plugin declares in its `ToolContext`, with OneWare's stored override on top. The value of the call comes first, and any other value fails the run with a message that names its source.
+
+### Changed
+
+- Whether a run mounts the project writable is decided by two names, the file name of the tool's executable and the tool's name in OneWare, both in lower case and without `.exe`; when one names a read-only tool and the other a writing one, read-only wins. The programmers and `gtkwave` stay read-only. Every tool whose name starts with `yosys`, `nextpnr-`, `sby`, `mcy`, `ghdl`, `iverilog` or `verilator` or ends in `pack` gets the project writable, and so do the tools that can write through a flag or a file argument of their own, such as `icepll` with `-f`; any other tool gets it writable only with an output flag the extension recognizes, as before. Before, the extension searched the whole path of the executable for parts of tool names, so every tool of a toolchain that OneWare installed, but the programmers and `gtkwave`, got the project writable, since that path runs through a folder named `Packages`, and so did every tool under a home folder such as `/home/jpackard`. The configuration guide lists every name.
+
+### Removed
+
+- The setting Allow Privileged Containers, with its field in the dashboard's settings dialog and its row in Active Configuration. No container ever started privileged: off, as by default, the setting failed every run whose tool arguments or Extra Container Labels contained the text `--privileged`, even a run on a file named `x--privileged.v`, and on, it lifted that check and nothing else. Every container keeps its hardening; OneWare keeps the old key in a saved settings file, and nothing reads it.
+
+### Fixed
+
+- On Linux, a project on a removable drive under `/run/media/`, where udisks2 mounts it, may be bound; the check compares the canonical path, so no symlink or `..` leads out. Before, the check of bind mounts blocked `/var/run` and with it its target `/run`, and so every path under `/run/media/`. `/run` itself stays blocked by name, with its sockets, among them the Docker socket and `/run/user/<uid>/docker.sock` of rootless Docker.
+- Image references are checked against the grammar of `distribution/reference`: upper case only in the registry host, path components of lower-case letters and digits joined by a dot, an underscore, two underscores or dashes, a tag of at most 128 characters that starts with a letter, a digit or an underscore, a repository path of at most 255 characters, counted as the daemon normalizes the name, and a digest in lower-case hex. Before, the check ignored case and took any run of letters, digits, dots, dashes and underscores, so such a reference passed the settings and failed only when the run pulled it. Three limits stay stricter than Docker's: no IPv6 host in brackets, a port of at most five digits, and only a sha256 digest.
+- A port range given with `-p` in the Extra Container Labels publishes at most 1024 ports, counted as the difference of its ends plus one; before, a range capped at 1024 published 1025. A mapping whose host and container ranges differ in length is ignored, with a warning in the run log at the log level Verbose, like a range whose ends lie outside the port numbers; before, both ranges were cut to the shorter one without a word.
+
+### Tests
+
+- New tests run a tool with `--privileged` in its argument against a stand-in daemon, check Active Configuration for a privileged mode, decide the workspace access by both names and by `docker.workspace`, bind paths under `/run` on every Unix system, check image references against the grammar and its length rule, and count the ports of a range.
+
+### Documentation
+
+- The configuration guide describes the workspace access in a section of its own and no longer lists Allow Privileged Containers; the security policy, the README and the limitations guide drop the setting, and the index and the getting-started guide count 18 settings.
+- The README names `/run` among the blocked mounts and says that on Linux a project on a removable drive under `/run/media/` may be bound.
+
 ## [1.1.6] - 2026-10-09
 
 Tells a Windows named pipe that nobody serves from an untrusted one and says to start the runtime,
