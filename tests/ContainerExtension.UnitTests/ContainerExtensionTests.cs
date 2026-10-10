@@ -988,7 +988,7 @@ public sealed class ContainerExtensionTests : IDisposable
 
     [Theory]
     [InlineData("my.registry:5000/org/repo:v1.2", true)]    // Registry with port and namespace
-    [InlineData("UPPER/repo:tag", true)]                      // Uppercase allowed by validator regex
+    [InlineData("UPPER/repo:tag", true)]                      // Upper case allowed in a registry host
     [InlineData("image with spaces", false)]                   // Spaces rejected
     [InlineData("image::tag", false)]                          // Double colon
     [InlineData("image/", false)]                             // Trailing slash
