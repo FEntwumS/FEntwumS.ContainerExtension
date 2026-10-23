@@ -24,11 +24,12 @@
          assembly, and its plugin loader rejects the plugin on a host older than this pin. 1.0.40 is
          the first Essentials with the tool-execution strategy members DockerExecutionStrategy
          implements (StartProcess, StopProcess, IsProcessRunning), so it is the oldest pin that
-         compiles; a newer pin would only lock out 1.0.40 hosts. The Avalonia pins above follow the
-         floor this version sets (11.3.22). A release built on this pin needs "minStudioVersion" in
-         its oneware-extension.json entry, so older hosts are not offered it. Dependabot-ignored;
+         compiles. The pin follows the newest release instead, 1.0.45 (published 2026-10-14), and so
+         locks out hosts 1.0.40 to 1.0.44. The Avalonia pins above follow the floor this version
+         sets (11.3.22). A release built on this pin needs "minStudioVersion" 1.0.45.0 in its
+         oneware-extension.json entry, so older hosts are not offered it. Dependabot-ignored;
          bump manually and re-run the OneWare side-load load test (a clean build does not prove it loads). -->
-    <PackageVersion Include="OneWare.Essentials" Version="1.0.40" />
+    <PackageVersion Include="OneWare.Essentials" Version="1.0.45" />
     <PackageVersion Include="SonarAnalyzer.CSharp" Version="10.35.0.4138">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>

@@ -28,9 +28,9 @@ thesis was submitted.
 - **Side-load a local build:** publish the plugin and copy it into the OneWare plugins directory
   (`~/OneWareStudio/Packages/Plugins/` on Linux/macOS). See [docs/articles/getting-started.md](docs/articles/getting-started.md).
 
-OneWare Studio 1.0.40 or later is required; the plugin implements the tool-execution strategy interface
-that OneWare introduced in 1.0.40. A running container engine (Docker, Podman, OrbStack, or Colima) is
-required for containerized execution. Containerized runs use the toolchain image
+OneWare Studio 1.0.45 or later is required; the plugin is built against OneWare.Essentials 1.0.45 and
+implements the tool-execution strategy interface that OneWare introduced in 1.0.40. A running container
+engine (Docker, Podman, OrbStack, or Colima) is required for containerized execution. Containerized runs use the toolchain image
 `fentwums/oss-cad-suite:latest`, which is on no registry: build it once with Build Local Image in the
 Container Dashboard, or with [`docker/build_oss_cad_suite.sh`](docker/build_oss_cad_suite.sh).
 
