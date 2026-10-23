@@ -40,7 +40,7 @@ The extension's settings are under **Binary Management > Container Engine** in O
 | Auto-Remove Containers | CheckBox | On | Remove containers after execution, and at the next start the stopped ones a crashed session left behind |
 | Network Mode | ComboBox | `bridge` | Docker network mode: `bridge`, `host`, `none` |
 | Container Name Prefix | Text | `containerextension-` | Prefix for generated container names |
-| Extra Container Labels | Text | *(empty)* | Space-separated `key=value` container labels for filtering |
+| Extra Container Labels | Text | *(empty)* | Space-separated `key=value` container labels for filtering; `-p host:container` (or `--publish`) publishes a port instead, on `127.0.0.1` unless the mapping names an address, such as `-p 0.0.0.0:8080:80` |
 
 ### Security & Fallback
 

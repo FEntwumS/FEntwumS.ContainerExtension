@@ -505,9 +505,9 @@ public static partial class ContainerTelemetry
             if (!string.IsNullOrEmpty(home))
             {
                 var scrubbed = path.Replace(home, "~");
-                // The reconstructed docker-run command normalises Windows backslashes to forward
-                // slashes, so also collapse the forward-slash form of the profile path; otherwise
-                // C:/Users/<name> survives unredacted on Windows.
+                // The reconstructed docker-run command keeps a bind in the backslash form the run
+                // passes (before 1.2.1 it wrote forward slashes); any text with the forward-slash form
+                // of the profile path is collapsed too, or C:/Users/<name> survives unredacted on Windows.
                 if (home.Contains('\\', StringComparison.Ordinal))
                 {
                     scrubbed = scrubbed.Replace(home.Replace('\\', '/'), "~");

@@ -111,14 +111,26 @@ Use the **Copy Docker Run** feature:
 
 1. Open the Container Dashboard
 2. Find the failed execution in **Execution History**
-3. Click the copy button to get the exact `docker run` command
-4. Paste and run in your terminal for debugging
+3. Click the copy button to get the `docker run` command of that run
+4. Paste and run it in your terminal for debugging
+
+The command starts the container the run started: the same mounts, working directory, user, limits,
+hardening flags (`--cap-drop ALL`, `--security-opt no-new-privileges:true`, `--pids-limit`), published
+and exposed ports and labels, with every word quoted for the shell of the host, a POSIX shell (sh, bash,
+zsh) on macOS and Linux and PowerShell 7.3 or later on Windows. It leaves out the extension's own label,
+so the cleanup at the next start does not remove a container started from the copy. The copy of a run
+from this session carries the real environment values; the history of an earlier session holds only the
+command as the log keeps it, with `********` in place of each value and the redactions listed under
+[Redaction before persistence](#redaction-before-persistence), such as `~` for the home directory, all
+to be filled in before it runs. Before the first run of a session, **Copy Docker Run** in Quick Settings
+copies a template built from the settings instead, with `<tool>` and `<args>` to fill in.
 
 ```bash
-# Example copied command:
-docker run --rm \
-  -v /path/to/project:/workspace \
-  -w /workspace \
+# Example copied command (macOS):
+docker run --rm --name containerextension-ghdl-143012345-1-1a2b3c4d --user 501:20 \
+  -v /path/to/project:/workspace -w /workspace --init \
+  --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 4096 \
+  -e HOME=/tmp \
   hdlc/ghdl:yosys \
   ghdl -a --std=08 test.vhd
 ```
