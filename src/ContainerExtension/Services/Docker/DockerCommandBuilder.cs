@@ -25,6 +25,10 @@ internal static class DockerCommandBuilder
 {
     private static long _containerCounter = 0;
     private const string ContainerWorkDir = "/workspace";
+    // The hardening every container gets; the copied docker run command renders the same values.
+    internal const string DroppedCapabilities = "ALL";
+    internal const string NoNewPrivilegesOption = "no-new-privileges:true";
+    internal const long ProcessLimit = 4096;
     internal static readonly SearchValues<char> ShellSpecialChars = SearchValues.Create(";&|<>*?[]{}()$\\'\"#~`! \t\n\r");
     private static readonly SearchValues<char> DangerousEnvKeyChars = SearchValues.Create("&|;`$()<>\n\r\\ \t");
     private static readonly Dictionary<string, (List<string>? vars, DateTime lastWrite, DateTime lastAccess)> EnvCache = new(StringComparer.Ordinal);
@@ -132,7 +136,7 @@ internal static class DockerCommandBuilder
         return sb.ToString();
     }
 
-    private static string SanitizeContainerName(string input)
+    internal static string SanitizeContainerName(string input)
     {
         if (string.IsNullOrWhiteSpace(input))
         {
@@ -520,14 +524,14 @@ internal static class DockerCommandBuilder
                 AutoRemove = autoRemove,
                 NetworkMode = networkMode,
                 Init = true,
-                CapDrop = new List<string> { "ALL" },
+                CapDrop = new List<string> { DroppedCapabilities },
                 // Defence-in-depth for every container. no-new-privileges blocks
                 // setuid/setgid privilege escalation inside the container — a primary escape primitive —
                 // and PidsLimit caps the task count as a fork-bomb backstop (generous so multi-threaded
                 // synthesis and place-and-route are unaffected). No container starts privileged, so no
                 // setting opts out of this baseline.
-                SecurityOpt = new List<string> { "no-new-privileges:true" },
-                PidsLimit = 4096,
+                SecurityOpt = new List<string> { NoNewPrivilegesOption },
+                PidsLimit = ProcessLimit,
                 Binds = new List<string>(4) { $"{workingDirFull}:{ContainerWorkDir}{bindSuffix}" }
             }
         };
@@ -598,187 +602,7 @@ internal static class DockerCommandBuilder
         var extraFlags = settingsService.SafeGetSetting(ContainerExtensionModule.ExtraFlagsSetting, "");
         if (!string.IsNullOrWhiteSpace(extraFlags))
         {
-            createParams.Labels ??= new Dictionary<string, string>(StringComparer.Ordinal);
-            createParams.HostConfig.PortBindings ??= new Dictionary<string, IList<PortBinding>>(StringComparer.OrdinalIgnoreCase);
-            createParams.ExposedPorts ??= new Dictionary<string, EmptyStruct>(StringComparer.OrdinalIgnoreCase);
-
-            var flags = TokenizeExtraFlags(extraFlags);
-            int i = 0;
-            while (i < flags.Count)
-            {
-                var flag = flags[i];
-                if ((string.Equals(flag, "-p", StringComparison.Ordinal) || string.Equals(flag, "--publish", StringComparison.Ordinal)) && i + 1 < flags.Count)
-                {
-                    var portMappingStr = flags[i + 1];
-                    i += 2;
-
-                    var parts = portMappingStr.Split(':');
-                    string hostIp = "";
-                    string hostPart = "";
-                    string guestPart = "";
-
-                    if (parts.Length == 1)
-                    {
-                        guestPart = parts[0];
-                    }
-                    else if (parts.Length == 2)
-                    {
-                        if (parts[0].Contains('.', StringComparison.Ordinal))
-                        {
-                            hostIp = parts[0];
-                            guestPart = parts[1];
-                        }
-                        else
-                        {
-                            hostPart = parts[0];
-                            guestPart = parts[1];
-                        }
-                    }
-                    else if (parts.Length == 3)
-                    {
-                        hostIp = parts[0];
-                        hostPart = parts[1];
-                        guestPart = parts[2];
-                    }
-
-                    if (!string.IsNullOrEmpty(guestPart))
-                    {
-                        var proto = "tcp";
-                        var protoIdx = guestPart.IndexOf('/');
-                        if (protoIdx >= 0)
-                        {
-                            if (protoIdx + 1 < guestPart.Length)
-                            {
-                                var parsedProto = guestPart[(protoIdx + 1)..].ToLowerInvariant();
-                                if (!string.IsNullOrEmpty(parsedProto))
-                                {
-                                    proto = parsedProto;
-                                }
-                            }
-                            guestPart = guestPart[..protoIdx];
-                        }
-
-                        var hostDash = hostPart.IndexOf('-');
-                        var guestDash = guestPart.IndexOf('-');
-
-                        if (hostDash >= 0 && guestDash >= 0)
-                        {
-                            if (int.TryParse(hostPart[..hostDash], out var hostStart) &&
-                                int.TryParse(hostPart[(hostDash + 1)..], out var hostEnd) &&
-                                int.TryParse(guestPart[..guestDash], out var guestStart) &&
-                                int.TryParse(guestPart[(guestDash + 1)..], out var guestEnd))
-                            {
-                                // Reject out-of-range or inverted endpoints and clamp the span so a
-                                // malformed mapping such as "0-2000000000" cannot spin a near-unbounded
-                                // loop and exhaust memory during container creation.
-                                const int maxPort = 65535;
-                                const int maxRange = 1024;
-                                if (hostStart < 0 || hostStart > maxPort || hostEnd < hostStart || hostEnd > maxPort ||
-                                    guestStart < 0 || guestStart > maxPort || guestEnd < guestStart || guestEnd > maxPort)
-                                {
-                                    sdkLog(command, $"[Docker SDK] Warning: ignoring invalid port-range mapping '{portMappingStr}'.");
-                                    continue;
-                                }
-                                // A range holds one port more than the difference of its ends, and both sides must hold
-                                // as many, or the mapping would publish other ports than the ones it names.
-                                if (hostEnd - hostStart != guestEnd - guestStart)
-                                {
-                                    sdkLog(command, $"[Docker SDK] Warning: ignoring port-range mapping '{portMappingStr}': the host and container ranges differ in length.");
-                                    continue;
-                                }
-                                var portCount = hostEnd - hostStart + 1;
-                                if (portCount > maxRange)
-                                {
-                                    sdkLog(command, $"[Docker SDK] Warning: port-range mapping '{portMappingStr}' exceeds {maxRange} ports; truncating.");
-                                    portCount = maxRange;
-                                }
-                                for (int r = 0; r < portCount; r++)
-                                {
-                                    var hp = (hostStart + r).ToString(System.Globalization.CultureInfo.InvariantCulture);
-                                    var gp = (guestStart + r).ToString(System.Globalization.CultureInfo.InvariantCulture);
-                                    var key = $"{gp}/{proto}";
-                                    createParams.ExposedPorts[key] = default;
-                                    var binding = new PortBinding { HostPort = hp };
-                                    if (!string.IsNullOrEmpty(hostIp))
-                                    {
-                                        binding.HostIP = hostIp;
-                                    }
-                                    else
-                                    {
-                                        binding.HostIP = "127.0.0.1";
-                                    }
-                                    if (createParams.HostConfig.PortBindings.TryGetValue(key, out var list))
-                                    {
-                                        list.Add(binding);
-                                    }
-                                    else
-                                    {
-                                        createParams.HostConfig.PortBindings[key] = new List<PortBinding> { binding };
-                                    }
-                                }
-                            }
-                        }
-                        else
-                        {
-                            if (!int.TryParse(guestPart, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var guestPort) ||
-                                guestPort < 1 || guestPort > 65535)
-                            {
-                                sdkLog(command, $"[Docker SDK] Warning: ignoring invalid port mapping '{portMappingStr}'.");
-                                continue;
-                            }
-                            if (!string.IsNullOrEmpty(hostPart) &&
-                                (!int.TryParse(hostPart, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var hostPort) ||
-                                 hostPort < 0 || hostPort > 65535))
-                            {
-                                sdkLog(command, $"[Docker SDK] Warning: ignoring invalid port mapping '{portMappingStr}'.");
-                                continue;
-                            }
-
-                            var key = $"{guestPart}/{proto}";
-                            createParams.ExposedPorts[key] = default;
-                            var binding = new PortBinding { HostPort = hostPart };
-                            if (!string.IsNullOrEmpty(hostIp))
-                            {
-                                binding.HostIP = hostIp;
-                            }
-                            else
-                            {
-                                binding.HostIP = "127.0.0.1";
-                            }
-                            if (createParams.HostConfig.PortBindings.TryGetValue(key, out var list))
-                            {
-                                list.Add(binding);
-                            }
-                            else
-                            {
-                                createParams.HostConfig.PortBindings[key] = new List<PortBinding> { binding };
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    i++;
-                    var eqIdx = flag.IndexOf('=');
-                    if (eqIdx > 0)
-                    {
-                        var key = SanitizeLabel(flag[..eqIdx].Trim('"', '\''));
-                        var val = SanitizeLabel(flag[(eqIdx + 1)..].Trim('"', '\''));
-                        if (!string.IsNullOrEmpty(key))
-                        {
-                            createParams.Labels[key] = val;
-                        }
-                    }
-                    else
-                    {
-                        var key = SanitizeLabel(flag.Trim('"', '\''));
-                        if (!string.IsNullOrEmpty(key))
-                        {
-                            createParams.Labels[key] = "true";
-                        }
-                    }
-                }
-            }
+            ApplyExtraContainerLabels(createParams, extraFlags, message => sdkLog(command, message));
             sdkLog(command, $"[Docker SDK] Injecting extra label(s) and port mapping(s) from Extra Container Labels.");
         }
 
@@ -829,6 +653,204 @@ internal static class DockerCommandBuilder
         createParams.Labels[ContainerExtensionModule.ContainerOwnerLabel] = "true";
 
         return createParams;
+    }
+
+    /// <summary>
+    /// Applies the Extra Container Labels setting to <paramref name="createParams"/>: <c>-p</c> or <c>--publish</c>
+    /// with the mapping after it publishes a port, on the loopback address unless the mapping names an address;
+    /// every other word becomes a label, <c>key=value</c>, or <c>key</c> for <c>key=true</c>. The run and the
+    /// copied <c>docker run</c> template both go through here, so they read the setting alike.
+    /// </summary>
+    internal static void ApplyExtraContainerLabels(CreateContainerParameters createParams, string extraFlags, Action<string> warn)
+    {
+        ArgumentNullException.ThrowIfNull(createParams);
+        ArgumentNullException.ThrowIfNull(warn);
+        if (string.IsNullOrWhiteSpace(extraFlags))
+        {
+            return;
+        }
+        createParams.HostConfig ??= new HostConfig();
+        createParams.Labels ??= new Dictionary<string, string>(StringComparer.Ordinal);
+        createParams.HostConfig.PortBindings ??= new Dictionary<string, IList<PortBinding>>(StringComparer.OrdinalIgnoreCase);
+        createParams.ExposedPorts ??= new Dictionary<string, EmptyStruct>(StringComparer.OrdinalIgnoreCase);
+
+        var flags = TokenizeExtraFlags(extraFlags);
+        int i = 0;
+        while (i < flags.Count)
+        {
+            var flag = flags[i];
+            if ((string.Equals(flag, "-p", StringComparison.Ordinal) || string.Equals(flag, "--publish", StringComparison.Ordinal)) && i + 1 < flags.Count)
+            {
+                var portMappingStr = flags[i + 1];
+                i += 2;
+
+                var parts = portMappingStr.Split(':');
+                string hostIp = "";
+                string hostPart = "";
+                string guestPart = "";
+
+                if (parts.Length == 1)
+                {
+                    guestPart = parts[0];
+                }
+                else if (parts.Length == 2)
+                {
+                    if (parts[0].Contains('.', StringComparison.Ordinal))
+                    {
+                        hostIp = parts[0];
+                        guestPart = parts[1];
+                    }
+                    else
+                    {
+                        hostPart = parts[0];
+                        guestPart = parts[1];
+                    }
+                }
+                else if (parts.Length == 3)
+                {
+                    hostIp = parts[0];
+                    hostPart = parts[1];
+                    guestPart = parts[2];
+                }
+
+                if (!string.IsNullOrEmpty(guestPart))
+                {
+                    var proto = "tcp";
+                    var protoIdx = guestPart.IndexOf('/');
+                    if (protoIdx >= 0)
+                    {
+                        if (protoIdx + 1 < guestPart.Length)
+                        {
+                            var parsedProto = guestPart[(protoIdx + 1)..].ToLowerInvariant();
+                            if (!string.IsNullOrEmpty(parsedProto))
+                            {
+                                proto = parsedProto;
+                            }
+                        }
+                        guestPart = guestPart[..protoIdx];
+                    }
+
+                    var hostDash = hostPart.IndexOf('-');
+                    var guestDash = guestPart.IndexOf('-');
+
+                    if (hostDash >= 0 && guestDash >= 0)
+                    {
+                        if (int.TryParse(hostPart[..hostDash], out var hostStart) &&
+                            int.TryParse(hostPart[(hostDash + 1)..], out var hostEnd) &&
+                            int.TryParse(guestPart[..guestDash], out var guestStart) &&
+                            int.TryParse(guestPart[(guestDash + 1)..], out var guestEnd))
+                        {
+                            // Reject out-of-range or inverted endpoints and clamp the span so a
+                            // malformed mapping such as "0-2000000000" cannot spin a near-unbounded
+                            // loop and exhaust memory during container creation.
+                            const int maxPort = 65535;
+                            const int maxRange = 1024;
+                            if (hostStart < 0 || hostStart > maxPort || hostEnd < hostStart || hostEnd > maxPort ||
+                                guestStart < 0 || guestStart > maxPort || guestEnd < guestStart || guestEnd > maxPort)
+                            {
+                                warn($"[Docker SDK] Warning: ignoring invalid port-range mapping '{portMappingStr}'.");
+                                continue;
+                            }
+                            // A range holds one port more than the difference of its ends, and both sides must hold
+                            // as many, or the mapping would publish other ports than the ones it names.
+                            if (hostEnd - hostStart != guestEnd - guestStart)
+                            {
+                                warn($"[Docker SDK] Warning: ignoring port-range mapping '{portMappingStr}': the host and container ranges differ in length.");
+                                continue;
+                            }
+                            var portCount = hostEnd - hostStart + 1;
+                            if (portCount > maxRange)
+                            {
+                                warn($"[Docker SDK] Warning: port-range mapping '{portMappingStr}' exceeds {maxRange} ports; truncating.");
+                                portCount = maxRange;
+                            }
+                            for (int r = 0; r < portCount; r++)
+                            {
+                                var hp = (hostStart + r).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                                var gp = (guestStart + r).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                                var key = $"{gp}/{proto}";
+                                createParams.ExposedPorts[key] = default;
+                                var binding = new PortBinding { HostPort = hp };
+                                if (!string.IsNullOrEmpty(hostIp))
+                                {
+                                    binding.HostIP = hostIp;
+                                }
+                                else
+                                {
+                                    binding.HostIP = "127.0.0.1";
+                                }
+                                if (createParams.HostConfig.PortBindings.TryGetValue(key, out var list))
+                                {
+                                    list.Add(binding);
+                                }
+                                else
+                                {
+                                    createParams.HostConfig.PortBindings[key] = new List<PortBinding> { binding };
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if (!int.TryParse(guestPart, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var guestPort) ||
+                            guestPort < 1 || guestPort > 65535)
+                        {
+                            warn($"[Docker SDK] Warning: ignoring invalid port mapping '{portMappingStr}'.");
+                            continue;
+                        }
+                        if (!string.IsNullOrEmpty(hostPart) &&
+                            (!int.TryParse(hostPart, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var hostPort) ||
+                             hostPort < 0 || hostPort > 65535))
+                        {
+                            warn($"[Docker SDK] Warning: ignoring invalid port mapping '{portMappingStr}'.");
+                            continue;
+                        }
+
+                        var key = $"{guestPart}/{proto}";
+                        createParams.ExposedPorts[key] = default;
+                        var binding = new PortBinding { HostPort = hostPart };
+                        if (!string.IsNullOrEmpty(hostIp))
+                        {
+                            binding.HostIP = hostIp;
+                        }
+                        else
+                        {
+                            binding.HostIP = "127.0.0.1";
+                        }
+                        if (createParams.HostConfig.PortBindings.TryGetValue(key, out var list))
+                        {
+                            list.Add(binding);
+                        }
+                        else
+                        {
+                            createParams.HostConfig.PortBindings[key] = new List<PortBinding> { binding };
+                        }
+                    }
+                }
+            }
+            else
+            {
+                i++;
+                var eqIdx = flag.IndexOf('=');
+                if (eqIdx > 0)
+                {
+                    var key = SanitizeLabel(flag[..eqIdx].Trim('"', '\''));
+                    var val = SanitizeLabel(flag[(eqIdx + 1)..].Trim('"', '\''));
+                    if (!string.IsNullOrEmpty(key))
+                    {
+                        createParams.Labels[key] = val;
+                    }
+                }
+                else
+                {
+                    var key = SanitizeLabel(flag.Trim('"', '\''));
+                    if (!string.IsNullOrEmpty(key))
+                    {
+                        createParams.Labels[key] = "true";
+                    }
+                }
+            }
+        }
     }
 
     internal static List<string>? ParseEnvFile(string workingDir)

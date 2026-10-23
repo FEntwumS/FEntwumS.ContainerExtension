@@ -4,7 +4,7 @@ Installation, configuration, and a first containerized build with the Container 
 
 ## Prerequisites
 
-- [OneWare Studio](https://one-ware.com/) 1.0.40 or later
+- [OneWare Studio](https://one-ware.com/) 1.0.45 or later
 - A container runtime:
   - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (recommended)
   - [Podman](https://podman.io/)
@@ -70,7 +70,7 @@ The Container Dashboard provides:
 | **Connection Status** | Daemon health, Docker version, OS, CPU/RAM info |
 | **Containers** | Live container list with stop/remove/view-logs buttons |
 | **Images & Disk** | Cached images with sizes, reclaimable space indicator |
-| **Configuration** | Snapshot of all active Container Engine settings |
+| **Active Configuration** | Snapshot of the active Container Engine settings, all but Custom Daemon Socket |
 | **Execution History** | Up to 50 telemetry entries with timing and exit codes |
 
 ## Next Steps

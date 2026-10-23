@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the hardened oss-cad-suite image for the host platform and runs a Trivy scan.
+# Builds the hardened oss-cad-suite image for linux/amd64 on any host and runs a Trivy scan.
 set -Eeuo pipefail
 trap 'echo -e "\nCritical failure at line $LINENO"; exit 1' ERR
 

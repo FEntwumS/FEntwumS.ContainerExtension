@@ -8,8 +8,8 @@ is not published to a registry.
 |---|---|
 | `oss-cad-suite/Dockerfile` | Builds the image from a pinned [oss-cad-suite](https://github.com/YosysHQ/oss-cad-suite-build) release. The release tag, date, and a SHA-256 of the downloaded archive are `ARG`s, so the toolchain release is pinned and its download is integrity-checked (fail-closed). The apt layer tracks rolling security updates, so a rebuild is not bit-identical; image identity is anchored on the built image's digest. Adds `tini` as PID 1 and a non-root `oneware` user. |
 | `oss-cad-suite/oss-cad-suite-build` | Submodule pinning the upstream build definitions. |
-| `build_oss_cad_suite.sh` | Builds the image for the host platform and runs a Trivy scan. `--no-cache` forces a clean rebuild. |
-| `pull_all_images.sh` | Pulls the images the plugin references, for offline use. |
+| `build_oss_cad_suite.sh` | Builds the image for `linux/amd64` on any host, since the upstream ARM64 release carries no GHDL, and runs a Trivy scan. `--no-cache` forces a clean rebuild. |
+| `pull_all_images.sh` | Pulls 26 images for offline use: 25 upstream `hdlc/*` toolchain images, of which the plugin names only its fallback `hdlc/ghdl:yosys`, and the digest-pinned Ubuntu base of the `Dockerfile`. |
 
 The release tag is single-sourced in the `Dockerfile` `ARG`s and `build_oss_cad_suite.sh`; the CI
 workflow (`.github/workflows/docker-build.yml`) builds and scans the same tag on a schedule.

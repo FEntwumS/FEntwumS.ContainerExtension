@@ -40,7 +40,7 @@ The extension's settings are under **Binary Management > Container Engine** in O
 | Auto-Remove Containers | CheckBox | On | Remove containers after execution, and at the next start the stopped ones a crashed session left behind |
 | Network Mode | ComboBox | `bridge` | Docker network mode: `bridge`, `host`, `none` |
 | Container Name Prefix | Text | `containerextension-` | Prefix for generated container names |
-| Extra Container Labels | Text | *(empty)* | Space-separated `key=value` container labels for filtering |
+| Extra Container Labels | Text | *(empty)* | Space-separated `key=value` container labels for filtering; `-p host:container` (or `--publish`) publishes a port instead, on `127.0.0.1` unless the mapping names an address, such as `-p 0.0.0.0:8080:80` |
 
 ### Security & Fallback
 
@@ -54,8 +54,8 @@ The extension's settings are under **Binary Management > Container Engine** in O
 | Setting | Type | Default | Description |
 | ------- | ---- | ------- | ----------- |
 | Log Level | ComboBox | `Errors Only` | `Off`, `Errors Only`, `Info`, `Verbose`. Defaults to `Errors Only` (privacy-by-default); `Verbose` adds SDK messages and stack traces. It also decides which runs the telemetry records: see [Telemetry](telemetry.md#execution-telemetry) |
-| Show Timestamps | CheckBox | On | Prepend `HH:mm:ss.fff` to SDK log messages |
-| Telemetry Retention | ComboBox | `25` | Max entries: `None`, `25`, `50`, `100`, `250`, `500`, `1000`, `Unlimited`. Defaults to `25` (privacy-by-default); `None` opts out and **purges** existing history |
+| Show Timestamps in Logs | CheckBox | On | Prepend `[HH:mm:ss.fff]` to SDK log messages |
+| Telemetry Retention | ComboBox | `25` | Max entries: `None`, `25`, `50`, `100`, `250`, `500`, `1000`, `Unlimited`. Defaults to `25` (privacy-by-default); `None` opts out and **purges** existing history. `Unlimited` sets no count, but the size cap stays: a log over 10 MB is cut to its newest 200 entries, one over 50 MB to its newest 50 |
 | Dashboard Refresh | ComboBox | `Manual` | Auto-refresh: `Manual`, `2s`, `5s`, `10s`, `15s`, `30s`, `60s`, `120s` |
 
 ## Per-Tool Image Overrides

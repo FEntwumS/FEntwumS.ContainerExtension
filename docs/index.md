@@ -22,7 +22,7 @@ Developed as part of the Master's thesis *Design and Implementation of a Modular
 | Execution Telemetry | JSON Lines log with stats, export, and retention |
 | Dockable Docker Dashboard | Live daemon status, containers, images, disk usage |
 | Multi-Architecture | Platform override for Apple Silicon |
-| UID/GID Injection | Prevents root-owned output files on Linux |
+| UID/GID Injection | Runs the container as the host UID/GID, so output files are not root-owned; not on rootless runtimes or Windows hosts, where the image's default user applies |
 | Copy Docker Run | Reproduces executions outside the IDE |
 
 ## Quick Links

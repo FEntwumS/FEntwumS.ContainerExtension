@@ -2,11 +2,15 @@
 
 The central contribution of this work is the transparent-integration architecture: the
 `IToolExecutionStrategy` hybrid (`DockerExecutionStrategy`) that OneWare Studio dispatches its
-FPGA-tool execution to, running the unmodified invocation in an isolated container without altering the
-tool's command line, working directory, or output contract. Overhead and reproducibility measurements are
+FPGA-tool execution to, running the invocation in an isolated container with the project mounted at
+`/workspace` and its path arguments mapped there, and passing the tool's output and exit code back as a
+native run would. Overhead and reproducibility measurements are
 supporting evidence for that architecture, not the object of study. This document records the known
 boundaries of the implementation and the corresponding threats to the validity of the evaluation, so
-that measured numbers are read against the conditions that produced them.
+that measured numbers are read against the conditions that produced them. The measurements and the
+evaluation hold for the extension as the thesis studied it: the thesis repository pins it at commit
+`5fa2f5f`, one commit after release 1.0.10, and its evaluation records name the states the measurements
+ran on; the code has changed since.
 
 The limitations below are properties of the upstream toolchain images, the public board packages, or
 deliberate security boundaries — not defects of the integration mechanism. The architecture is
@@ -15,7 +19,8 @@ under *what conditions* they run.
 
 ## Image architecture and GHDL on arm64
 
-The reference image `fentwums/oss-cad-suite` is published `linux/amd64` only. Upstream
+The reference image `fentwums/oss-cad-suite` is built for `linux/amd64` only, locally, and is published
+to no registry. Upstream
 `oss-cad-suite` arm64 releases omit GHDL, and GHDL is a required front end for the VHDL path
 (`ghdl --synth` precedes Yosys, and `ghdl` drives VHDL simulation). To keep a single image that
 satisfies the full VHDL and Verilog matrix across all device families, the image is built for amd64
@@ -131,13 +136,10 @@ overhead is correspondingly larger than it would be for long-running industrial 
 measured overhead is therefore a conservative (upper-bound) estimate of the steady-state cost on
 larger designs, where the fixed container setup amortizes over a longer tool execution.
 
-## Future work
+## Refactors after the evaluation
 
-Two internal refactors are recognised but deliberately deferred on this artifact. `DockerExecutionStrategy`
-concentrates connection probing, image resolution, command assembly, and stream handling in a single class;
-extracting these into dedicated collaborators would improve cohesion. The path-canonicalisation helper is
-likewise duplicated across the telemetry, strategy, and command-builder layers. Both are behaviour-preserving
-moves with no correctness payoff, and the path-canonicalisation and bind-validation code lies on the
-per-invocation execution path the overhead evaluation measures; consolidating it would perturb the measured
-subject and require a re-baseline. They are left for a post-evaluation maintenance pass rather than undertaken
-on the frozen, benchmarked codebase.
+The two internal refactors the thesis deferred past the evaluation have since been made: release 1.0.13
+consolidated the path-canonicalisation helper, duplicated across the telemetry, strategy, and command-builder
+layers, into `PathCanonicalizer`, and release 1.0.14 split `DockerExecutionStrategy` into a coordinator and
+dedicated collaborators, which the [architecture guide](architecture.md) describes. Both came after the
+measurements, so the measured subject is the code before them.
