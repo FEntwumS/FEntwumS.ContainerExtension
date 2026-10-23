@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pulls the toolchain images the plugin references, for offline use.
+# Pulls the upstream hdlc/* toolchain images and the Dockerfile's Ubuntu base, for offline use.
 set -Eeuo pipefail
 trap 'echo -e "\nProcess terminated abnormally." ; exit 1' ERR INT TERM
 

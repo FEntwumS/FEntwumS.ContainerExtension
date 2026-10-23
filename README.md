@@ -66,7 +66,7 @@ flowchart TD
     E --> F[Run the tool<br/>in the container<br/>tini as PID 1]
     C -->|no, native fallback enabled| G[Run the tool<br/>from the host PATH]
     C -->|no, fallback disabled| H[Fail: daemon<br/>unreachable]
-    F --> I[Stream stdout/stderr to the IDE<br/>same working dir and exit code]
+    F --> I[Stream stdout/stderr to the IDE<br/>with the tool's exit code]
     G --> I
     I --> J[Record JSON Lines telemetry<br/>at the configured level]
 ```
@@ -90,11 +90,12 @@ flowchart TD
 - Host paths that escape the mounted workspace are remapped to an in-workspace sentinel rather than
   their real location; an explicit device/library allowlist is the only pass-through. The behaviour is
   pinned by an adversarial path-containment test corpus that runs in CI.
-- Mount allow-listing rejects binds of critical host paths (`/etc`, `/proc`, `/sys`, `/run`, the Docker
+- A mount deny list rejects binds of critical host paths (`/etc`, `/proc`, `/sys`, `/run`, the Docker
   socket, …); on Linux a project on a removable drive under `/run/media/`, where udisks2 mounts it, may
   be bound.
-- The registry client is HTTPS-only, scopes forwarded credentials to the matching host, and rejects
-  references that resolve to loopback or internal addresses (SSRF defense).
+- The registry client uses HTTPS, and plain HTTP only for a registry named as `localhost` or a loopback
+  address; it scopes forwarded credentials to the matching host and rejects any other host name that
+  resolves to a loopback or internal address (SSRF defense).
 - Supply chain: `NuGetAudit`, an SBOM and OIDC build attestations on releases, and CodeQL plus Trivy
   scans in CI. The runtime image pins its base by digest and verifies the toolchain tarball against a
   committed SHA-256 (fail-closed); image integrity is anchored on these committed digests and the
