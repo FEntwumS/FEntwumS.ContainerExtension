@@ -4,6 +4,34 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-10-23
+
+Makes **Copy Docker Run** start the container the run started, quoted for the shell of the host,
+builds against OneWare.Essentials 1.0.45, and corrects the guides where the code contradicts them.
+OneWare Studio 1.0.45 or later is now required.
+
+### Changed
+
+- The plugin is built against OneWare.Essentials 1.0.45 instead of 1.0.40, so OneWare Studio 1.0.45 or later is required; the manifest entry of 1.2.1 carries minStudioVersion 1.0.45.0, and older hosts are not offered it. The transitive dependencies of Essentials move with it, and MediatR and Microsoft.IdentityModel leave the graph.
+- The build-time analyzers Meziantou.Analyzer (3.0.294 to 3.0.303) and Microsoft.CodeAnalysis.NetAnalyzers (10.0.401 to 10.0.402), the test packages xunit.v3 (4.0.1 to 4.0.2), xunit.runner.visualstudio (4.0.0 to 4.0.1) and Microsoft.NET.Test.Sdk (18.10.1 to 18.11.0), and the GitHub Action `github/codeql-action` (v4.38.2 to v4.39.0) are updated.
+- The description of Extra Container Labels, in the settings and in the dashboard's settings dialog, says that `-p host:container` publishes a port, on `127.0.0.1` unless the mapping names an address.
+
+### Fixed
+
+- The command that **Copy Docker Run** copies quotes every word for the shell of the host: a POSIX shell (sh, bash, zsh) on macOS and Linux, PowerShell 7.3 or later on Windows. Before, an argument sat in double quotes, where the shell still expanded `$HOME_FILE.v` to `.v` and ran a command in backticks, and a bind had its backslashes turned into slashes and broke on a quote. In PowerShell, the one word that no quoting passes on, `--%`, goes over as `@('--%')`.
+- The copied command carries what the run sets: `--cap-drop ALL`, `--security-opt no-new-privileges:true`, `--pids-limit 4096`, the published ports as `-p`, the exposed ports as `--expose`, and the labels, except the extension's own label, so the cleanup at the next start does not remove a container started from the copy. The template copied before the first run of a session reads Extra Container Labels as a run does, so `-p 8080:80` publishes the port instead of becoming `--label -p --label 8080:80`.
+
+### Tests
+
+- New tests quote words that a shell would change, among them `$HOME_FILE.v`, a backtick, quotes, spaces, an empty argument and non-ASCII text, for both shells, and read them back through sh, bash, zsh and pwsh where these are installed; they build a run and check that its copied command carries the hardening flags, the ports and the labels without the extension's own, and that the logged command leads back to the exact one.
+
+### Documentation
+
+- The architecture guide names every class of `Services/Docker`, and its lifecycle follows the order of a run.
+- The limitations guide says that a run mounts the project at `/workspace` and maps its path arguments there, that the toolchain image is built locally and on no registry, and that the two deferred refactors were made in 1.0.13 and 1.0.14; it adds that the measurements and the evaluation hold for the extension as the thesis studied it, at commit `5fa2f5f`.
+- The telemetry guide says what the copied command holds and for which shell; its entry format shows the current `docker_run`, adds `error_msg`, and says that `oom` is written only when true and `peak_mem` and `max_cpu` are left out when unknown.
+- The configuration guide names Show Timestamps in Logs and the size cap that also limits `Unlimited` retention; the README no longer calls the mount check an allow list or the registry client HTTPS-only and no longer promises the same working directory; `docker/` says that the image is built for `linux/amd64` on any host and which 26 images `pull_all_images.sh` pulls; `Extension.md` and the index name Windows hosts among the runs without `--user`.
+
 ## [1.2.0] - 2026-10-10
 
 Removes the Allow Privileged Containers setting, since no container ever started privileged, decides

@@ -16,10 +16,9 @@ cancelled; at `Info` and `Verbose`, every run; at `Off`, none.
   "tool": "ghdl",
   "duration_s": 4.23,
   "exit": 0,
-  "docker_run": "docker run --rm -v /project:/workspace hdlc/ghdl:yosys ghdl -a test.vhd",
+  "docker_run": "docker run --rm --name containerextension-ghdl-094508123-1-1a2b3c4d --user 501:20 -v ~/project:/workspace -w /workspace --init --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 4096 -e 'HOME=********' hdlc/ghdl:yosys ghdl -a test.vhd",
   "peak_mem": 536870912,
-  "max_cpu": 89.2,
-  "oom": false
+  "max_cpu": 89.2
 }
 ```
 
@@ -33,9 +32,10 @@ cancelled; at `Info` and `Verbose`, every run; at `Off`, none.
 | `exit` | Container exit code (0 = success) |
 | `cancelled` | Present and `true` if user cancelled the execution |
 | `docker_run` | Reconstructed CLI command for debugging |
-| `peak_mem` | Peak container memory usage in bytes (null if unavailable) |
-| `max_cpu` | Maximum CPU usage percentage during execution (null if unavailable) |
-| `oom` | `true` if container was killed by the OOM killer |
+| `peak_mem` | Peak container memory usage in bytes (absent if unavailable) |
+| `max_cpu` | Maximum CPU usage percentage during execution (absent if unavailable) |
+| `oom` | Present and `true` if the OOM killer stopped the container |
+| `error_msg` | Present if the execution failed: its error message, redacted |
 
 ### Dashboard Telemetry
 
@@ -49,7 +49,7 @@ The Container Dashboard's **Execution History** section shows up to 50 entries w
 
 - **Export**: Click "Export Telemetry" in the dashboard to save a copy
 - **Clear**: Click "Clear Recents" to delete all entries
-- **Retention**: Configure via `Telemetry Retention` setting (None/25/50/100/250/500/1000/Unlimited)
+- **Retention**: Configure via `Telemetry Retention` setting (None/25/50/100/250/500/1000/Unlimited); a log over 10 MB is cut to its newest 200 entries, one over 50 MB to its newest 50, whatever the setting
 
 ## Troubleshooting
 
@@ -111,14 +111,26 @@ Use the **Copy Docker Run** feature:
 
 1. Open the Container Dashboard
 2. Find the failed execution in **Execution History**
-3. Click the copy button to get the exact `docker run` command
-4. Paste and run in your terminal for debugging
+3. Click the copy button to get the `docker run` command of that run
+4. Paste and run it in your terminal for debugging
+
+The command starts the container the run started: the same mounts, working directory, user, limits,
+hardening flags (`--cap-drop ALL`, `--security-opt no-new-privileges:true`, `--pids-limit`), published
+and exposed ports and labels, with every word quoted for the shell of the host, a POSIX shell (sh, bash,
+zsh) on macOS and Linux and PowerShell 7.3 or later on Windows. It leaves out the extension's own label,
+so the cleanup at the next start does not remove a container started from the copy. The copy of a run
+from this session carries the real environment values; the history of an earlier session holds only the
+command as the log keeps it, with `********` in place of each value and the redactions listed under
+[Redaction before persistence](#redaction-before-persistence), such as `~` for the home directory, all
+to be filled in before it runs. Before the first run of a session, **Copy Docker Run** in Quick Settings
+copies a template built from the settings instead, with `<tool>` and `<args>` to fill in.
 
 ```bash
-# Example copied command:
-docker run --rm \
-  -v /path/to/project:/workspace \
-  -w /workspace \
+# Example copied command (macOS):
+docker run --rm --name containerextension-ghdl-143012345-1-1a2b3c4d --user 501:20 \
+  -v /path/to/project:/workspace -w /workspace --init \
+  --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 4096 \
+  -e HOME=/tmp \
   hdlc/ghdl:yosys \
   ghdl -a --std=08 test.vhd
 ```
