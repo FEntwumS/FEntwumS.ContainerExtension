@@ -118,9 +118,12 @@ internal static class DockerRunCommandFormatter
 
     /// <summary>
     /// Builds a generic, copy-pasteable <c>docker run</c> template from the active settings, using
-    /// <c>&lt;tool&gt;</c>/<c>&lt;args&gt;</c> placeholders in place of a concrete command.
+    /// <c>&lt;tool&gt;</c>/<c>&lt;args&gt;</c> placeholders in place of a concrete command. For a POSIX shell
+    /// it sets the user a run would: root (<c>0:0</c>) when <paramref name="isRootless"/> is true, the host's
+    /// uid:gid otherwise.
     /// </summary>
-    internal static string Generate(ISettingsService settings, string runtimePath, string image, CommandShell? shell = null)
+    internal static string Generate(
+        ISettingsService settings, string runtimePath, string image, CommandShell? shell = null, bool isRootless = false)
     {
         var sh = shell ?? HostShell;
         var memMb = settings.SafeGetSetting(ContainerExtensionModule.MemoryLimitSetting, 0.0);
@@ -148,7 +151,11 @@ internal static class DockerRunCommandFormatter
             : $" -v \"$(pwd)\":{ContainerWorkDir} -w {ContainerWorkDir}");
         if (sh == CommandShell.Posix)
         {
-            sb.Append(" --user $(id -u):$(id -g)");
+            // A rootless runtime maps container root to the host user who started it; the host's own uid would
+            // map to a subordinate id that cannot write the mounted project.
+            sb.Append(isRootless
+                ? " --user " + DockerCommandBuilder.RootlessContainerUser
+                : " --user $(id -u):$(id -g)");
         }
         if (memMb > 0)
         {

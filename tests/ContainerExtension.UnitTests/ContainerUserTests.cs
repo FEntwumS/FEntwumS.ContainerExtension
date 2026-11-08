@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using ContainerExtension.Services.Docker;
+using Docker.DotNet.Models;
 using OneWare.Essentials.ToolEngine;
 using Xunit;
 
@@ -66,5 +67,34 @@ public sealed class ContainerUserTests
     public void RootfulRuntime_WithoutHostIds_KeepsTheImageUser()
     {
         Assert.Null(UserFor(null, null, isRootless: false));
+    }
+
+    [Fact]
+    public void IsRootless_ReadsTheRootlessSecurityOption()
+    {
+        var info = new SystemInfoResponse
+        {
+            SecurityOptions = new List<string> { "name=seccomp,profile=builtin", "name=rootless", "name=cgroupns" },
+        };
+
+        Assert.True(DockerConnectionProvider.IsRootless(info));
+    }
+
+    [Fact]
+    public void IsRootless_IsFalseForARootfulRuntime()
+    {
+        var info = new SystemInfoResponse
+        {
+            SecurityOptions = new List<string> { "name=seccomp,profile=builtin", "name=cgroupns" },
+        };
+
+        Assert.False(DockerConnectionProvider.IsRootless(info));
+    }
+
+    [Fact]
+    public void IsRootless_IsFalseWithoutSystemInfo()
+    {
+        Assert.False(DockerConnectionProvider.IsRootless(null));
+        Assert.False(DockerConnectionProvider.IsRootless(new SystemInfoResponse()));
     }
 }
