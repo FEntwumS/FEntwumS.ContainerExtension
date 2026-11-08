@@ -82,8 +82,9 @@ end-to-end results come from controlled local runs, not from the CI matrix.
 ## Argument and environment size
 
 The container receives the tool's arguments as an argument vector, which its `execve` checks against
-the Linux limits; the extension checks the same limits before it creates the container, on the
-arguments after path mapping, counted in UTF-8 bytes with the terminating NUL of each string:
+the Linux limits. The extension checks them before it creates the container, the total against a
+stricter cap of its own, on the arguments after path mapping, counted in UTF-8 bytes with the
+terminating NUL of each string:
 
 - One argument or environment string may take at most 131072 bytes, `MAX_ARG_STRLEN`, which is
   32 pages (`include/uapi/linux/binfmts.h`) on the 4 KiB pages of an amd64 host.
