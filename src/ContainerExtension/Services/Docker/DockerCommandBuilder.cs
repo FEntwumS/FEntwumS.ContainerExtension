@@ -25,6 +25,8 @@ internal static class DockerCommandBuilder
 {
     private static long _containerCounter = 0;
     private const string ContainerWorkDir = "/workspace";
+    // The container user on a rootless runtime, whose user namespace maps container root to the invoking host user.
+    internal const string RootlessContainerUser = "0:0";
     // The hardening every container gets; the copied docker run command renders the same values.
     internal const string DroppedCapabilities = "ALL";
     internal const string NoNewPrivilegesOption = "no-new-privileges:true";
@@ -497,14 +499,30 @@ internal static class DockerCommandBuilder
         var counter = Interlocked.Increment(ref _containerCounter);
         var containerName = $"{SanitizeContainerName(rawPrefix)}{SanitizeContainerName(executable)}-{DateTime.Now.ToString("HHmmssfff", System.Globalization.CultureInfo.InvariantCulture)}-{counter}-{Guid.NewGuid().ToString("N")[..8]}";
 
-        // On a rootless runtime (rootless Podman or rootless Docker), pinning --user to the host euid:egid
-        // breaks every workspace write: the host uid is not the in-namespace owner of the bind mount, so the
-        // tool's output hits EACCES. Omitting --user runs as the image default (root), which the rootless
-        // user namespace maps back to the invoking host user that owns the workspace. Every other runtime —
-        // including ROOTFUL Podman and Docker — still needs the explicit uid:gid for correct file ownership.
-        var user = isRootless || string.IsNullOrEmpty(uid) || string.IsNullOrEmpty(gid) || OperatingSystem.IsWindows()
-          ? null
-          : $"{uid}:{gid}";
+        // A rootless runtime (rootless Podman or rootless Docker) maps container uid 0 to the invoking host user,
+        // who owns the project, and every other container uid to a subordinate host id, which may not write to
+        // the bind-mounted /workspace. Inside that namespace the host uid:gid is such an other uid. Omitting the
+        // user does not help either: the toolchain image then runs as its USER oneware (uid 1000), not as root,
+        // and on both rootless runtimes every write to /workspace fails with EACCES.
+        // So the container runs as root ("0:0"), and its output files belong to the invoking host user. That
+        // root holds no capabilities: the drop of ALL capabilities, no-new-privileges and the pids limit stay in
+        // force. It therefore cannot write to the image user's home directory either, and HOME falls back to
+        // /tmp below when the run sets none. Podman's keep-id user namespace mode is not used, because Docker
+        // ignores it. Every rootful runtime, Podman and Docker alike, still gets the host uid:gid so that output
+        // files are not root-owned. On Windows the image's default user applies.
+        string? user;
+        if (OperatingSystem.IsWindows())
+        {
+            user = null;
+        }
+        else if (isRootless)
+        {
+            user = RootlessContainerUser;
+        }
+        else
+        {
+            user = string.IsNullOrEmpty(uid) || string.IsNullOrEmpty(gid) ? null : $"{uid}:{gid}";
+        }
 
         var autoRemove = settingsService.SafeGetSetting(ContainerExtensionModule.AutoRemoveSetting, true);
         var networkMode = settingsService.SafeGetSetting(ContainerExtensionModule.NetworkModeSetting, "bridge");
