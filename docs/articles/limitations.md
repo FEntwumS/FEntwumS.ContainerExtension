@@ -88,9 +88,13 @@ arguments after path mapping, counted in UTF-8 bytes with the terminating NUL of
 - One argument or environment string may take at most 131072 bytes, `MAX_ARG_STRLEN`, which is
   32 pages (`include/uapi/linux/binfmts.h`) on the 4 KiB pages of an amd64 host.
 - All arguments and environment strings together may take at most 1 MiB. Linux allows a quarter of
-  the stack limit, 2 MiB at the default of 8 MiB (`execve(2)`); the extension keeps half of that, so
-  the variables that the image and the runtime add still fit, and a container with a 4 MiB stack
-  limit runs as well.
+  the stack limit, 2 MiB at the default of 8 MiB (`execve(2)`), and counts against it the pointer
+  arrays of the arguments and the environment, one pointer of 8 bytes per string on a 64-bit host,
+  and the variables that the image and the runtime add, which the extension does not see. The
+  extension keeps half of the default quarter as room for these, which a command of a few long
+  arguments leaves ample. The check is not exact, though: a command close to the cap can pass it and
+  still fail inside the container with `E2BIG`, when it consists of very many short strings or when
+  the container's stack limit is lower; at 4 MiB the quarter equals the 1 MiB cap.
 
 A run over either limit fails with an error that names the limit and the length it found. A tool
 whose script grows with the design, such as a yosys script given with `-p`, can take the script as

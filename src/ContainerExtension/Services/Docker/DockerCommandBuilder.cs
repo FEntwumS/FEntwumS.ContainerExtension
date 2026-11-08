@@ -37,8 +37,11 @@ internal static class DockerCommandBuilder
     internal const int MaxArgumentBytes = 32 * 4096;
 
     // execve(2) limits argv and envp together to a quarter of the soft stack limit, 2 MiB at the default 8 MiB.
-    // Half of that leaves room for the variables the image and the runtime add, which the run does not see here,
-    // and still holds in a container whose stack limit is 4 MiB.
+    // The kernel also counts the argv and envp pointer arrays, 8 bytes per string on a 64-bit host, and the
+    // variables the image and the runtime add, which the run does not see here. Half of the default quarter is kept
+    // as room for them, which a command of a few long strings leaves ample. The check is not exact: a command close
+    // to this cap can pass here and still fail with E2BIG in the container when it consists of very many short
+    // strings or when the container's stack limit is lower; at 4 MiB the quarter equals this cap.
     internal const int MaxArgumentAndEnvironmentBytes = 1024 * 1024;
 
     internal static readonly SearchValues<char> ShellSpecialChars = SearchValues.Create(";&|<>*?[]{}()$\\'\"#~`! \t\n\r");
