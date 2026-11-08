@@ -11,7 +11,7 @@
 This project executes user-specified FPGA toolchains inside Docker/Podman containers and adheres to zero-trust principles:
 - **SLSA build provenance (L2)** for the published release archive (the release zip is the attestation subject).
 - **Deterministic Builds** ensuring verifiable and reproducible binary outputs.
-- **Non-root Container Execution** preventing namespace privilege escalation.
+- **Unprivileged Container Execution**: on rootful runtimes the tool runs as the host user's uid and gid; on rootless runtimes it runs as root inside the user namespace, which the runtime maps to the unprivileged host user who started it. All capabilities are dropped either way.
 - **Static Analysis** enforced via GitHub CodeQL and Trivy.
 
 ## Reporting a Vulnerability
