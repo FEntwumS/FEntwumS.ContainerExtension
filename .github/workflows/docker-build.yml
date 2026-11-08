@@ -49,6 +49,20 @@ jobs:
         sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
         df -h /
 
+    # Release tag/date/arch and the tarball SHA-256 are pinned once, as ARG defaults in the
+    # Dockerfile, which is the single source of truth for the toolchain provenance. The image's
+    # version tag is read from there, so moving the pin needs no edit in this workflow.
+    - name: Read pinned release tag from Dockerfile
+      id: pin
+      run: |
+        tag="$(grep -m1 '^ARG RELEASE_TAG=' docker/oss-cad-suite/Dockerfile | cut -d= -f2 || true)"
+        if ! [[ "${tag}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+          echo "::error::No YYYY-MM-DD 'ARG RELEASE_TAG=' found in docker/oss-cad-suite/Dockerfile (read: '${tag}')."
+          exit 1
+        fi
+        echo "Pinned OSS CAD Suite release: ${tag}"
+        echo "release_tag=${tag}" >> "${GITHUB_OUTPUT}"
+
     - name: Build and Load
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
       with:
@@ -56,10 +70,7 @@ jobs:
         platforms: linux/amd64
         tags: |
           fentwums/oss-cad-suite:latest
-          fentwums/oss-cad-suite:2026-07-15
-        # Release tag/date/arch and the tarball SHA-256 are pinned once, as ARG defaults in the
-        # Dockerfile, which is the single source of truth for the toolchain provenance. Do not
-        # duplicate them here.
+          fentwums/oss-cad-suite:${{ steps.pin.outputs.release_tag }}
         load: true
         cache-from: type=gha
         cache-to: type=gha,mode=max
