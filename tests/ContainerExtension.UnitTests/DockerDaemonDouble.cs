@@ -14,7 +14,8 @@ namespace ContainerExtension.UnitTests;
 /// A stand-in for a Docker daemon on 127.0.0.1, so that a test can see which API version a client asks for
 /// without a daemon. It answers <c>GET /version</c> with the API version it was given, or without one,
 /// <c>GET /_ping</c> with <c>OK</c> and any other request with 404, closes each connection after its answer and
-/// records the path of every request.
+/// records the path of every request. With <see cref="OnImageInspect"/> set, it also answers the inspection of an
+/// image, as if the image were present, after running that action.
 /// </summary>
 internal sealed class DockerDaemonDouble : IDisposable
 {
@@ -36,6 +37,12 @@ internal sealed class DockerDaemonDouble : IDisposable
 
     /// <summary>The paths of the requests received so far, in order.</summary>
     public IReadOnlyCollection<string> Paths => _paths;
+
+    /// <summary>
+    /// When set, runs before the answer to an image inspection, which then reports the image as present; when null,
+    /// that request gets 404 like any other.
+    /// </summary>
+    public Action? OnImageInspect { get; set; }
 
     /// <summary>
     /// Starts a stand-in daemon on <paramref name="port"/> that reports <paramref name="apiVersion"/>, with
@@ -87,7 +94,16 @@ internal sealed class DockerDaemonDouble : IDisposable
                 var path = parts.Length > 1 ? parts[1] : string.Empty;
                 _paths.Enqueue(path);
 
-                var (status, body) = path.EndsWith("/version", StringComparison.Ordinal)
+                var onImageInspect = OnImageInspect;
+                var isImageInspect = onImageInspect != null
+                    && path.Contains("/images/", StringComparison.Ordinal) && path.EndsWith("/json", StringComparison.Ordinal);
+                if (isImageInspect)
+                {
+                    onImageInspect?.Invoke();
+                }
+                var (status, body) = isImageInspect
+                    ? ("200 OK", "{\"Id\":\"sha256:0\"}")
+                    : path.EndsWith("/version", StringComparison.Ordinal)
                     ? (_versionStatus, _apiVersion is null ? "{}" : $"{{\"ApiVersion\":\"{_apiVersion}\",\"Version\":\"27.0.0\"}}")
                     : path.EndsWith("/_ping", StringComparison.Ordinal)
                         ? ("200 OK", "OK")

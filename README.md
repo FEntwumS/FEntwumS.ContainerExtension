@@ -87,9 +87,73 @@ flowchart TD
   the image's default user applies (`oneware` in the toolchain image); `tini` as PID 1. Every container
   drops all capabilities (`--cap-drop=ALL`), forbids privilege escalation
   (`--security-opt no-new-privileges`), and caps the task count as a fork-bomb backstop.
-- Host paths that escape the mounted workspace are remapped to an in-workspace sentinel rather than
-  their real location; an explicit device/library allowlist is the only pass-through. The behaviour is
-  pinned by an adversarial path-containment test corpus that runs in CI.
+- A run inside a project mounts the project folder, the folder that holds the `.fpgaproj` file,
+  read-only at `/workspace`, and the tool starts in its working directory below `/workspace`. A tool
+  writes only where release 1.2.1 let it write, in its working directory: for a tool that writes, the
+  working directory is bound a second time, writable, at its place below `/workspace`, such as
+  `/workspace/build/netlist`; every other tool gets the read-only project alone. When the working
+  directory is the project folder, or no project file lies in it or a folder above it, the working
+  directory alone is mounted at `/workspace`, read-only or writable by tool, as in release 1.2.1. A
+  project folder that is a file system root, such as a drive root on Windows, or is or contains the
+  home folder, a shared temporary folder or a folder the mount deny list below blocks, is never
+  mounted; the working directory is mounted alone instead. As in release 1.2.1, a tool that writes
+  may change anything in its working directory, a
+  `.git` there included, with one exception: when the top-level `.git` of the writable working
+  directory is a folder or the `.git` file of a git worktree or submodule, it is bound a second time,
+  read-only, at the same place in the container, such as `/workspace/.git` or
+  `/workspace/build/netlist/.git`. A `.git` that is a symbolic link is not bound. On a host with a
+  case-insensitive file system, other spellings such as `/workspace/.GIT` reach the same read-only
+  folder; this was measured with OrbStack on macOS only. Only that one path is bound: the metadata
+  folder that a `.git` file names and a repository nested deeper in the working directory stay
+  writable for a tool that writes when they lie inside the working directory. After the bind check,
+  and once more after the image is made available, right before the container is created, a run fails
+  with an error saying that the project changed while the run was prepared when a bind no longer names
+  exactly the folder it was made for: the project folder at `/workspace`, the working directory at
+  its own place, or its `.git`, for example because a folder or a `.git` was replaced with a symbolic
+  link. A short window between that last check and the mount by the engine remains. When the working
+  directory lies below the project folder, `/workspace` names the project folder, not the working
+  directory as in release 1.2.1, so a script that wrote to `/workspace` for its working directory
+  must use a relative path or the working directory's place in the container instead. The folders of
+  output paths that a tool's arguments name are created only in the working directory. A path
+  argument the extension recognises as a path (a path on its own, the value after `=` of an option
+  such as `--input=<path>` or `-DFOO=<path>`, a path attached to `-P`, a path attached to `-o` that
+  is rooted or starts with `~/` or `~\`, or a path in an argument that a space, a comma or a
+  semicolon splits, such as the script after `-p`) fails the run when it lies outside the mounted
+  folder, also through a symbolic link that leads out, before the image is pulled, with an error
+  that names the path and the folder. A path on its own or the value after `=` counts only when it
+  holds a `/` or `\`, is rooted, starts with `~/` or `~\` or is the value after `--workdir=`; any
+  other value, such as `x.json` or a bare `..`, also as the value after `-o` or in `--input=..`, is
+  passed on unchanged and unchecked. Such a name lies in the working directory, except `..`, which
+  names the folder above it and lies outside the mounted folder whenever the working directory is
+  mounted alone: without a project file, in a working directory at the project root, or below a
+  project folder that is never mounted because it is a file system root, such as a drive root on
+  Windows, or is or contains the home folder, a shared temporary folder or a folder the mount deny
+  list blocks.
+  Only `/dev/null`, `/dev/zero`, `/dev/urandom` and paths under the image's `/bin`, `/usr/bin`,
+  `/lib` and `/lib64` pass through unchanged, as paths in the container. The extension does not
+  expand a `~`: it checks `~/x` and `~\x` as a folder `~` in the working directory and passes
+  the argument on as written, except that every `\` becomes `/`, as in any argument. A tool may
+  expand a `~/` itself, as yosys does with its `HOME`, which the container sets to `/tmp` unless
+  the run's environment sets one; the path then names a place in the container that the check
+  never saw, and what the tool writes there is lost with the container. A relative path or an
+  absolute host path is the reliable form. A path attached directly to an option, without `=` and
+  other than these forms after `-P` and `-o`, such as `-obuild/out.json`, `-I/abs/include` or
+  `+incdir+/abs/include`, is not recognised as a path and is not mapped. When it holds a `/` or `\`,
+  the whole argument is checked as a path in the working directory, its option letters read as the
+  first folder: it reaches the tool unchanged, apart from every `\` becoming `/`, while that path
+  stays inside the mounted folder, and fails the run when it leaves it. A `..` right after the
+  option letters therefore only leaves the folder they form, such as `-o..`, so the check climbs up
+  to two levels fewer than the tool does,
+  and where that path leads through a symbolic link, the argument comes back as the container path it
+  resolves to, without its option letters. A path given as a separate argument, such as
+  `-o build/out.json`, or after `=` is checked as the tool reads it when it counts as a path. A value
+  that holds `://`, such as a URL, is not checked, also after `--workdir=` or attached to an option,
+  unless it is rooted or starts with `~/` or `~\` and stands on its own, after `=` or attached to
+  `-P` or `-o`; in an argument that a space, a comma or a semicolon splits, it is never checked. Two
+  GHDL forms are rewritten instead of checked: the value of `--work` or `-work`, after `=` or as the
+  next argument, becomes a library name, and with `ghdl` and one of `-m`, `-e`, `-r`, `--synth`,
+  `--elab` or `--run`, an argument that ends in `.vhd` or `.vhdl` becomes its unit name. The
+  behaviour is pinned by an adversarial path-containment test corpus that runs in CI.
 - A mount deny list rejects binds of critical host paths (`/etc`, `/proc`, `/sys`, `/run`, the Docker
   socket, …); on Linux a project on a removable drive under `/run/media/`, where udisks2 mounts it, may
   be bound.

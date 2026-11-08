@@ -1026,10 +1026,10 @@ public sealed class ContainerExtensionTests : IDisposable
     }
 
     [Fact]
-    public void MapPathToContainer_RelativePathLeavingTheWorkspace_MapsToTheSentinel()
+    public void MapPathToContainer_RelativePathLeavingTheWorkspace_Fails()
     {
-        var result = DockerCommandBuilder.MapPathToContainer("../outside.v", Directory.GetCurrentDirectory());
-        Assert.Equal("/workspace/invalid_escaped_path", result);
+        var ex = Assert.Throws<DockerExecutionException>(() => DockerCommandBuilder.MapPathToContainer("../outside.v", Directory.GetCurrentDirectory()));
+        Assert.Contains("../outside.v", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1255,10 +1255,11 @@ public sealed class ContainerExtensionTests : IDisposable
     }
 
     [Fact]
-    public void MapPathToContainer_EscapesWorkspace_ReturnsInvalidEscapedPath()
+    public void MapPathToContainer_EscapesWorkspace_FailsAndNamesThePathAndTheMount()
     {
-        var result = DockerCommandBuilder.MapPathToContainer("/etc/passwd", "/workspace/myproj");
-        Assert.Equal("/workspace/invalid_escaped_path", result);
+        var ex = Assert.Throws<DockerExecutionException>(() => DockerCommandBuilder.MapPathToContainer("/etc/passwd", "/workspace/myproj"));
+        Assert.Contains("'/etc/passwd'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("myproj", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2424,8 +2425,9 @@ public sealed class ContainerExtensionTests : IDisposable
                 }
             };
 
-            _ = DockerCommandBuilder.BuildContainerParameters("img", command, null!, null, null, (c, l) => { });
+            var ex = Assert.Throws<DockerExecutionException>(() => DockerCommandBuilder.BuildContainerParameters("img", command, null!, null, null, (c, l) => { }));
 
+            Assert.Contains(outsideDirName, ex.Message, StringComparison.Ordinal);
             Assert.False(Directory.Exists(outsidePath), "The outside directory traversal path should not have been created.");
         }
         finally
@@ -2439,19 +2441,13 @@ public sealed class ContainerExtensionTests : IDisposable
     }
 
     [Fact]
-    public void DockerCommandBuilder_MapPathToContainerInternal_MapsPathsCorrectly()
+    public void DockerCommandBuilder_MapPathToContainer_MapsPathsCorrectly()
     {
-        var method = typeof(DockerCommandBuilder).GetMethod("MapPathToContainerInternal", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        Assert.NotNull(method);
-
         var workingDir = HostAbs("work/Projects/MyProject");
         var path1 = HostAbs("work/Projects/MyProject/build/out.json");
-        var result1 = method.Invoke(null, new object[] { path1, workingDir }) as string;
-        Assert.Equal("/workspace/build/out.json", result1);
+        Assert.Equal("/workspace/build/out.json", DockerCommandBuilder.MapPathToContainer(path1, workingDir));
 
-        var path2 = "src/main.v";
-        var result2 = method.Invoke(null, new object[] { path2, workingDir }) as string;
-        Assert.Equal("src/main.v", result2);
+        Assert.Equal("src/main.v", DockerCommandBuilder.MapPathToContainer("src/main.v", workingDir));
     }
 
     [Fact]

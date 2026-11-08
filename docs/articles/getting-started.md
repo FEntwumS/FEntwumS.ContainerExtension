@@ -55,7 +55,16 @@ If the search finds nothing, first add the manifest link
 3. Under **Extras > Settings > Binary Management > Execution Strategy**, switch the tool from `NativeExecutionStrategy` to `DockerExecutionStrategy` (OneWare lists the raw strategy keys)
 4. Run the tool (e.g., GHDL Analyze) - the extension will:
    - Pull the tool's image if it comes from a registry and is not cached yet
-   - Mount your project directory into the container
+   - Mount your project directory, the folder with the `.fpgaproj` file, read-only at `/workspace` and
+     start the tool in its working directory there, which alone is writable, and only for a tool that
+     writes, as in release 1.2.1; a path argument the extension recognises as a path fails the run with
+     an error that names it when it lies outside the mounted folder. A path on its own or after `=`
+     counts only when it holds a `/` or `\`, is rooted, starts with `~/` or `~\` or follows
+     `--workdir=`, so a bare `..` reaches the tool unchecked; a value that holds `://`, such as a URL,
+     can reach it unchecked as well; a path attached directly to an option without `=`, such as
+     `-obuild/out.json`, is checked only when it holds a `/` or `\` and only as a whole, its option
+     letters read as its first folder, except the forms after `-P` and `-o` that
+     [Workspace Access](configuration.md#workspace-access) lists
    - Execute the tool inside the container
    - Stream output back to the IDE
 5. View execution details in the Container Dashboard's **Execution History** section
