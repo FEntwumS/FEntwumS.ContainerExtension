@@ -84,7 +84,7 @@ jobs:
         with:
           global-json-file: global.json
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           languages: csharp
       - name: Build for analysis
@@ -92,7 +92,7 @@ jobs:
         env:
           GITHUB_ACTIONS: true
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         # SARIF upload requires code scanning to be enabled for the repository;
         # tolerate a rejected upload so a fork without it still gets an
         # informational scan rather than a failing workflow.
