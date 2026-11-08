@@ -29,6 +29,18 @@ internal static class DockerCommandBuilder
     internal const string DroppedCapabilities = "ALL";
     internal const string NoNewPrivilegesOption = "no-new-privileges:true";
     internal const long ProcessLimit = 4096;
+
+    // The limits execve(2) sets inside the container on the strings of argv and envp, each counted in UTF-8 bytes
+    // with its terminating NUL, which E2BIG counts as well (execve(2), "Limits on size of arguments and environment").
+    // One string may take MAX_ARG_STRLEN = PAGE_SIZE * 32 bytes (include/uapi/linux/binfmts.h): 131072 on the 4 KiB
+    // pages of amd64, the smallest page size arm64 offers as well, so a kernel with larger pages accepts more.
+    internal const int MaxArgumentBytes = 32 * 4096;
+
+    // execve(2) limits argv and envp together to a quarter of the soft stack limit, 2 MiB at the default 8 MiB.
+    // Half of that leaves room for the variables the image and the runtime add, which the run does not see here,
+    // and still holds in a container whose stack limit is 4 MiB.
+    internal const int MaxArgumentAndEnvironmentBytes = 1024 * 1024;
+
     internal static readonly SearchValues<char> ShellSpecialChars = SearchValues.Create(";&|<>*?[]{}()$\\'\"#~`! \t\n\r");
     private static readonly SearchValues<char> DangerousEnvKeyChars = SearchValues.Create("&|;`$()<>\n\r\\ \t");
     private static readonly Dictionary<string, (List<string>? vars, DateTime lastWrite, DateTime lastAccess)> EnvCache = new(StringComparer.Ordinal);
@@ -238,10 +250,6 @@ internal static class DockerCommandBuilder
                 if (string.IsNullOrWhiteSpace(arg))
                 {
                     continue;
-                }
-                if (arg.Length > 2048)
-                {
-                    throw new ArgumentException("Command argument exceeds maximum allowed length of 2048 characters.", nameof(command));
                 }
                 try
                 {
@@ -575,6 +583,9 @@ internal static class DockerCommandBuilder
             envList.Add("HOME=/tmp");
         }
 
+        // The arguments are checked in their final form, after path mapping, as the container's execve receives them.
+        ValidateExecveLimits(fullCmd, envList);
+
         if (envList.Count > 0)
         {
             createParams.Env = envList;
@@ -653,6 +664,51 @@ internal static class DockerCommandBuilder
         createParams.Labels[ContainerExtensionModule.ContainerOwnerLabel] = "true";
 
         return createParams;
+    }
+
+    /// <summary>
+    /// Fails the run before the container is created when an argument, an environment string or all of them together
+    /// exceed what execve accepts inside the container (see <see cref="MaxArgumentBytes"/> and
+    /// <see cref="MaxArgumentAndEnvironmentBytes"/>). The executable counts as argument 0. An environment string is
+    /// named by its key alone, since its value may hold a secret.
+    /// </summary>
+    internal static void ValidateExecveLimits(IReadOnlyList<string> argv, IReadOnlyList<string> envp)
+    {
+        ArgumentNullException.ThrowIfNull(argv);
+        ArgumentNullException.ThrowIfNull(envp);
+        const string scriptHint = "Pass a long script as a file instead, for yosys with -s <file>.";
+        long total = 0;
+        for (int i = 0; i < argv.Count; i++)
+        {
+            var bytes = Encoding.UTF8.GetByteCount(argv[i] ?? "") + 1L;
+            if (bytes > MaxArgumentBytes)
+            {
+                throw new DockerExecutionException(
+                    $"Argument {i} of the container command takes {bytes} bytes in UTF-8 with its terminating NUL, more than the " +
+                    $"{MaxArgumentBytes} bytes Linux accepts for one argument (MAX_ARG_STRLEN). {scriptHint}");
+            }
+            total += bytes;
+        }
+        foreach (var entry in envp)
+        {
+            var bytes = Encoding.UTF8.GetByteCount(entry ?? "") + 1L;
+            if (bytes > MaxArgumentBytes)
+            {
+                var separator = entry!.IndexOf('=', StringComparison.Ordinal);
+                var key = separator > 0 ? entry[..separator] : "(unnamed)";
+                throw new DockerExecutionException(
+                    $"The environment variable {key} takes {bytes} bytes in UTF-8 with its terminating NUL, more than the " +
+                    $"{MaxArgumentBytes} bytes Linux accepts for one environment string (MAX_ARG_STRLEN).");
+            }
+            total += bytes;
+        }
+        if (total > MaxArgumentAndEnvironmentBytes)
+        {
+            throw new DockerExecutionException(
+                $"The container command and its environment take {total} bytes in UTF-8 with their terminating NULs, more than " +
+                $"the {MaxArgumentAndEnvironmentBytes} bytes the extension allows; Linux limits them together to a quarter of the " +
+                $"stack limit. {scriptHint}");
+        }
     }
 
     /// <summary>
