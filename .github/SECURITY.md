@@ -3,12 +3,16 @@
 ## Supported Versions
 
 | Version | Supported | Verified |
-| ------- | --------- | ---------------------- |
-| 1.0.x   | Yes       | Yes                    |
+| ------- | --------- | -------- |
+| 1.2.x   | Yes       | Yes      |
+| < 1.2   | No        | Yes      |
+
+Fixes, security fixes included, ship in the next patch release of the current minor line; earlier lines receive no backports, so upgrade to the latest release. Verified means the release archive carries SLSA build provenance, which `gh attestation verify ContainerExtension_<version>_all.zip -R FEntwumS/FEntwumS.ContainerExtension` checks.
 
 ## Secure Infrastructure
 
 This project executes user-specified FPGA toolchains inside Docker/Podman containers and adheres to zero-trust principles:
+
 - **SLSA build provenance (L2)** for the published release archive (the release zip is the attestation subject).
 - **Deterministic Builds** ensuring verifiable and reproducible binary outputs.
 - **Non-root Container Execution** preventing namespace privilege escalation.
@@ -23,12 +27,14 @@ You should receive an acknowledgement within **48 hours**. Critical issues affec
 ## Scope & Threat Model
 
 Security-relevant areas in-scope include:
+
 - **Container escape** - Any bypass of the Docker sandbox boundary via extension mounts or config.
 - **Credential leakage** - Exposure of host environment variables, SSH keys, or socket paths via telemetry or logs.
 - **Path traversal** - Workspace mount injection that accesses files outside the active project directory.
 - **Zombie Process Exhaustion** - Unhandled PIDs overloading host PID limits.
 
 One setting deliberately relaxes the isolation boundary. It defaults to disabled, and a bypass reached through it is not a vulnerability:
+
 - **Allow Native Fallback** - Runs the tool directly on the host when no container engine is reachable, bypassing container isolation by design.
 
 Issues related to host-side Docker daemon misconfiguration (e.g., exposing unauthenticated TCP sockets) or inherent zero-days in the EDA tools themselves (e.g., buffer overflows in `yosys`) are outside the scope of this project, provided they do not facilitate a container escape.
