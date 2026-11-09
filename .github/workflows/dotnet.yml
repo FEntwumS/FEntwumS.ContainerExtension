@@ -34,7 +34,6 @@ jobs:
 
   build-test:
     name: Build & Test (${{ matrix.os }})
-    needs: format
     strategy:
       fail-fast: false
       matrix:
@@ -70,7 +69,6 @@ jobs:
 
   codeql:
     name: CodeQL
-    needs: format
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
