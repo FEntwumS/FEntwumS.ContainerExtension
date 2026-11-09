@@ -2,9 +2,10 @@
 
 The central contribution of this work is the transparent-integration architecture: the
 `IToolExecutionStrategy` hybrid (`DockerExecutionStrategy`) that OneWare Studio dispatches its
-FPGA-tool execution to, running the invocation in an isolated container with the project mounted at
-`/workspace` and its path arguments mapped there, and passing the tool's output and exit code back as a
-native run would. Overhead and reproducibility measurements are
+FPGA-tool execution to, running the invocation in an isolated container with the project (the folder
+that holds its `.fpgaproj` file) mounted read-only at `/workspace`, only the tool's working directory
+writable for a tool that writes, and its path arguments mapped there, and passing the tool's output
+and exit code back as a native run would. Overhead and reproducibility measurements are
 supporting evidence for that architecture, not the object of study. This document records the known
 boundaries of the implementation and the corresponding threats to the validity of the evaluation, so
 that measured numbers are read against the conditions that produced them. The measurements and the
@@ -62,6 +63,15 @@ not a deficiency: pulling and running a fully qualified private image through th
 itself is unaffected, since that path delegates to the configured engine and its native credential
 store.
 
+## A folder with a colon in its path cannot be mounted
+
+A project folder or working directory whose path contains a colon, other than that of a Windows
+drive letter such as `C:\`, cannot be mounted, because Docker's bind syntax `source:target:mode`
+uses the colon as its separator. On Linux and macOS every colon counts. The run fails at once,
+before the image is pulled, with an error that names the folder and, where a symbolic link leads to
+a path with a colon, the place it resolves to. Rename the folder or move it to a path without a
+colon.
+
 ## The container E2E suite is gated out of CI
 
 The end-to-end suite in `tests/ContainerExtension.UnitTests/DockerExecutionE2ETests.cs` exercises the
@@ -79,6 +89,29 @@ Impact on the evaluation: container-level behaviour is validated locally against
 host-only portions of the strategy; it does not certify end-to-end container execution. Reported
 end-to-end results come from controlled local runs, not from the CI matrix.
 
+## Argument and environment size
+
+The container receives the tool's arguments as an argument vector, which its `execve` checks against
+the Linux limits. The extension checks them before it creates the container, the total against a
+stricter cap of its own, on the arguments after path mapping, counted in UTF-8 bytes with the
+terminating NUL of each string:
+
+- One argument or environment string may take at most 131072 bytes, `MAX_ARG_STRLEN`, which is
+  32 pages (`include/uapi/linux/binfmts.h`) on the 4 KiB pages of an amd64 host.
+- All arguments and environment strings together may take at most 1 MiB. Linux allows a quarter of
+  the stack limit, 2 MiB at the default of 8 MiB (`execve(2)`), and counts against it the pointer
+  arrays of the arguments and the environment, one pointer of 8 bytes per string on a 64-bit host,
+  and the variables that the image and the runtime add, which the extension does not see. The
+  extension keeps half of the default quarter as room for these, which a command of a few long
+  arguments leaves ample. The check is not exact, though: a command close to the cap can pass it and
+  still fail inside the container with `E2BIG`, when it consists of very many short strings or when
+  the container's stack limit is lower; at 4 MiB the quarter equals the 1 MiB cap.
+
+A run over either limit fails with an error that names the limit and the length it found. A tool
+whose script grows with the design, such as a yosys script given with `-p`, can take the script as
+a file instead (`yosys -s <file>`), which also avoids the limit of 32767 characters on a native
+command line on Windows.
+
 ## Scope and non-goals
 
 This artifact is an *execution-integration layer*. Its responsibility is to run tool execution
@@ -90,13 +123,20 @@ resource limits, I/O streaming, and telemetry. The following are explicit non-go
   `docker.image`, per-tool override, the plugin's `docker.image`, default image, hardcoded fallback
   `hdlc/ghdl:yosys`). The capabilities of a given run are the capabilities of the resolved image.
 - **A formal security proof of the host daemon.** The implementation hardens the *client* boundary —
-  named-pipe server-process trust verification on Windows, socket-owner checks on Unix, critical-path
-  bind blocking, workspace path containment that remaps out-of-tree paths to an in-workspace sentinel,
-  unprivileged containers only (`--cap-drop=ALL`, `--security-opt no-new-privileges`, a PID-count cap),
-  SSRF gating on registry hosts, and telemetry credential scrubbing — but it does not, and
-  cannot, prove the host container daemon trustworthy. A compromised or misconfigured daemon is
-  outside the trust model. The native-fallback path is opt-in and explicitly documented as bypassing
-  container isolation.
+  named-pipe server-process trust verification on Windows, socket-owner checks on Unix,
+  critical-path bind blocking, workspace path containment that fails a run on a path argument it
+  recognises as a path outside the mounted folder (a path on its own or after `=` counts only when it
+  holds a `/` or `\`, is rooted, starts with `~/` or `~\` or follows `--workdir=`, so a bare `..`
+  reaches the tool unchecked, and a value that holds `://`, such as a URL, can reach the tool
+  unchecked; a path attached directly to an option, without `=` and other than a path after `-P` or a
+  rooted, `~/` or `~\` path after `-o`, such as `-I/abs/include`, is checked only when it holds a `/`
+  or `\` and only as a whole, its option letters read as its first folder, so a `..` right after them
+  can lead the tool up to two levels further up than the check sees;
+  [Workspace Access](configuration.md#workspace-access) gives the full rule), unprivileged containers
+  only (`--cap-drop=ALL`, `--security-opt no-new-privileges`, a PID-count cap), SSRF gating on
+  registry hosts, and telemetry credential scrubbing — but it does not, and cannot, prove the host
+  container daemon trustworthy. A compromised or misconfigured daemon is outside the trust model. The
+  native-fallback path is opt-in and explicitly documented as bypassing container isolation.
 
 These boundaries delimit what the evaluation claims: it measures the cost and reproducibility of
 *transparent integration and containerized dispatch*, not the security of the underlying engine or

@@ -8,16 +8,14 @@ using Xunit;
 namespace ContainerExtension.UnitTests;
 
 /// <summary>
-/// Adversarial corpus for the host→container path-containment boundary. A host path that escapes the
-/// mounted workspace — whether by an absolute system path or by `..` traversal — must be collapsed to a
-/// sentinel *inside* the workspace, never mapped to the real out-of-tree location; only an explicit
-/// allowlist of device and system-library paths passes through verbatim. The companion fixture asserts
+/// Adversarial corpus for the host to container path-containment boundary. A host path that escapes the
+/// mounted workspace, whether by an absolute system path or by `..` traversal, fails with an error that names it,
+/// and is never mapped to the real out-of-tree location; only an explicit allowlist of device and system-library
+/// paths passes through verbatim. The companion fixture asserts
 /// the non-privileged HostConfig hardening. These are the evidence base for the container-security study.
 /// </summary>
 public sealed class PathContainmentTests
 {
-    private const string Sentinel = "/workspace/invalid_escaped_path";
-
     private static string NewWorkspace()
     {
         var dir = Path.Combine(Path.GetTempPath(), "pc_" + Guid.NewGuid().ToString("N"));
@@ -46,26 +44,25 @@ public sealed class PathContainmentTests
     [InlineData("/root/.ssh/id_rsa")]
     [InlineData("/var/run/docker.sock")]
     [InlineData("/proc/self/environ")]
-    public void AbsoluteOutOfTreePath_IsContainedToSentinel(string escape)
+    public void AbsoluteOutOfTreePath_FailsAndNamesThePath(string escape)
     {
         var wd = NewWorkspace();
         try
         {
-            var mapped = DockerCommandBuilder.MapPathToContainer(escape, wd);
-            Assert.Equal(Sentinel, mapped);
+            var ex = Assert.Throws<DockerExecutionException>(() => DockerCommandBuilder.MapPathToContainer(escape, wd));
+            Assert.Contains(escape, ex.Message, StringComparison.Ordinal);
         }
         finally { Directory.Delete(wd, true); }
     }
 
     [Fact]
-    public void DotDotTraversalEscape_IsContainedToSentinel()
+    public void DotDotTraversalEscape_Fails()
     {
         var wd = NewWorkspace();
         try
         {
             var traversal = Path.Combine(wd, "..", "..", "..", "..", "..", "etc", "passwd");
-            var mapped = DockerCommandBuilder.MapPathToContainer(traversal, wd);
-            Assert.Equal(Sentinel, mapped);
+            Assert.Throws<DockerExecutionException>(() => DockerCommandBuilder.MapPathToContainer(traversal, wd));
         }
         finally { Directory.Delete(wd, true); }
     }
@@ -75,14 +72,14 @@ public sealed class PathContainmentTests
     [InlineData("/workspace/../../root/.ssh/id_rsa")]
     [InlineData("/workspace/sub/../../etc/shadow")]
     [InlineData("/workspace/./../../var/run/docker.sock")]
-    public void ContainerSpaceTraversalEscape_IsContainedToSentinel(string escape)
+    public void ContainerSpaceTraversalEscape_Fails(string escape)
     {
         var wd = NewWorkspace();
         try
         {
             // A path already expressed in container space (/workspace/...) must still be collapsed and
             // contained: "/workspace/../etc/passwd" must not escape the bind mount via the early-return path.
-            Assert.Equal(Sentinel, DockerCommandBuilder.MapPathToContainer(escape, wd));
+            Assert.Throws<DockerExecutionException>(() => DockerCommandBuilder.MapPathToContainer(escape, wd));
         }
         finally { Directory.Delete(wd, true); }
     }

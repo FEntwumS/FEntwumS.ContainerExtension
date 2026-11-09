@@ -339,8 +339,12 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         }
     }
 
+    // The template uses the system info a connection check last cached, as a run does. Before any has been
+    // read the runtime counts as rootful, so the template keeps the host uid:gid.
     public string GenerateDockerRunCommand()
-        => Services.Docker.DockerRunCommandFormatter.Generate(_settingsService, GetRuntimePath(), GetDefaultImage());
+        => Services.Docker.DockerRunCommandFormatter.Generate(
+            _settingsService, GetRuntimePath(), GetDefaultImage(),
+            isRootless: Services.Docker.DockerConnectionProvider.IsRootless(_connectionProvider?.CachedSystemInfo));
 
     // The exact docker run command from the most recent execution this session, with REAL env values and
     // paths (unmasked). Kept in memory only — never logged or persisted — so the dashboard can copy a
@@ -1031,15 +1035,11 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         };
     }
 
-    private CreateContainerParameters BuildContainerParameters(string image, ToolCommand command)
+    private CreateContainerParameters BuildContainerParameters(string image, ToolCommand command, Services.Docker.DockerCommandBuilder.ContainerMount? mount, bool? workspaceAccess)
     {
         var sysInfo = ConnectionProvider.CachedSystemInfo;
         double? remoteCpuCores = sysInfo?.NCPU;
-        // Rootless runtimes advertise "name=rootless" in /info SecurityOptions. When system info is
-        // unavailable (e.g. a runtime whose /info could not be read), default to false so the standard
-        // uid:gid path is used — correct for Docker, OrbStack, and rootful Podman.
-        var isRootless = sysInfo?.SecurityOptions?.Any(
-            o => o != null && o.Contains("name=rootless", StringComparison.OrdinalIgnoreCase)) ?? false;
+        var isRootless = Services.Docker.DockerConnectionProvider.IsRootless(sysInfo);
         return Services.Docker.DockerCommandBuilder.BuildContainerParameters(
           image,
           command,
@@ -1049,7 +1049,8 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
           (cmd, msg) => _console.SdkLog(cmd, msg),
           remoteCpuCores,
           isRootless,
-          ResolveWorkspaceAccess(command));
+          workspaceAccess,
+          mount);
     }
 
     /// <summary>
@@ -1342,9 +1343,25 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
                 throw dockerConnectionEx ?? new DockerExecutionException("Docker daemon is offline.");
             }
 
-            var resolvedWorkingDir = string.IsNullOrWhiteSpace(command.WorkingDirectory) ? Directory.GetCurrentDirectory() : command.WorkingDirectory;
-            var workingDirFull = Path.GetFullPath(resolvedWorkingDir);
-            command.PrepareCommand(System.Runtime.InteropServices.OSPlatform.Linux, path => Services.Docker.DockerCommandBuilder.MapPathToContainer(path, workingDirFull));
+            // Paths are mapped for the folder the run mounts. Without an absolute working directory the run fails
+            // below, when it is built, with a message saying so; until then the arguments are prepared unmapped.
+            var mount = !string.IsNullOrWhiteSpace(command.WorkingDirectory) && Path.IsPathRooted(command.WorkingDirectory)
+                ? Services.Docker.DockerCommandBuilder.ResolveMount(command.WorkingDirectory)
+                : null;
+            command.PrepareCommand(System.Runtime.InteropServices.OSPlatform.Linux,
+                path => mount == null ? path : Services.Docker.DockerCommandBuilder.MapPreparedPath(path, mount));
+
+            // Resolved once, on the prepared arguments, so that the line below and the binds agree on write access.
+            var workspaceAccess = ResolveWorkspaceAccess(command);
+            if (mount != null && !string.Equals(mount.ContainerWorkingDir, "/workspace", StringComparison.Ordinal))
+            {
+                // A project file in a folder above the working directory widens what the tool reads; say which one, and
+                // that the tool writes only in its working directory.
+                var access = Services.Docker.DockerCommandBuilder.IsWorkspaceWritable(command, workspaceAccess)
+                    ? ", its working directory, which alone is mounted writable."
+                    : ".";
+                _console.SdkLog(command, $"[Docker SDK] Mounting the project root '{mount.RootFull}' read-only at /workspace; the tool starts in {mount.ContainerWorkingDir}{access}", RankInfo);
+            }
 
             if (!OperatingSystem.IsWindows())
             {
@@ -1357,9 +1374,8 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             _console.SdkLog(command, $"[Docker SDK] Resolved image: {image} ({imageSource})", RankInfo);
 
             _console.SdkLog(command, $"[Docker SDK] Building container parameters...", RankInfo);
-            var createParams = BuildContainerParameters(image, command);
-
-            Services.Docker.BindValidator.ValidateBinds(createParams.HostConfig?.Binds);
+            // Building the parameters also runs the bind check, before any output folder is created.
+            var createParams = BuildContainerParameters(image, command, mount, workspaceAccess);
 
             _console.SdkLog(command, $"[Docker SDK] Cmd = [{string.Join(", ", createParams.Cmd ?? [])}]", RankInfo);
             _console.SdkLog(command, $"[Docker SDK] WorkingDir = {createParams.WorkingDir}, Binds = [{string.Join(", ", createParams.HostConfig?.Binds ?? [])}]", RankInfo);
@@ -1369,6 +1385,12 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
             var runner = _runner!;
             imageDigest = await runner.EnsureImageAsync(image, command, ct).ConfigureAwait(false);
             _console.SdkLog(command, $"[Docker SDK] Image ready. Digest = {imageDigest ?? "(none)"}", RankInfo);
+
+            // A pull can take long, and a writing run in the same project can replace a folder or a .git with a
+            // symbolic link meanwhile; the binds are checked once more right before the container is created.
+            // Building the parameters refuses a run without a mount, so the mount is known here.
+            Services.Docker.DockerCommandBuilder.RecheckBinds(createParams,
+                mount ?? throw new InvalidOperationException("The run was built without a mount."));
 
             reconstructedDockerRun = Services.Docker.DockerRunCommandFormatter.Reconstruct(createParams, GetRuntimePath());
             LastRawDockerRunCommand = Services.Docker.DockerRunCommandFormatter.Reconstruct(createParams, GetRuntimePath(), maskEnvValues: false);

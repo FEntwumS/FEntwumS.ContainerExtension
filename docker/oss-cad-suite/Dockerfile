@@ -11,12 +11,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tar \
     && rm -rf /var/lib/apt/lists/*
 
-ARG RELEASE_TAG=2026-07-15
-ARG RELEASE_DATE=20260715
+# OSS CAD Suite is released daily upstream. This pin moves to the newest release with every release
+# of the extension.
+ARG RELEASE_TAG=2026-11-08
+ARG RELEASE_DATE=20261108
 ARG ARCH=linux-x64
-# SHA-256 of the release asset for the pinned tag/date/arch (oss-cad-suite-build does not publish
-# per-asset checksums; computed from the tarball). The build fails closed on a mismatch.
-ARG OSS_CAD_SUITE_SHA256=fd29b8067dc2ff5ef21cd9dd0e97e6d7b6f4e3f0a93a0fa5b3e0ecb7326a9507
+# SHA-256 of the release asset for the pinned tag/date/arch, as GitHub reports it in the asset's
+# digest (GET /repos/YosysHQ/oss-cad-suite-build/releases/tags/<tag>). The build fails closed on a
+# mismatch.
+ARG OSS_CAD_SUITE_SHA256=12f6c70d5536c9250f59a46e8b76148976ca86db77e16a9f43b67bcaf35628d4
 
 # Download and verify integrity before extraction
 RUN wget --progress=dot:giga --retry-connrefused --read-timeout=60 --timeout=30 -O /tmp/oss-cad-suite.tgz \
@@ -44,7 +47,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # runtime, not build-time scaffolding: the Verilator flow emits C++ from the HDL and compiles it into a
 # simulation executable inside the container, so it cannot be dropped without losing Verilator support.
 # The in-container-compiler escape exposure is mitigated by the non-privileged, cap-dropped,
-# no-new-privileges, non-root, read-only-tooling execution posture. python3 backs SymbiYosys and flow
+# no-new-privileges, read-only-tooling execution posture, as a non-root user or, on a rootless
+# runtime, as root of an unprivileged user namespace. python3 backs SymbiYosys and flow
 # scripts. The base image is digest-pinned (above); the apt index it points at still serves rolling
 # security updates, so a from-source rebuild is not bit-identical — reproducibility is anchored on the
 # built image's recorded digest (the evaluation captures it per run), not on a Dockerfile rebuild.
