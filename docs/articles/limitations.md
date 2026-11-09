@@ -79,6 +79,29 @@ Impact on the evaluation: container-level behaviour is validated locally against
 host-only portions of the strategy; it does not certify end-to-end container execution. Reported
 end-to-end results come from controlled local runs, not from the CI matrix.
 
+## Argument and environment size
+
+The container receives the tool's arguments as an argument vector, which its `execve` checks against
+the Linux limits. The extension checks them before it creates the container, the total against a
+stricter cap of its own, on the arguments after path mapping, counted in UTF-8 bytes with the
+terminating NUL of each string:
+
+- One argument or environment string may take at most 131072 bytes, `MAX_ARG_STRLEN`, which is
+  32 pages (`include/uapi/linux/binfmts.h`) on the 4 KiB pages of an amd64 host.
+- All arguments and environment strings together may take at most 1 MiB. Linux allows a quarter of
+  the stack limit, 2 MiB at the default of 8 MiB (`execve(2)`), and counts against it the pointer
+  arrays of the arguments and the environment, one pointer of 8 bytes per string on a 64-bit host,
+  and the variables that the image and the runtime add, which the extension does not see. The
+  extension keeps half of the default quarter as room for these, which a command of a few long
+  arguments leaves ample. The check is not exact, though: a command close to the cap can pass it and
+  still fail inside the container with `E2BIG`, when it consists of very many short strings or when
+  the container's stack limit is lower; at 4 MiB the quarter equals the 1 MiB cap.
+
+A run over either limit fails with an error that names the limit and the length it found. A tool
+whose script grows with the design, such as a yosys script given with `-p`, can take the script as
+a file instead (`yosys -s <file>`), which also avoids the limit of 32767 characters on a native
+command line on Windows.
+
 ## Scope and non-goals
 
 This artifact is an *execution-integration layer*. Its responsibility is to run tool execution
