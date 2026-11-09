@@ -7,6 +7,21 @@ Contributions are welcome. This document describes how to build, test, and submi
 - `main` is the released branch; `dev` is the integration branch. Open pull requests against `dev`.
 - Keep changes focused; unrelated cleanups belong in separate pull requests.
 
+## Release flow
+
+1. Branch `release/x.y.z` from `dev` and add one commit, `chore(release): x.y.z`. It sets the version in
+   `src/ContainerExtension/ContainerExtension.csproj`, `oneware-extension.json` (together with a new
+   entry in its version list that names the minimum OneWare Studio version; the new entry goes at the
+   end of the list, which runs oldest first and newest last) and `CITATION.cff` (together with the
+   release date), and adds the `CHANGELOG.md` section. The `OneWare.Essentials` floor in
+   `Directory.Packages.props` is checked at every release: it stays unless the release needs a newer
+   API, and the new entry's `minStudioVersion` follows it (`1.0.45.0` today). Merge the commit into
+   `dev` by pull request.
+2. Open a pull request from `dev` to `main` titled `Release x.y.z` and merge it with a merge commit.
+3. Publish a GitHub release tagged `x.y.z` on `main`. Publishing runs `.github/workflows/publish.yml`,
+   which builds the release archive and its SBOM, attests the archive's build provenance and attaches
+   the archive, `compatibility.txt` and the SBOM to the release.
+
 ## Prerequisites
 
 - .NET SDK 10 (see `global.json` for the pinned version).
