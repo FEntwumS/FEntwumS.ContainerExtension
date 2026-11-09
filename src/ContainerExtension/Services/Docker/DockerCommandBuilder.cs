@@ -188,7 +188,8 @@ internal static class DockerCommandBuilder
       Action<ToolCommand, string> sdkLog,
       double? remoteCpuCores = null,
       bool isRootless = false,
-      bool? workspaceWritable = null)
+      bool? workspaceWritable = null,
+      ContainerMount? mount = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(image);
         ArgumentNullException.ThrowIfNull(command);
@@ -216,32 +217,15 @@ internal static class DockerCommandBuilder
             executable = executable[..^4];
         }
 
-        // The caller must supply an absolute working directory (the project root). Resolving a relative
-        // or empty value against the process directory would silently mount the plugin's own bin folder
-        // (e.g. "<bin>/Debug/net10.0/C:/Users/.../Project:/workspace"), producing a broken bind. Reject it
-        // with an actionable message instead.
-        if (string.IsNullOrWhiteSpace(command.WorkingDirectory))
-        {
-            throw new InvalidOperationException(
-                "No working directory was supplied for the tool command; the container workspace cannot be mounted. " +
-                "The caller must provide the absolute project path.");
-        }
-        if (!Path.IsPathRooted(command.WorkingDirectory))
-        {
-            throw new InvalidOperationException(
-                $"The tool working directory '{command.WorkingDirectory}' is not an absolute path. It would be resolved " +
-                "against the plugin's process directory and produce an incorrect bind mount. The caller must provide an " +
-                "absolute project path.");
-        }
-        var workingDirFull = Path.GetFullPath(command.WorkingDirectory);
-        workingDirFull = ResolvePhysicalPath(workingDirFull);
-        if (!Path.IsPathRooted(workingDirFull))
-        {
-            throw new InvalidOperationException("Resolved mount path is not absolute.");
-        }
-        var workingDirCanonical = GetCanonicalPath(workingDirFull);
+        // The caller passes the mount it resolved for preparing the arguments, so that both use the same folders and
+        // the file system is searched for the project file once per run.
+        mount ??= ResolveMount(command.WorkingDirectory);
+        var workingDirFull = mount.WorkingDirFull;
         var rawPrefix = settingsService.SafeGetSetting(ContainerExtensionModule.ContainerNamePrefixSetting, "containerextension-");
 
+        // The output folders the arguments name are collected here and created only once every check has passed, so
+        // a run that is rejected leaves nothing behind.
+        var outputFolders = new List<string>();
         if (command.Arguments != null && command.Arguments.Count > 0)
         {
             foreach (var arg in command.Arguments)
@@ -312,38 +296,26 @@ internal static class DockerCommandBuilder
 
                             if (!string.IsNullOrWhiteSpace(dir))
                             {
-                                var absoluteDir = Path.GetFullPath(Path.Combine(workingDirFull, dir));
-                                var osAwareComparison = OperatingSystem.IsLinux()
-                                    ? StringComparison.Ordinal
-                                    : StringComparison.OrdinalIgnoreCase;
-
-                                if (absoluteDir.StartsWith(workingDirFull, osAwareComparison))
+                                // A path OneWare already mapped while it prepared the command is in container form;
+                                // its folder lies below the mounted folder on the host.
+                                var absoluteDir = HostFolderOf(dir, mount);
+                                if (absoluteDir == null)
                                 {
-                                    // Containment must be checked on the fully canonical candidate, not the
-                                    // lexical path. GetCanonicalPath resolves intermediate symlinks realpath-
-                                    // style (appending any not-yet-created leaf verbatim), so a checked-in
-                                    // symlinked ancestor (e.g. out -> /home/victim/.ssh) is exposed as an
-                                    // out-of-bound target here; ResolvePhysicalPath would leave it unresolved
-                                    // and let Directory.CreateDirectory follow it at the OS level.
-                                    var canonicalDir = GetCanonicalPath(absoluteDir);
-                                    var canonicalBound = workingDirCanonical;
-                                    if (!canonicalBound.EndsWith(Path.DirectorySeparatorChar) && !canonicalBound.EndsWith(Path.AltDirectorySeparatorChar))
-                                        canonicalBound += Path.DirectorySeparatorChar;
-                                    var canonicalDirBound = canonicalDir;
-                                    if (!canonicalDirBound.EndsWith(Path.DirectorySeparatorChar) && !canonicalDirBound.EndsWith(Path.AltDirectorySeparatorChar))
-                                        canonicalDirBound += Path.DirectorySeparatorChar;
-
-                                    if (canonicalDirBound.StartsWith(canonicalBound, osAwareComparison) && !Directory.Exists(absoluteDir))
-                                    {
-                                        try
-                                        {
-                                            Directory.CreateDirectory(absoluteDir);
-                                        }
-                                        catch (Exception ex) when (ex is not OutOfMemoryException)
-                                        {
-                                            ContainerTelemetry.TrackError("DockerCommandBuilder", $"Workspace dir creation failed for '{absoluteDir}'", ex);
-                                        }
-                                    }
+                                    continue;
+                                }
+                                // Only a folder at or below the working directory is created, the one folder a writing
+                                // tool may write to; elsewhere in the project the tool could not write anyway.
+                                // Containment is checked on the fully canonical candidate alone, not the lexical path:
+                                // a path OneWare mapped to /workspace comes back below the project root and may be
+                                // spelled differently from the working directory, and GetCanonicalPath resolves
+                                // intermediate symlinks realpath-style (appending any not-yet-created leaf verbatim),
+                                // so a checked-in symlinked ancestor (e.g. out -> /home/victim/.ssh) is exposed as an
+                                // out-of-bound target here; ResolvePhysicalPath would leave it unresolved and let
+                                // Directory.CreateDirectory follow it at the OS level.
+                                var canonicalDir = GetCanonicalPath(absoluteDir);
+                                if (IsAtOrBelow(canonicalDir, mount.WorkingDirCanonical) && !Directory.Exists(absoluteDir))
+                                {
+                                    outputFolders.Add(absoluteDir);
                                 }
                             }
                         }
@@ -454,6 +426,14 @@ internal static class DockerCommandBuilder
                 }
             }
 
+            // Every path the container cannot reach is collected, so the run fails once and names them all.
+            var outsideMount = new List<string>();
+            string CollectOutside(string path)
+            {
+                outsideMount.Add(path);
+                return path;
+            }
+
             for (int i = 0; i < argsList.Count; i++)
             {
                 var a = argsList[i];
@@ -486,21 +466,26 @@ internal static class DockerCommandBuilder
                 }
                 else if (IsSinglePathArgument(a, out var prefix, out var pathPart))
                 {
-                    mapped = prefix + MapPathToContainer(pathPart, workingDirFull, workingDirCanonical);
+                    mapped = prefix + MapPathToContainer(pathPart, mount, CollectOutside);
                 }
                 else if (a.Contains(' ') || a.Contains(';') || a.Contains(','))
                 {
-                    mapped = MapCommandScriptPaths(a, workingDirFull, workingDirCanonical);
+                    mapped = MapCommandScriptPaths(a, mount, CollectOutside);
                 }
                 else
                 {
-                    mapped = ShouldMapArgument(a) ? MapPathToContainer(a, workingDirFull, workingDirCanonical) : a;
+                    mapped = ShouldMapArgument(a) ? MapPathToContainer(a, mount, CollectOutside) : a;
                 }
 
                 // Each mapped token becomes one argv element. No shell escaping or quoting is applied:
                 // the token is delivered verbatim to the program through execve, exactly as OneWare's
                 // native execution would, so shell metacharacters are inert data rather than syntax.
                 cmdTokens.Add(NormalizeSeparators(mapped));
+            }
+
+            if (outsideMount.Count > 0)
+            {
+                throw OutsideMountError(outsideMount, mount);
             }
         }
         var fullCmd = cmdTokens;
@@ -521,7 +506,7 @@ internal static class DockerCommandBuilder
         var networkMode = settingsService.SafeGetSetting(ContainerExtensionModule.NetworkModeSetting, "bridge");
 
         // A docker.workspace of the call or of the tool decides first; without one, the tool's name and flags do.
-        var bindSuffix = (workspaceWritable ?? ToolRequiresWriteAccess(command)) ? "" : ":ro";
+        var writable = IsWorkspaceWritable(command, workspaceWritable);
 
         var createParams = new CreateContainerParameters
         {
@@ -529,7 +514,7 @@ internal static class DockerCommandBuilder
             Name = containerName,
             Cmd = fullCmd,
             User = user,
-            WorkingDir = ContainerWorkDir,
+            WorkingDir = mount.ContainerWorkingDir,
             HostConfig = new HostConfig
             {
                 AutoRemove = autoRemove,
@@ -543,10 +528,12 @@ internal static class DockerCommandBuilder
                 // setting opts out of this baseline.
                 SecurityOpt = new List<string> { NoNewPrivilegesOption },
                 PidsLimit = ProcessLimit,
-                Binds = new List<string>(4) { $"{workingDirFull}:{ContainerWorkDir}{bindSuffix}" }
+                Binds = BuildBinds(mount, writable)
             }
         };
 
+        // The .env file comes from the tool's working directory, as the configuration guide says, also when the
+        // project root above it is the mounted folder.
         var envVars = ParseEnvFile(workingDirFull);
         var hostVars = command.EnvironmentVariables;
         var hostCount = hostVars?.Count ?? 0;
@@ -666,7 +653,48 @@ internal static class DockerCommandBuilder
         createParams.Labels ??= new Dictionary<string, string>(StringComparer.Ordinal);
         createParams.Labels[ContainerExtensionModule.ContainerOwnerLabel] = "true";
 
+        // The bind check is the last check of the run; it rewrites each host path to its canonical form and rejects a
+        // bind of a blocked host folder, also one reached through a symbolic link such as a working directory that is
+        // a link into /etc.
+        BindValidator.ValidateBinds(createParams.HostConfig.Binds);
+        EnsureBindsStayInTheProject(createParams.HostConfig.Binds, mount);
+
+        // Every check of the run has passed; only now are the output folders created.
+        foreach (var folder in outputFolders.Distinct(StringComparer.Ordinal))
+        {
+            if (Directory.Exists(folder))
+            {
+                continue;
+            }
+            try
+            {
+                Directory.CreateDirectory(folder);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                ContainerTelemetry.TrackError("DockerCommandBuilder", $"Workspace dir creation failed for '{folder}'", ex);
+            }
+        }
+
         return createParams;
+    }
+
+    // The host folder a folder argument names: a container path below /workspace lies below the mounted folder, any
+    // other path is taken relative to the working directory. Null for a container path that leaves /workspace.
+    private static string? HostFolderOf(string dir, ContainerMount mount)
+    {
+        var unix = dir.Replace('\\', '/');
+        if (!IsContainerSpacePath(unix, mount))
+        {
+            return Path.GetFullPath(Path.Combine(mount.WorkingDirFull, dir));
+        }
+        var collapsed = CollapseContainerPath(unix);
+        if (collapsed == null)
+        {
+            return null;
+        }
+        var relative = collapsed.Length > ContainerWorkDir.Length ? collapsed[(ContainerWorkDir.Length + 1)..] : "";
+        return Path.GetFullPath(Path.Combine(mount.RootFull, relative));
     }
 
     /// <summary>
@@ -1257,67 +1285,460 @@ internal static class DockerCommandBuilder
         return false;
     }
 
-    public static string MapPathToContainer(string path, string workingDirFull)
+    /// <summary>
+    /// True when the run gets write access to its working directory: a <c>docker.workspace</c> of the call or of the
+    /// tool decides first, given as <paramref name="workspaceWritable"/>; without one, the tool's name and flags do.
+    /// </summary>
+    internal static bool IsWorkspaceWritable(ToolCommand command, bool? workspaceWritable)
     {
-        return MapPathToContainer(path, workingDirFull, GetCanonicalPath(workingDirFull));
+        ArgumentNullException.ThrowIfNull(command);
+        return workspaceWritable ?? ToolRequiresWriteAccess(command);
     }
 
-    public static string MapPathToContainer(string path, string workingDirFull, string workingDirCanonical)
+    /// <summary>
+    /// The binds of a run. A tool writes only where release 1.2.1 let it, in its working directory. When the working
+    /// directory lies below the project root, the root is bound read-only at <c>/workspace</c>, so the tool reads the
+    /// whole project, and for a writing tool the working directory is bound a second time, writable, at its own path in
+    /// the container. When the working directory is the project root, or there is no project file, it is bound alone
+    /// at <c>/workspace</c>, read-only or writable by tool. The top-level <c>.git</c> of the writable folder, when it is
+    /// a real folder or file, is bound read-only over it (<see cref="IsPlainGitMetadata"/>).
+    /// </summary>
+    internal static List<string> BuildBinds(ContainerMount mount, bool writable)
+    {
+        ArgumentNullException.ThrowIfNull(mount);
+        var binds = new List<string>(3);
+        if (!PathsEqual(mount.RootCanonical, mount.WorkingDirCanonical))
+        {
+            // A read-only bind does not follow a symbolic link inside it to the host: such a link resolves inside the
+            // container, so a .git link of the root that leads outside the project shows the tool nothing of the host.
+            binds.Add($"{mount.RootFull}:{ContainerWorkDir}:ro");
+            if (writable)
+            {
+                binds.Add($"{mount.WorkingDirFull}:{mount.ContainerWorkingDir}");
+            }
+        }
+        else
+        {
+            binds.Add($"{mount.WorkingDirFull}:{ContainerWorkDir}{(writable ? "" : ":ro")}");
+        }
+
+        // The top-level .git of the writable folder stays read-only: a tool that could write .git/config or .git/hooks
+        // would have the user's next git command on the host run what it wrote. Only this one path is bound, a folder or
+        // the .git file of a git worktree or submodule; a repository nested deeper stays writable, as everything in the
+        // working directory was under release 1.2.1. On a case-insensitive host the one bind also covers other
+        // spellings such as .GIT, as measured with OrbStack on macOS, while a bind per spelling there let every write
+        // through, so none is added. A .git that is a symbolic link gets no bind, as under release 1.2.1: binding it
+        // would put the place it leads to into the container.
+        if (writable && IsPlainGitMetadata(mount.WorkingDirFull))
+        {
+            binds.Add($"{Path.Combine(mount.WorkingDirFull, ".git")}:{GitContainerPath(mount)}:ro");
+        }
+        return binds;
+    }
+
+    private static string GitContainerPath(ContainerMount mount) => $"{mount.ContainerWorkingDir}/.git";
+
+    /// <summary>
+    /// True when the top-level <c>.git</c> of the folder is a real folder or a regular file: neither a symbolic link
+    /// nor any other reparse point, such as a junction on Windows. A folder without <c>.git</c> has none.
+    /// </summary>
+    internal static bool IsPlainGitMetadata(string folderFull)
+    {
+        var gitMetadata = Path.Combine(folderFull, ".git");
+        try
+        {
+            FileSystemInfo entry = Directory.Exists(gitMetadata) ? new DirectoryInfo(gitMetadata) : new FileInfo(gitMetadata);
+            if (entry.LinkTarget != null)
+            {
+                return false;
+            }
+            return entry.Exists && !entry.Attributes.HasFlag(FileAttributes.ReparsePoint);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Runs after <see cref="BindValidator.ValidateBinds"/> has written every bind source in canonical form, and
+    /// throws <see cref="DockerExecutionException"/> when a bind no longer is exactly what the run decided on. The
+    /// bind at <c>/workspace</c> names the project root, read-only when the working directory lies below it; the bind
+    /// at the working directory's container path names the working directory; a <c>.git</c> bind names the
+    /// <c>.git</c> of the working directory, read-only; every source lies at or below the project root; and no other
+    /// bind exists. Between the first look at the folders and the bind check, a writing run in the same project can
+    /// replace a folder or the <c>.git</c> with a symbolic link, also one to another place inside the project; the
+    /// bind would then follow it. The canonical forms are only compared here; nothing is read from the file system.
+    /// </summary>
+    internal static void EnsureBindsStayInTheProject(IList<string> binds, ContainerMount mount)
+    {
+        ArgumentNullException.ThrowIfNull(binds);
+        ArgumentNullException.ThrowIfNull(mount);
+        EnsureBindsMatchTheMount(binds, mount);
+    }
+
+    /// <summary>
+    /// Runs the bind check of <see cref="BuildContainerParameters"/> once more on the binds it built, right before the
+    /// container is created: the image may have been pulled in between, and the engine resolves each bind source
+    /// again when it mounts it. The binds are already canonical, so a source that a symbolic link swapped in
+    /// meanwhile now resolves to another place and fails the run. A window between this check and the mount remains.
+    /// </summary>
+    internal static void RecheckBinds(CreateContainerParameters createParams, ContainerMount mount)
+    {
+        ArgumentNullException.ThrowIfNull(createParams);
+        ArgumentNullException.ThrowIfNull(mount);
+        var binds = createParams.HostConfig?.Binds;
+        if (binds == null)
+        {
+            return;
+        }
+        BindValidator.ValidateBinds(binds);
+        EnsureBindsMatchTheMount(binds, mount);
+    }
+
+    private static void EnsureBindsMatchTheMount(IList<string> binds, ContainerMount mount)
+    {
+        var gitSource = Path.Combine(mount.WorkingDirCanonical, ".git");
+        var belowTheRoot = !PathsEqual(mount.RootCanonical, mount.WorkingDirCanonical);
+        foreach (var bind in binds)
+        {
+            var (host, container, options) = BindValidator.SplitDockerBind(bind);
+            var source = host.Trim();
+            var target = container?.Trim() ?? "";
+            var readOnly = string.Equals(options?.Trim(), "ro", StringComparison.Ordinal);
+            bool expected;
+            if (string.Equals(target, ContainerWorkDir, StringComparison.Ordinal))
+            {
+                expected = PathsEqual(source, mount.RootCanonical) && (readOnly || !belowTheRoot);
+            }
+            else if (string.Equals(target, mount.ContainerWorkingDir, StringComparison.Ordinal))
+            {
+                expected = PathsEqual(source, mount.WorkingDirCanonical);
+            }
+            else if (string.Equals(target, GitContainerPath(mount), StringComparison.Ordinal))
+            {
+                expected = PathsEqual(source, gitSource) && readOnly;
+            }
+            else
+            {
+                expected = false;
+            }
+            if (!expected || !IsAtOrBelow(source, mount.RootCanonical))
+            {
+                throw new DockerExecutionException(
+                    $"The project changed while the run was prepared: the bind '{bind}' no longer names the place inside " +
+                    $"'{mount.RootFull}' it was made for, for example because a folder or a .git was replaced with a " +
+                    "symbolic link. Start the run again.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// The host folder a run binds to <c>/workspace</c>, and the tool's working directory on the host and in the
+    /// container. <see cref="RootFull"/> is the project root when the working directory lies inside a OneWare
+    /// project, else the working directory itself; the canonical forms have every symbolic link resolved. Only the
+    /// working directory is ever writable (<see cref="BuildBinds"/>).
+    /// </summary>
+    internal sealed record ContainerMount(string RootFull, string RootCanonical, string WorkingDirFull, string WorkingDirCanonical, string ContainerWorkingDir);
+
+    /// <summary>
+    /// Decides what a run mounts. When a <c>*.fpgaproj</c> file lies in the working directory or a folder above it,
+    /// the folder holding it is mounted read-only at <c>/workspace</c> and the tool starts in its working directory
+    /// below; a path elsewhere in the project, such as a source folder beside the build folder, is then visible to the
+    /// tool. Without a project file, or when the project folder is a file system root or is or contains the user's
+    /// home folder or a shared temporary folder, which would expose far more than a project, the working directory
+    /// alone is mounted, as before.
+    /// </summary>
+    internal static ContainerMount ResolveMount(string? workingDirectory)
+    {
+        // The caller must supply an absolute working directory. Resolving a relative or empty value against the
+        // process directory would silently mount the plugin's own bin folder
+        // (e.g. "<bin>/Debug/net10.0/C:/Users/.../Project:/workspace"), producing a broken bind. Reject it
+        // with an actionable message instead.
+        if (string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            throw new InvalidOperationException(
+                "No working directory was supplied for the tool command; the container workspace cannot be mounted. " +
+                "The caller must provide the absolute project path.");
+        }
+        if (!Path.IsPathRooted(workingDirectory))
+        {
+            throw new InvalidOperationException(
+                $"The tool working directory '{workingDirectory}' is not an absolute path. It would be resolved " +
+                "against the plugin's process directory and produce an incorrect bind mount. The caller must provide an " +
+                "absolute project path.");
+        }
+        var workingDirFull = ResolvePhysicalPath(Path.GetFullPath(workingDirectory));
+        if (!Path.IsPathRooted(workingDirFull))
+        {
+            throw new InvalidOperationException("Resolved mount path is not absolute.");
+        }
+        var workingDirCanonical = GetCanonicalPath(workingDirFull);
+
+        var rootFull = workingDirFull;
+        var rootCanonical = workingDirCanonical;
+        var projectFile = FindProjectFile(workingDirCanonical);
+        var projectDir = projectFile == null ? null : Path.GetDirectoryName(projectFile);
+        if (!string.IsNullOrEmpty(projectDir))
+        {
+            var candidateFull = ResolvePhysicalPath(projectDir);
+            var candidateCanonical = GetCanonicalPath(candidateFull);
+            if (IsAtOrBelow(workingDirCanonical, candidateCanonical) && !IsTooWideToMount(candidateCanonical))
+            {
+                // The project root is bound read-only (BuildBinds), so its .git needs no check here: a symbolic link
+                // inside a read-only bind resolves inside the container and leads to nothing of the host.
+                rootFull = candidateFull;
+                rootCanonical = candidateCanonical;
+            }
+        }
+
+        var containerWorkingDir = ContainerWorkDir;
+        if (!PathsEqual(workingDirCanonical, rootCanonical))
+        {
+            var relative = workingDirCanonical[WithTrailingSeparator(rootCanonical).Length..].Replace('\\', '/').TrimEnd('/');
+            containerWorkingDir = $"{ContainerWorkDir}/{relative}";
+        }
+
+        // A bind is written as source:target:mode, so a colon in a bound folder's path would split the bind and the
+        // engine would refuse it late, with a message that does not name the cause. The bind check writes each bind
+        // with its folder in canonical form, so a colon that only the canonical form holds, reached through a
+        // symbolic link, splits it as well; the message names the folder as given and, where it differs, the place it
+        // resolves to.
+        var bound = new[] { (rootFull, rootCanonical), (workingDirFull, workingDirCanonical) };
+        foreach (var (full, canonical) in bound.Distinct())
+        {
+            if (HasColonOutsideDriveLetter(full, OperatingSystem.IsWindows())
+                || HasColonOutsideDriveLetter(canonical, OperatingSystem.IsWindows()))
+            {
+                var folder = string.Equals(full, canonical, StringComparison.Ordinal)
+                    ? $"'{full}'"
+                    : $"'{full}', which resolves to '{canonical}',";
+                throw new DockerExecutionException(
+                    $"The folder {folder} cannot be mounted into the container: its path contains a colon, which a " +
+                    "container bind cannot carry. Rename the folder or move it to a path without a colon.");
+            }
+        }
+        return new ContainerMount(rootFull, rootCanonical, workingDirFull, workingDirCanonical, containerWorkingDir);
+    }
+
+    /// <summary>
+    /// True when a host path holds a colon that a bind cannot carry. On Windows, when <paramref name="windows"/> is
+    /// true, the colon of a drive letter at the start, such as <c>C:\</c> or <c>C:/</c>, passes, also after a device
+    /// prefix, <c>\\?\</c>, <c>\\.\</c> or <c>\??\</c>, which resolving a symbolic link or junction can produce there.
+    /// On any other system a path has neither, so every colon is refused. Only the string is read.
+    /// </summary>
+    internal static bool HasColonOutsideDriveLetter(string path, bool windows)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        var rest = path.AsSpan();
+        if (!windows)
+        {
+            return rest.Contains(':');
+        }
+        if (rest.Length >= 4 && IsSeparator(rest[0]) && IsSeparator(rest[3])
+            && ((IsSeparator(rest[1]) && (rest[2] is '?' or '.')) || (rest[1] == '?' && rest[2] == '?')))
+        {
+            rest = rest[4..];
+        }
+        if (rest.Length >= 2 && char.IsAsciiLetter(rest[0]) && rest[1] == ':'
+            && (rest.Length == 2 || IsSeparator(rest[2])))
+        {
+            rest = rest[2..];
+        }
+        return rest.Contains(':');
+
+        static bool IsSeparator(char c) => c is '\\' or '/';
+    }
+
+    private static StringComparison HostPathComparison =>
+        (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()) ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+    private static string WithTrailingSeparator(string path) =>
+        path.EndsWith(Path.DirectorySeparatorChar) || path.EndsWith(Path.AltDirectorySeparatorChar) ? path : path + Path.DirectorySeparatorChar;
+
+    private static bool PathsEqual(string a, string b) =>
+        string.Equals(Path.TrimEndingDirectorySeparator(a), Path.TrimEndingDirectorySeparator(b), HostPathComparison);
+
+    private static bool IsAtOrBelow(string path, string root) =>
+        PathsEqual(path, root) || path.StartsWith(WithTrailingSeparator(root), HostPathComparison);
+
+    /// <summary>
+    /// True for a project folder that would expose more than a project: a file system root, a folder that is or
+    /// contains the user's home folder or a shared temporary folder, or one that is or contains a folder the bind
+    /// check blocks (<see cref="BindValidator.BlockedHostPaths"/>). A stray project file in /home, /Users or /tmp
+    /// would otherwise mount every user's files or everything other programs left in the temporary folder, and one
+    /// in /usr or /var would mount /usr/bin or /var/run, which the bind check refuses only for a bind at or below them.
+    /// </summary>
+    internal static bool IsTooWideToMount(string canonical)
+    {
+        if (PathsEqual(canonical, Path.GetPathRoot(canonical) ?? canonical))
+        {
+            return true;
+        }
+        return SharedFolders().Any(folder => ContainsFolder(canonical, folder))
+            || BindValidator.BlockedHostPaths().Any(folder => ContainsFolder(canonical, folder));
+    }
+
+    // The folders a project root must neither be nor contain. The home folder is read from the runtime and from
+    // HOME and USERPROFILE, since on Windows the runtime asks the shell and not the environment. Path.GetTempPath
+    // follows TMPDIR on Unix and TMP or TEMP on Windows; the fixed Unix folders are listed beside it, because the
+    // temporary folder a process reports need not be the one other programs share.
+    private static IEnumerable<string?> SharedFolders()
+    {
+        yield return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        yield return Environment.GetEnvironmentVariable("HOME");
+        yield return Environment.GetEnvironmentVariable("USERPROFILE");
+        yield return Path.GetTempPath();
+        if (!OperatingSystem.IsWindows())
+        {
+            // S5443 warns of writing into a publicly writable folder. These names are only compared against, so
+            // that such a folder is refused as a mount; nothing is written there.
+#pragma warning disable S5443
+            yield return "/tmp";
+            yield return "/private/tmp";
+            yield return "/var/tmp";
+#pragma warning restore S5443
+        }
+    }
+
+    // True when the folder at canonical is the given folder or one of its ancestors. Both the written and the
+    // canonical form of the folder are compared, so a folder reached through a symbolic link, such as /tmp on
+    // macOS, is recognised either way.
+    private static bool ContainsFolder(string canonical, string? folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder) || !Path.IsPathRooted(folder))
+        {
+            return false;
+        }
+        string full;
+        try
+        {
+            full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return false;
+        }
+        if (IsAtOrBelow(full, canonical))
+        {
+            return true;
+        }
+        try
+        {
+            return IsAtOrBelow(GetCanonicalPath(full), canonical);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return false;
+        }
+    }
+
+    private static DockerExecutionException OutsideMountError(IEnumerable<string> paths, ContainerMount mount)
+    {
+        var distinct = paths.Distinct(StringComparer.Ordinal).ToList();
+        return new DockerExecutionException(
+            $"The tool's arguments name {distinct.Count} path(s) that the container cannot reach, because they lie outside " +
+            $"'{mount.RootFull}', the folder mounted at {ContainerWorkDir}, or cannot be resolved: " +
+            $"{string.Join(", ", distinct.Select(p => $"'{p}'"))}. Keep the files inside the project folder, the folder that " +
+            "holds the .fpgaproj file, or without a project file inside the tool's working directory.");
+    }
+
+    /// <summary>
+    /// Maps <paramref name="path"/> into the container as a run started in <paramref name="workingDirFull"/> sees it,
+    /// and throws <see cref="DockerExecutionException"/> for a path the container cannot reach. There is no
+    /// placeholder for such a path: the class is internal, and no caller needs one.
+    /// </summary>
+    public static string MapPathToContainer(string path, string workingDirFull)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return path;
+        }
+        var mount = ResolveMount(workingDirFull);
+        return MapPathToContainer(path, mount, outside => throw OutsideMountError([outside], mount));
+    }
+
+    /// <summary>
+    /// The mapper OneWare applies while it prepares the arguments, before the run is built. OneWare hands it the
+    /// whole value of a path placeholder, which may be a quoted, space-separated list of paths; such a value is
+    /// split as a script is. A path the container cannot reach stays as it is here, so that building the run
+    /// finds it again and fails with every such path named once.
+    /// </summary>
+    internal static string MapPreparedPath(string value, ContainerMount mount)
+    {
+        ArgumentNullException.ThrowIfNull(mount);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+        if (!Path.IsPathRooted(value) && value.AsSpan().IndexOfAny('"', '\'') >= 0)
+        {
+            return MapCommandScriptPaths(value, mount, static outside => outside, stripOuterQuotes: false);
+        }
+        return MapPathToContainer(value, mount, static outside => outside);
+    }
+
+    /// <summary>
+    /// Maps <paramref name="path"/> into the container for <paramref name="mount"/>. A path the container cannot
+    /// reach goes to <paramref name="onOutside"/>, whose result takes its place.
+    /// </summary>
+    internal static string MapPathToContainer(string path, ContainerMount mount, Func<string, string> onOutside)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
             return path;
         }
 
+        var prefix = "";
+        var part = path;
+        string? mapped;
         try
         {
             var eqIdx = path.IndexOf('=');
             if (eqIdx > 0)
             {
-                var prefix = path[..(eqIdx + 1)];
+                var optionPrefix = path[..(eqIdx + 1)];
                 var suffix = path[(eqIdx + 1)..];
-                if (!string.IsNullOrWhiteSpace(suffix) && (suffix.Contains('/') || suffix.Contains('\\') || Path.IsPathRooted(suffix) || prefix.Equals("--workdir=", StringComparison.Ordinal)))
+                if (!string.IsNullOrWhiteSpace(suffix) && (suffix.Contains('/') || suffix.Contains('\\') || Path.IsPathRooted(suffix) || optionPrefix.Equals("--workdir=", StringComparison.Ordinal)))
                 {
                     // Special case for GHDL work library path passed to --work=
-                    if (prefix.Equals("--work=", StringComparison.OrdinalIgnoreCase) || prefix.Equals("-work=", StringComparison.OrdinalIgnoreCase))
+                    if (optionPrefix.Equals("--work=", StringComparison.OrdinalIgnoreCase) || optionPrefix.Equals("-work=", StringComparison.OrdinalIgnoreCase))
                     {
                         var normalized = suffix.Replace('\\', '/');
                         var libName = Path.GetFileName(normalized.TrimEnd('/'));
-                        var mappedLib = FindLibraryForDirectory(workingDirFull, normalized);
+                        var mappedLib = FindLibraryForDirectory(mount.WorkingDirFull, normalized);
                         var finalLibName = !string.IsNullOrWhiteSpace(mappedLib) ? mappedLib : (string.IsNullOrWhiteSpace(libName) ? "work" : libName);
-                        return prefix + finalLibName;
+                        return optionPrefix + finalLibName;
                     }
 
-                    var mappedSuffix = MapPathToContainerInternal(suffix, workingDirCanonical);
-                    return prefix + mappedSuffix;
+                    prefix = optionPrefix;
+                    part = suffix;
                 }
             }
 
-            if (path.StartsWith("-P", StringComparison.Ordinal) && path.Length > 2)
+            if (prefix.Length == 0 && path.StartsWith("-P", StringComparison.Ordinal) && path.Length > 2 && !string.IsNullOrWhiteSpace(path[2..]))
             {
-                var suffix = path[2..];
-                if (!string.IsNullOrWhiteSpace(suffix))
-                {
-                    var mappedSuffix = MapPathToContainerInternal(suffix, workingDirCanonical);
-                    return "-P" + mappedSuffix;
-                }
+                prefix = "-P";
+                part = path[2..];
             }
 
-            return MapPathToContainerInternal(path, workingDirCanonical);
+            mapped = MapPathToContainerInternal(part, mount);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            return $"{ContainerWorkDir}/invalid_escaped_path";
+            // A path that cannot be resolved, such as one in a loop of symbolic links, is not shown to stay inside.
+            mapped = null;
         }
+        return prefix + (mapped ?? onOutside(part));
     }
 
     private static string GetCanonicalPath(string path) => PathCanonicalizer.GetCanonicalPath(path);
 
     // Collapses '.' and '..' segments in an absolute container-space path and enforces that the result
-    // stays within the workspace root. Any path that escapes /workspace resolves to the in-workspace
-    // sentinel, preserving the containment guarantee the bind mount provides. Operates purely on the
-    // Linux container path; it must not touch the host filesystem or host path semantics.
-    private static string CollapseContainerPath(string containerPath)
+    // stays within the workspace root. A path that escapes /workspace yields null, so the caller treats it
+    // as a path the container cannot reach. Operates purely on the Linux container path; it must not touch
+    // the host filesystem or host path semantics.
+    private static string? CollapseContainerPath(string containerPath)
     {
         var segments = containerPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
         var stack = new List<string>(segments.Length);
@@ -1340,54 +1761,62 @@ internal static class DockerCommandBuilder
         var collapsed = "/" + string.Join('/', stack);
         return collapsed.Equals(ContainerWorkDir, StringComparison.Ordinal) || collapsed.StartsWith(ContainerWorkDir + "/", StringComparison.Ordinal)
             ? collapsed
-            : ContainerWorkDir + "/invalid_escaped_path";
+            : null;
     }
 
-    private static string MapPathToContainerInternal(string path, string workingDirCanonical)
+    // True for a path, with forward slashes, that names a place in the container: /workspace or a path below it that
+    // is not a path into the mounted folder on the host. It does not ask whether the path exists on the host: OneWare
+    // maps paths such as the project root to /workspace before the run is built, so a host folder of that name must
+    // not turn them back into host paths. A host project inside a literal /workspace folder therefore works only for
+    // its own paths; a host path elsewhere below /workspace is read as a path in the container.
+    private static bool IsContainerSpacePath(string normalizedPath, ContainerMount mount)
     {
-        var resolvedWorkingDir = workingDirCanonical;
-        var workingDirNormalized = resolvedWorkingDir;
-        if (!workingDirNormalized.EndsWith(Path.DirectorySeparatorChar) && !workingDirNormalized.EndsWith(Path.AltDirectorySeparatorChar))
-        {
-            workingDirNormalized += Path.DirectorySeparatorChar;
-        }
+        var rootUnix = mount.RootCanonical.Replace('\\', '/');
+        var rootNormalizedUnix = WithTrailingSeparator(mount.RootCanonical).Replace('\\', '/');
+        return (normalizedPath.StartsWith(ContainerWorkDir + "/", StringComparison.Ordinal) || normalizedPath.Equals(ContainerWorkDir, StringComparison.Ordinal))
+            && !normalizedPath.StartsWith(rootNormalizedUnix, HostPathComparison)
+            && !normalizedPath.Equals(rootUnix, HostPathComparison);
+    }
 
-        var osComparison = (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()) ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+    // Maps one path for the mount, or returns null for a path outside it. The mounted folder is the project root or
+    // the working directory; the container starts in the working directory below /workspace.
+    private static string? MapPathToContainerInternal(string path, ContainerMount mount)
+    {
+        var rootCanonical = mount.RootCanonical;
+        var rootNormalized = WithTrailingSeparator(rootCanonical);
+        var workingDirCanonical = mount.WorkingDirCanonical;
+
+        var osComparison = HostPathComparison;
 
         var normalizedPath = path.Replace('\\', '/');
-        var workingDirNormalizedUnix = workingDirNormalized.Replace('\\', '/');
-        var resolvedWorkingDirUnix = resolvedWorkingDir.Replace('\\', '/');
 
-        if ((normalizedPath.StartsWith(ContainerWorkDir + "/", StringComparison.Ordinal) || normalizedPath.Equals(ContainerWorkDir, StringComparison.Ordinal))
-            && !normalizedPath.StartsWith(workingDirNormalizedUnix, osComparison)
-            && !normalizedPath.Equals(resolvedWorkingDirUnix, osComparison))
+        if (IsContainerSpacePath(normalizedPath, mount))
         {
             // Already a container-space path (/workspace/...). Collapse '.'/'..' and enforce containment so a
-            // crafted "/workspace/../etc/passwd" cannot escape the bind mount; anything out-of-tree maps to
-            // the in-workspace sentinel. Do NOT use Path.GetFullPath here — it would re-anchor this Linux
-            // container path against the host OS root.
+            // crafted "/workspace/../etc/passwd" cannot escape the bind mount. Do NOT use Path.GetFullPath here;
+            // it would re-anchor this Linux container path against the host OS root.
             return CollapseContainerPath(normalizedPath);
         }
 
         var isRelative = !Path.IsPathRooted(path);
-        var fullPath = GetCanonicalPath(isRelative ? Path.Combine(resolvedWorkingDir, path) : path);
-        var insideWorkingDir = fullPath.StartsWith(workingDirNormalized, osComparison) || fullPath.Equals(resolvedWorkingDir, osComparison);
+        var fullPath = GetCanonicalPath(isRelative ? Path.Combine(workingDirCanonical, path) : path);
+        var insideMount = fullPath.StartsWith(rootNormalized, osComparison) || fullPath.Equals(rootCanonical, osComparison);
 
-        // The container starts in the mounted working directory, so a relative path inside it names the same file
-        // there, and the tool's messages name it as the caller passed it. A path through a symbolic link keeps its
-        // resolved form below, since the target of an absolute link does not exist inside the container.
-        if (isRelative && insideWorkingDir
-            && fullPath.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(resolvedWorkingDir, normalizedPath))), osComparison))
+        // The container starts in the working directory, so a relative path that stays in the mounted folder names the
+        // same file there, and the tool's messages name it as the caller passed it. A path through a symbolic link
+        // keeps its resolved form below, since the target of an absolute link does not exist inside the container.
+        if (isRelative && insideMount
+            && fullPath.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(workingDirCanonical, normalizedPath))), osComparison))
         {
             return normalizedPath;
         }
 
-        if (fullPath.StartsWith(workingDirNormalized, osComparison))
+        if (fullPath.StartsWith(rootNormalized, osComparison))
         {
-            var relativePath = fullPath[workingDirNormalized.Length..].Replace('\\', '/');
+            var relativePath = fullPath[rootNormalized.Length..].Replace('\\', '/');
             return $"{ContainerWorkDir}/{relativePath}";
         }
-        if (fullPath.Equals(resolvedWorkingDir, osComparison))
+        if (fullPath.Equals(rootCanonical, osComparison))
         {
             return ContainerWorkDir;
         }
@@ -1404,7 +1833,7 @@ internal static class DockerCommandBuilder
         {
             return path.Replace('\\', '/');
         }
-        return $"{ContainerWorkDir}/invalid_escaped_path";
+        return null;
     }
 
     private static List<string> TokenizeExtraFlags(string input)
@@ -1495,7 +1924,22 @@ internal static class DockerCommandBuilder
             .Replace("\a", "/a", StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Maps the paths in <paramref name="script"/> with the working directory as the mounted folder, and throws
+    /// <see cref="DockerExecutionException"/> for a path outside it.
+    /// </summary>
     internal static string MapCommandScriptPaths(string script, string workingDirFull, string workingDirCanonical)
+    {
+        var mount = new ContainerMount(workingDirFull, workingDirCanonical, workingDirFull, workingDirCanonical, ContainerWorkDir);
+        return MapCommandScriptPaths(script, mount, outside => throw OutsideMountError([outside], mount));
+    }
+
+    /// <summary>
+    /// Maps the paths in <paramref name="script"/> for <paramref name="mount"/>. A script wrapped in quotes as a whole
+    /// is unwrapped first, unless <paramref name="stripOuterQuotes"/> is false: a list of quoted paths, such as
+    /// <c>"a.v" "b.v"</c>, starts and ends with a quote without being wrapped.
+    /// </summary>
+    internal static string MapCommandScriptPaths(string script, ContainerMount mount, Func<string, string> onOutside, bool stripOuterQuotes = true)
     {
         if (string.IsNullOrWhiteSpace(script)) return script;
 
@@ -1503,7 +1947,7 @@ internal static class DockerCommandBuilder
         var leadingQuotes = new List<char>();
         var trailingQuotes = new List<char>();
 
-        while (trimmedScript.Length >= 2)
+        while (stripOuterQuotes && trimmedScript.Length >= 2)
         {
             if (trimmedScript.StartsWith('"') && trimmedScript.EndsWith('"'))
             {
@@ -1556,7 +2000,7 @@ internal static class DockerCommandBuilder
                 if (idx > start)
                 {
                     var part = span[start..idx].ToString();
-                    sb.Append(MapSingleScriptSegment(part, workingDirFull, workingDirCanonical));
+                    sb.Append(MapSingleScriptSegment(part, mount, onOutside));
                 }
                 sb.Append(c);
                 start = idx + 1;
@@ -1565,7 +2009,7 @@ internal static class DockerCommandBuilder
         if (span.Length > start)
         {
             var part = span[start..].ToString();
-            sb.Append(MapSingleScriptSegment(part, workingDirFull, workingDirCanonical));
+            sb.Append(MapSingleScriptSegment(part, mount, onOutside));
         }
 
         var result = sb.ToString();
@@ -1586,14 +2030,14 @@ internal static class DockerCommandBuilder
         return result;
     }
 
-    private static string MapSingleScriptSegment(string segment, string workingDirFull, string workingDirCanonical)
+    private static string MapSingleScriptSegment(string segment, ContainerMount mount, Func<string, string> onOutside)
     {
         if (string.IsNullOrWhiteSpace(segment)) return segment;
 
         var trimmed = segment.Trim('"', '\'', ';', ',');
         if (ShouldMapArgument(trimmed))
         {
-            var mapped = MapPathToContainer(trimmed, workingDirFull, workingDirCanonical);
+            var mapped = MapPathToContainer(trimmed, mount, onOutside);
             var idx = segment.IndexOf(trimmed, StringComparison.Ordinal);
             if (idx >= 0)
             {

@@ -18,35 +18,7 @@ internal static class BindValidator
     {
         if (binds == null) return;
 
-        string[] blockedPaths;
-        if (OperatingSystem.IsWindows())
-        {
-            blockedPaths = new[]
-            {
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows)),
-                @"C:\Windows",
-                @"\\.\pipe"
-            };
-        }
-        else
-        {
-            blockedPaths = new[]
-            {
-                "/etc",
-                "/run",
-                "/var/run",
-                "/var/run/docker.sock",
-                "/var/run/containerd",
-                "/proc",
-                "/sys",
-                "/dev",
-                "/boot",
-                "/bin",
-                "/sbin",
-                "/usr/bin",
-                "/usr/sbin"
-            };
-        }
+        var blockedPaths = BlockedHostPaths();
 
         // Enforce both the raw and the canonical form of each blocked path. If canonicalization of a
         // hardcoded blocked path fails, the raw form is still compared, so the gate cannot be weakened
@@ -134,6 +106,42 @@ internal static class BindValidator
                     }
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// The host folders no bind may name or lie below. A project root that contains one of them is refused as
+    /// a mount as well (see <see cref="DockerCommandBuilder.ResolveMount"/>).
+    /// </summary>
+    internal static string[] BlockedHostPaths()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return new[]
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows)),
+                @"C:\Windows",
+                @"\\.\pipe"
+            };
+        }
+        else
+        {
+            return new[]
+            {
+                "/etc",
+                "/run",
+                "/var/run",
+                "/var/run/docker.sock",
+                "/var/run/containerd",
+                "/proc",
+                "/sys",
+                "/dev",
+                "/boot",
+                "/bin",
+                "/sbin",
+                "/usr/bin",
+                "/usr/sbin"
+            };
         }
     }
 

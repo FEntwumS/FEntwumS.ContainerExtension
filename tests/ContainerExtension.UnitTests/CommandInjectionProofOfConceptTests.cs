@@ -130,7 +130,20 @@ public sealed class CommandInjectionProofOfConceptTests
             var sentinel = "pwned_" + Guid.NewGuid().ToString("N");
             var payload = payloadTemplate.Replace("SENTINEL", sentinel, StringComparison.Ordinal);
 
-            var cmd = EmitArgv("true", payload, workingDir);
+            IReadOnlyList<string> cmd;
+            try
+            {
+                cmd = EmitArgv("true", payload, workingDir);
+            }
+            catch (DockerExecutionException e) when (OperatingSystem.IsWindows() && Path.IsPathRooted(payload))
+            {
+                // On Windows a payload with a leading backslash is rooted, a path from the root of the current drive
+                // outside the mounted folder, so building the run fails. A refused run emits no command at all, so
+                // nothing reaches a process and nothing can be injected.
+                Assert.Contains("path(s) that the container cannot reach, because they lie outside", e.Message, StringComparison.Ordinal);
+                Assert.Contains($"'{payload}'", e.Message, StringComparison.Ordinal);
+                return;
+            }
 
             // The malicious token must occupy exactly one argv slot beyond the executable: argv[0]="true"
             // plus a single argument. If it were split, the model would have shell semantics.
