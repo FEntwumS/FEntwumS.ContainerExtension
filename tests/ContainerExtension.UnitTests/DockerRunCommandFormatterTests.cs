@@ -92,6 +92,34 @@ public sealed class DockerRunCommandFormatterTests
     }
 
     [Fact]
+    public void Generate_ForARootfulRuntime_RunsAsTheHostIds()
+    {
+        var runCommand = DockerRunCommandFormatter.Generate(new MockSettingsService(), "docker", "myimage", CommandShell.Posix);
+
+        Assert.Contains(" --user $(id -u):$(id -g)", runCommand, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Generate_ForARootlessRuntime_RunsAsRootLikeARun()
+    {
+        var runCommand = DockerRunCommandFormatter.Generate(
+            new MockSettingsService(), "docker", "myimage", CommandShell.Posix, isRootless: true);
+
+        Assert.Contains(" --user 0:0", runCommand, StringComparison.Ordinal);
+        Assert.DoesNotContain("$(id -u)", runCommand, StringComparison.Ordinal);
+        Assert.Contains(" --cap-drop ALL", runCommand, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Generate_ForPowerShell_OnARootlessRuntime_SetsNoUser()
+    {
+        var runCommand = DockerRunCommandFormatter.Generate(
+            new MockSettingsService(), "docker", "myimage", CommandShell.PowerShell, isRootless: true);
+
+        Assert.DoesNotContain("--user", runCommand, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Reconstruct_MasksEnvValuesByDefault()
     {
         var p = new CreateContainerParameters

@@ -62,7 +62,7 @@ flowchart TD
     A[OneWare runs an FPGA tool] -->|dispatches to the selected<br/>IToolExecutionStrategy| B[DockerExecutionStrategy]
     B --> C{Container engine<br/>reachable?}
     C -->|yes| D[Resolve image<br/>env var → per-call → per-tool →<br/>plugin → default → built-in fallback]
-    D --> E[Map project into /workspace<br/>host UID/GID via --user,<br/>not on Windows or rootless<br/>cap-drop ALL · no-new-privileges<br/>PID cap]
+    D --> E[Map project into /workspace<br/>host UID/GID via --user,<br/>root on a rootless runtime,<br/>image user on Windows<br/>cap-drop ALL, no-new-privileges<br/>PID cap]
     E --> F[Run the tool<br/>in the container<br/>tini as PID 1]
     C -->|no, native fallback enabled| G[Run the tool<br/>from the host PATH]
     C -->|no, fallback disabled| H[Fail: daemon<br/>unreachable]
@@ -73,9 +73,11 @@ flowchart TD
 
 - **Containerized (opt-in per tool):** each tool's *Execution Strategy* setting defaults to native; selecting
   the Docker strategy routes that tool through a container, which pulls and runs the toolchain image, pinning
-  the container process to the host UID/GID via `--user` so output files are not root-owned. On rootless
-  runtimes and on Windows hosts `--user` is left out and the image's default user applies, `oneware` in the
-  toolchain image. `tini` runs as PID 1 to reap children and forward signals.
+  the container process to the host UID/GID via `--user` so output files are not root-owned. On a rootless
+  runtime the container runs as root (`--user 0:0`), which the runtime's user namespace maps to the host
+  user who started it, so output files belong to that user. On Windows hosts `--user` is left out and the
+  image's default user applies, `oneware` in the toolchain image. `tini` runs as PID 1 to reap children and
+  forward signals.
 - **Native fallback:** if the daemon is unreachable and `Allow Native Fallback` is enabled, the tool is
   located on the host `PATH` and run natively so work is not blocked.
 - **Telemetry:** execution records are written as JSON Lines with a configurable level (`Off`,
@@ -83,8 +85,10 @@ flowchart TD
 
 ## Security
 
-- Containers run as the host UID/GID via `--user`, except on rootless runtimes and Windows hosts, where
-  the image's default user applies (`oneware` in the toolchain image); `tini` as PID 1. Every container
+- Containers run as the host UID/GID via `--user`. On a rootless runtime they run as root (`--user 0:0`),
+  which the runtime's user namespace maps to the host user who started it, so output files belong to that
+  user; this root holds no capabilities. On Windows hosts the image's default user applies (`oneware` in
+  the toolchain image). `tini` runs as PID 1. Every container
   drops all capabilities (`--cap-drop=ALL`), forbids privilege escalation
   (`--security-opt no-new-privileges`), and caps the task count as a fork-bomb backstop.
 - A run inside a project mounts the project folder, the folder that holds the `.fpgaproj` file,

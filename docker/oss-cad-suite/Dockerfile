@@ -47,7 +47,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # runtime, not build-time scaffolding: the Verilator flow emits C++ from the HDL and compiles it into a
 # simulation executable inside the container, so it cannot be dropped without losing Verilator support.
 # The in-container-compiler escape exposure is mitigated by the non-privileged, cap-dropped,
-# no-new-privileges, non-root, read-only-tooling execution posture. python3 backs SymbiYosys and flow
+# no-new-privileges, read-only-tooling execution posture, as a non-root user or, on a rootless
+# runtime, as root of an unprivileged user namespace. python3 backs SymbiYosys and flow
 # scripts. The base image is digest-pinned (above); the apt index it points at still serves rolling
 # security updates, so a from-source rebuild is not bit-identical — reproducibility is anchored on the
 # built image's recorded digest (the evaluation captures it per run), not on a Dockerfile rebuild.

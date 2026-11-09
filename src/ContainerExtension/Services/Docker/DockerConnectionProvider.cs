@@ -40,6 +40,16 @@ public sealed class DockerConnectionProvider : IDisposable
         }
     }
 
+    /// <summary>
+    /// Whether <paramref name="info"/> describes a rootless runtime, which advertises "name=rootless" in the
+    /// SecurityOptions of /info. Without system info (none read yet, or a runtime whose /info could not be
+    /// read) the answer is false, so the rootful uid:gid path applies: correct for Docker, OrbStack and
+    /// rootful Podman.
+    /// </summary>
+    internal static bool IsRootless(SystemInfoResponse? info)
+        => info?.SecurityOptions?.Any(
+            o => o != null && o.Contains("name=rootless", StringComparison.OrdinalIgnoreCase)) ?? false;
+
     public DockerConnectionProvider(DockerClient client)
     {
         ArgumentNullException.ThrowIfNull(client);

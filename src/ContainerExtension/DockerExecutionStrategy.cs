@@ -339,8 +339,12 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         }
     }
 
+    // The template uses the system info a connection check last cached, as a run does. Before any has been
+    // read the runtime counts as rootful, so the template keeps the host uid:gid.
     public string GenerateDockerRunCommand()
-        => Services.Docker.DockerRunCommandFormatter.Generate(_settingsService, GetRuntimePath(), GetDefaultImage());
+        => Services.Docker.DockerRunCommandFormatter.Generate(
+            _settingsService, GetRuntimePath(), GetDefaultImage(),
+            isRootless: Services.Docker.DockerConnectionProvider.IsRootless(_connectionProvider?.CachedSystemInfo));
 
     // The exact docker run command from the most recent execution this session, with REAL env values and
     // paths (unmasked). Kept in memory only — never logged or persisted — so the dashboard can copy a
@@ -1035,11 +1039,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     {
         var sysInfo = ConnectionProvider.CachedSystemInfo;
         double? remoteCpuCores = sysInfo?.NCPU;
-        // Rootless runtimes advertise "name=rootless" in /info SecurityOptions. When system info is
-        // unavailable (e.g. a runtime whose /info could not be read), default to false so the standard
-        // uid:gid path is used — correct for Docker, OrbStack, and rootful Podman.
-        var isRootless = sysInfo?.SecurityOptions?.Any(
-            o => o != null && o.Contains("name=rootless", StringComparison.OrdinalIgnoreCase)) ?? false;
+        var isRootless = Services.Docker.DockerConnectionProvider.IsRootless(sysInfo);
         return Services.Docker.DockerCommandBuilder.BuildContainerParameters(
           image,
           command,

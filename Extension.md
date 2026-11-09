@@ -5,9 +5,11 @@ or requiring a host toolchain install.
 
 ## Capabilities
 
-- **Non-root execution:** pins the container process to the host UID/GID via `--user`, so container output
-  is not root-owned; on rootless runtimes and on Windows hosts, where `--user` is omitted, the image's
-  `oneware` user applies.
+- **Unprivileged execution:** on a rootful runtime the container process runs as the host user's UID/GID
+  via `--user`, so container output is not root-owned. On a rootless runtime it runs as root inside the
+  user namespace (`--user 0:0`), which the runtime maps to the unprivileged host user who started it, so
+  the output belongs to that user. All capabilities are dropped either way. On Windows hosts, where
+  `--user` is omitted, the image's `oneware` user applies.
   `tini` runs as PID 1 to reap children and forward signals.
 - **Hybrid execution:** runs GHDL, Yosys, nextpnr, gmpack, Icarus, Verilator, and SymbiYosys in a
   container, with path and script mapping; with Allow Native Fallback turned on, runs the host's own tool
