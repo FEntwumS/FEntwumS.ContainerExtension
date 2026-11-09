@@ -147,9 +147,9 @@ flowchart TD
   first folder: it reaches the tool unchanged, apart from every `\` becoming `/`, while that path
   stays inside the mounted folder, and fails the run when it leaves it. A `..` right after the
   option letters therefore only leaves the folder they form, such as `-o..`, so the check climbs up
-  to two levels fewer than the tool does,
-  and where that path leads through a symbolic link, the argument comes back as the container path it
-  resolves to, without its option letters. A path given as a separate argument, such as
+  to two levels fewer than the tool does. Where the path of such an argument leads through a
+  symbolic link, the argument comes back as the container path it resolves to, without its option
+  letters. A path given as a separate argument, such as
   `-o build/out.json`, or after `=` is checked as the tool reads it when it counts as a path. A value
   that holds `://`, such as a URL, is not checked, also after `--workdir=` or attached to an option,
   unless it is rooted or starts with `~/` or `~\` and stands on its own, after `=` or attached to
