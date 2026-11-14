@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
       - name: Restore
@@ -34,7 +34,6 @@ jobs:
 
   build-test:
     name: Build & Test (${{ matrix.os }})
-    needs: format
     strategy:
       fail-fast: false
       matrix:
@@ -46,7 +45,7 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
       - name: Cache NuGet packages
@@ -70,7 +69,6 @@ jobs:
 
   codeql:
     name: CodeQL
-    needs: format
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -82,11 +80,11 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           languages: csharp
       - name: Build for analysis
@@ -94,7 +92,7 @@ jobs:
         env:
           GITHUB_ACTIONS: true
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         # SARIF upload requires code scanning to be enabled for the repository;
         # tolerate a rejected upload so a fork without it still gets an
         # informational scan rather than a failing workflow.
