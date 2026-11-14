@@ -4,6 +4,24 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-11-14
+
+Builds the extension with the .NET SDK 10.0.404 of the security release .NET 10.0.15, builds the toolchain image from OSS CAD Suite 2026-11-14 and on the current digest of its Ubuntu 26.04 base image, updates the build-time analyzers, the test packages and the GitHub Actions of CI and the publish workflow, and lets the build and CodeQL jobs of CI start without waiting for the format job. How the extension runs a tool does not change. OneWare Studio 1.0.45 or later is still required.
+
+### Changed
+
+- The extension is built with the .NET SDK 10.0.404 instead of 10.0.301, the SDK of .NET 10.0.15, a security release of 2026-11-10; `global.json` still disables roll-forward, so a locked restore cannot drift. The SDK brings `Microsoft.NET.ILLink.Tasks` in at 10.0.15 instead of 10.0.9, and the lock file of the extension follows it.
+- The toolchain image is built from the OSS CAD Suite release 2026-11-14 instead of 2026-11-08, the release that Build Local Image offers as `Pinned 2026-11-14 (recommended)`; the tarball is checked against the SHA-256 that GitHub reports for that release asset. The `oss-cad-suite-build` submodule does not move, since the upstream tags of both releases name the same commit.
+- The toolchain image is built on the current digest of its Ubuntu base image, which Dependabot moved twice since 1.2.2; each digest is a rebuild of Ubuntu 26.04, so the Ubuntu release of the image does not change.
+- The build-time analyzers are updated: Meziantou.Analyzer from 3.0.303 to 3.0.339, Microsoft.CodeAnalysis.NetAnalyzers from 10.0.402 to 11.0.100, the analyzers released with .NET 11, and SonarAnalyzer.CSharp from 10.35 to 10.36. None of them ships with the extension, and the build still has no warnings.
+- The test packages are updated: xunit.v3 from 4.0.2 to 4.0.3 and Microsoft.NET.Test.Sdk from 18.11.0 to 18.12.0.
+- The GitHub Action `actions/setup-dotnet` is updated from v6.0.0 to v6.1.0 in CI and in the publish workflow, and `github/codeql-action` from v4.39.1 to v4.39.3.
+- The build and test jobs and the CodeQL job of CI start together with the format job instead of after it; the format job still has to pass. Before, every run waited for the format check before it built anything.
+
+### Documentation
+
+- The README states in a sentence of its own that an argument whose path leads through a symbolic link comes back as the container path it resolves to; before, that case ran on from the sentence about how many levels the check climbs.
+
 ## [1.2.2] - 2026-11-09
 
 Mounts the project, the folder with its `.fpgaproj` file, read-only at `/workspace` and starts a tool in its working directory there, which alone stays writable for a tool that may write, fails a run on a path outside the project instead of passing on a placeholder, keeps the top-level `.git` of that writable folder read-only, checks the size of a tool's arguments and environment in bytes instead of a fixed 2048 characters, runs the container as root of its user namespace when a Linux or macOS host uses a rootless runtime, so a tool that may write can write to its working directory, and builds the toolchain image from OSS CAD Suite 2026-11-08. Its manifest now lists the versions oldest first, so that OneWare Studio installs the newest release it supports when no version is named. OneWare Studio 1.0.45 or later is still required.
