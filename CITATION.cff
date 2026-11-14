@@ -11,8 +11,8 @@ authors:
     given-names: Mert
     email: info@mtorun0x7cd.com
     affiliation: Technische Hochschule Köln
-date-released: "2026-11-09"
-version: "1.2.2"
+date-released: "2026-11-14"
+version: "1.2.3"
 license: MIT
 repository-code: "https://github.com/FEntwumS/FEntwumS.ContainerExtension"
 keywords:
