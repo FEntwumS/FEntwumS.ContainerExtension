@@ -13,13 +13,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # OSS CAD Suite is released daily upstream. This pin moves to the newest release with every release
 # of the extension.
-ARG RELEASE_TAG=2026-11-08
-ARG RELEASE_DATE=20261108
+ARG RELEASE_TAG=2026-11-14
+ARG RELEASE_DATE=20261114
 ARG ARCH=linux-x64
 # SHA-256 of the release asset for the pinned tag/date/arch, as GitHub reports it in the asset's
 # digest (GET /repos/YosysHQ/oss-cad-suite-build/releases/tags/<tag>). The build fails closed on a
 # mismatch.
-ARG OSS_CAD_SUITE_SHA256=12f6c70d5536c9250f59a46e8b76148976ca86db77e16a9f43b67bcaf35628d4
+ARG OSS_CAD_SUITE_SHA256=25d1960bc0f002c43b3579423c4e622bcffed49b7bb8b1f02df6426b1bdd2f26
 
 # Download and verify integrity before extraction
 RUN wget --progress=dot:giga --retry-connrefused --read-timeout=60 --timeout=30 -O /tmp/oss-cad-suite.tgz \
