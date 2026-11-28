@@ -34,9 +34,10 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     [GeneratedRegex(@"(?<=://)[^/\s@]+:[^/\s@]+(?=@)", RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
     private static partial Regex UriCredentialsRegex();
 
-    private static readonly SearchValues<char> DisallowedPathChars = SearchValues.Create(";&|<>*?[]{}()$\\'\"#~`!\t\n\r");
+    // Characters a shell would read in a runtime path left unquoted. The backslash and the parentheses of a
+    // Windows path, such as C:\Program Files (x86)\..., are allowed, since every command quotes the path.
+    private static readonly SearchValues<char> DisallowedPathChars = SearchValues.Create(";&|<>*?[]{}$'\"#~`!\t\n\r");
 
-    private string? _cachedRuntimePath;
     private Uri? _daemonUri;
 
     private readonly ReaderWriterLockSlim _strategyLock = new();
@@ -228,41 +229,21 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         conn.Client?.Dispose();
     }
 
+    // Read at every call, as every other setting is, so a changed Container Runtime Path applies to the next
+    // terminal command and the next copied command without a restart. The path is returned as configured:
+    // each command that uses it quotes it for its shell (DockerRunCommandFormatter).
     public string GetRuntimePath()
     {
-        _strategyLock.EnterReadLock();
-        try
+        var p = _settingsService.SafeGetSetting(ContainerExtensionModule.DockerRuntimePathSetting, "");
+        if (string.IsNullOrWhiteSpace(p))
         {
-            if (_cachedRuntimePath != null) return _cachedRuntimePath;
+            return "docker";
         }
-        finally
+        if (p.StartsWith('-') || p.AsSpan().ContainsAny(DisallowedPathChars))
         {
-            _strategyLock.ExitReadLock();
+            throw new DockerExecutionException("Disallowed characters or format detected in container runtime path.");
         }
-
-        _strategyLock.EnterWriteLock();
-        try
-        {
-            if (_cachedRuntimePath != null) return _cachedRuntimePath;
-            var p = _settingsService.SafeGetSetting(ContainerExtensionModule.DockerRuntimePathSetting, "");
-            if (string.IsNullOrWhiteSpace(p))
-            {
-                _cachedRuntimePath = "docker";
-            }
-            else if (p.StartsWith('-') || p.AsSpan().ContainsAny(DisallowedPathChars))
-            {
-                throw new DockerExecutionException("Disallowed characters or format detected in container runtime path.");
-            }
-            else
-            {
-                _cachedRuntimePath = p.AsSpan().Contains(' ') && !p.StartsWith('"') ? $"\"{p}\"" : p;
-            }
-            return _cachedRuntimePath;
-        }
-        finally
-        {
-            _strategyLock.ExitWriteLock();
-        }
+        return p;
     }
 
     public Dictionary<string, string> GetActiveSettingsSummary()

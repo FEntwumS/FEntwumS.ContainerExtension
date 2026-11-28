@@ -1,7 +1,7 @@
 # OSS CAD Suite Build
 
 # Stage 1
-FROM ubuntu@sha256:065aa8626841f16057b78b027b464cd59c4fac36c204c72dcbf48d66f5fa8a96 AS downloader
+FROM ubuntu@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db AS downloader
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -13,13 +13,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # OSS CAD Suite is released daily upstream. This pin moves to the newest release with every release
 # of the extension.
-ARG RELEASE_TAG=2026-11-14
-ARG RELEASE_DATE=20261114
+ARG RELEASE_TAG=2026-11-28
+ARG RELEASE_DATE=20261128
 ARG ARCH=linux-x64
 # SHA-256 of the release asset for the pinned tag/date/arch, as GitHub reports it in the asset's
 # digest (GET /repos/YosysHQ/oss-cad-suite-build/releases/tags/<tag>). The build fails closed on a
 # mismatch.
-ARG OSS_CAD_SUITE_SHA256=25d1960bc0f002c43b3579423c4e622bcffed49b7bb8b1f02df6426b1bdd2f26
+ARG OSS_CAD_SUITE_SHA256=4a5f4cab760e39f74fb8b50e4e31abca8db6072db6b34fcd45e164f9ecf2795e
 
 # Download and verify integrity before extraction
 RUN wget --progress=dot:giga --retry-connrefused --read-timeout=60 --timeout=30 -O /tmp/oss-cad-suite.tgz \
@@ -31,7 +31,7 @@ RUN wget --progress=dot:giga --retry-connrefused --read-timeout=60 --timeout=30 
     && rm -rf /opt/oss-cad-suite/lib/python3*/test
 
 # Stage 2
-FROM ubuntu@sha256:065aa8626841f16057b78b027b464cd59c4fac36c204c72dcbf48d66f5fa8a96
+FROM ubuntu@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db
 
 LABEL org.opencontainers.image.authors="YosysHQ, Mert Torun"
 LABEL org.opencontainers.image.title="OSS CAD Suite"

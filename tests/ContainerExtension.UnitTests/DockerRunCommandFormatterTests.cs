@@ -307,6 +307,89 @@ public sealed class DockerRunCommandFormatterTests
         Assert.Equal(words, echoed);
     }
 
+    [Fact]
+    public void RuntimeCommand_ForPowerShell_CallsAQuotedRuntimePathWithTheCallOperator()
+    {
+        var command = DockerRunCommandFormatter.RuntimeCommand(
+            @"C:\Program Files\Docker\Docker\resources\bin\docker.exe", CommandShell.PowerShell, "pull", "hdlc/ghdl:yosys");
+
+        Assert.Equal(@"& 'C:\Program Files\Docker\Docker\resources\bin\docker.exe' pull hdlc/ghdl:yosys", command);
+    }
+
+    [Fact]
+    public void RuntimeCommand_ForAPlainRuntime_KeepsTheCommandAsItWas()
+    {
+        Assert.Equal("docker info", DockerRunCommandFormatter.RuntimeCommand("docker", CommandShell.Posix, "info"));
+        Assert.Equal("docker info", DockerRunCommandFormatter.RuntimeCommand("docker", CommandShell.PowerShell, "info"));
+    }
+
+    // The words of a Build Local Image command, with a runtime and a plugin folder whose paths hold a space.
+    private static readonly string[] BuildWords =
+    [
+        "build", "--platform=linux/amd64", "--build-arg", "ARCH=linux-x64", "-t", "fentwums/oss-cad-suite:latest",
+        "-f", "/Users/a b/OneWareStudio/Packages/Plugins/ContainerExtension/docker/oss-cad-suite/Dockerfile",
+        "/Users/a b/OneWareStudio/Packages/Plugins/ContainerExtension/docker/oss-cad-suite",
+    ];
+
+    [Fact]
+    public async Task RuntimeCommand_ForPosix_StartsTheRuntimeWithTheSameWords()
+    {
+        if (OperatingSystem.IsWindows() || !File.Exists("/bin/sh"))
+        {
+            Assert.Skip("/bin/sh is not on this host.");
+        }
+        var runtime = CreateEchoingRuntime(out var folder);
+        try
+        {
+            var command = DockerRunCommandFormatter.RuntimeCommand(runtime, CommandShell.Posix, BuildWords);
+
+            var echoed = await RunAsync("/bin/sh", ["-c", command]);
+
+            Assert.Equal(BuildWords, echoed);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RuntimeCommand_ForPowerShell_StartsTheRuntimeWithTheSameWords()
+    {
+        var pwsh = FindOnPath(OperatingSystem.IsWindows() ? "pwsh.exe" : "pwsh");
+        if (pwsh == null || OperatingSystem.IsWindows() || !File.Exists("/bin/sh"))
+        {
+            Assert.Skip("pwsh, or /bin/sh to run the runtime that echoes its words, is not on this host.");
+        }
+        var runtime = CreateEchoingRuntime(out var folder);
+        try
+        {
+            var command = DockerRunCommandFormatter.RuntimeCommand(runtime, CommandShell.PowerShell, BuildWords);
+
+            var echoed = await RunAsync(pwsh, ["-NoProfile", "-NonInteractive", "-Command", command]);
+
+            Assert.Equal(BuildWords, echoed);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // A stand-in for the runtime in a folder whose name holds a space; it echoes the words it is started with.
+    private static string CreateEchoingRuntime(out string folder)
+    {
+        folder = Path.Combine(Path.GetTempPath(), "runtime dir " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var runtime = Path.Combine(folder, "docker");
+        File.WriteAllText(runtime, "#!/bin/sh\n" + HexEchoScript + "\n");
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(runtime, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        return runtime;
+    }
+
     // Prints each positional argument as one line of hex, so no byte of it can be lost on the way back.
     private const string HexEchoScript = "for a in \"$@\"; do printf '%s' \"$a\" | od -An -tx1 | tr -d ' \\n'; echo; done";
 

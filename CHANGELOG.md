@@ -4,6 +4,34 @@ All notable changes to the OneWare Container Extension are documented here.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4] - 2026-11-28
+
+Quotes the Container Runtime Path for the shell of the host, so that a Windows path such as `C:\Program Files\Docker\Docker\resources\bin\docker.exe` is no longer refused and a path with a space no longer breaks the copied `docker run` command, reads that path and checks it afresh at every use, builds the toolchain image from OSS CAD Suite 2026-11-28 and on the current digest of its Ubuntu 26.04 base image, updates the build-time analyzers and the GitHub Actions of CI and the publish workflow, and completes the release flow of the contributing guide. OneWare Studio 1.0.45 or later is still required.
+
+### Changed
+
+- The toolchain image is built from the OSS CAD Suite release 2026-11-28 instead of 2026-11-14, the release that Build Local Image offers as `Pinned 2026-11-28 (recommended)`; the tarball is checked against the SHA-256 that GitHub reports for that release asset. The `oss-cad-suite-build` submodule points at the commit of that release, three commits after the one of 2026-11-14.
+- The toolchain image is built on the current digest of its Ubuntu base image; the digest is a rebuild of Ubuntu 26.04, so the Ubuntu release of the image does not change.
+- The build-time analyzers are updated: Meziantou.Analyzer from 3.0.339 to 3.0.342 and SonarAnalyzer.CSharp from 10.36 to 10.37. None of them ships with the extension, and the build still has no warnings.
+- The GitHub Action `github/codeql-action` is updated from v4.39.3 to v4.39.5 in CI, with the CodeQL bundle 2.27.6, and `anchore/sbom-action` from v0.24.3 to v0.24.4 in the publish workflow.
+- The extension is still built against OneWare.Essentials 1.0.45. Of the interfaces of OneWare Studio that the extension uses, 1.0.47 and 1.0.48 change only `ISettingsService`, which gains the member `SaveValues`; the extension calls that interface and implements none of it, and it builds without warnings against OneWare.Essentials 1.0.47.
+
+### Fixed
+
+- A Container Runtime Path with a backslash or parentheses, such as `C:\Program Files\Docker\Docker\resources\bin\docker.exe`, is accepted. Before, such a path was refused as holding disallowed characters, as the new tests show for the paths of Docker Desktop and Podman on Windows. By the code, and not tried in OneWare Studio, the refusal failed the dashboard's terminal commands and a run as well, since a run builds the command that **Copy Docker Run** copies before it creates the container. A path with any other character a shell would read, such as `;`, `$` or a quote, is still refused.
+- The dashboard's terminal commands, Build Local Image among them, quote the Container Runtime Path and every argument for the shell of the host, as **Copy Docker Run** does, and put the call operator `&` before a quoted path for PowerShell. Before, a path with a space was put in double quotes, which the copied command then quoted once more, so the command began with a word that begins and ends with a quote; by the rules of PowerShell, a quoted path at the start of a terminal command is a string, not a command. On Windows, where OneWare Studio opens Windows PowerShell 5.1 as its terminal, these commands follow from the code and were not run. The tests run the quoted form of a Build Local Image command through sh and through PowerShell 7 on macOS; the pull, image prune, run hello-world, info and system prune commands were not run.
+- A changed Container Runtime Path applies to the next terminal command and the next copied command. Before, the path read first stayed in use until OneWare Studio was restarted.
+- The check of the Container Runtime Path setting looks at the file and the `PATH` each time. Before, it kept its first verdict for every path it had checked, so a path stayed refused after the runtime was installed there, or accepted after it was removed, until OneWare Studio was restarted.
+
+### Tests
+
+- New tests take the paths of Docker Desktop and Podman on Windows and of Rancher Desktop on macOS through the setting into the copied command for a POSIX shell and for PowerShell, check that paths with characters a shell would read are still refused, start a stand-in runtime in a folder whose name holds a space through sh and through PowerShell 7 with the words of a Build Local Image command, two tests that skip themselves on Windows, and check that a changed runtime path and a runtime installed or removed after the first check are seen.
+
+### Documentation
+
+- The configuration guide says how the Container Runtime Path is quoted for the shell of the host, that this quoting is checked by tests on macOS and not by a run on Windows, which paths it takes and that a changed path applies to the next command.
+- The contributing guide adds the last step of a release, moving `dev` forward to the merge commit on `main`, and says that the release is published on that merge commit once its checks have passed; the docker README says that the Docker build workflow builds and scans the pinned tag for every push and pull request into `main` or `dev` that changes `docker/` or the workflow, and weekly.
+
 ## [1.2.3] - 2026-11-14
 
 Builds the extension with the .NET SDK 10.0.404 of the security release .NET 10.0.15, builds the toolchain image from OSS CAD Suite 2026-11-14 and on the current digest of its Ubuntu 26.04 base image, updates the build-time analyzers, the test packages and the GitHub Actions of CI and the publish workflow, and lets the build and CodeQL jobs of CI start without waiting for the format job. How the extension runs a tool does not change. OneWare Studio 1.0.45 or later is still required.

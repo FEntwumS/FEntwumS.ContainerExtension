@@ -8,7 +8,7 @@ The extension's settings are under **Binary Management > Container Engine** in O
 
 | Setting | Type | Default | Description |
 | ------- | ---- | ------- | ----------- |
-| Container Runtime Path | File Path | *(empty)* | Absolute path to the `docker` or `podman` CLI that the dashboard's terminal commands and the copied `docker run` commands use; empty means `docker` from the `PATH`. Runs do not use it: they reach the daemon through its socket or pipe |
+| Container Runtime Path | File Path | *(empty)* | Absolute path to the `docker` or `podman` CLI that the dashboard's terminal commands and the copied `docker run` commands use; empty means `docker` from the `PATH`. The commands quote a path that needs it for the shell of the host: in single quotes for the POSIX shell on Linux and macOS, and on Windows in single quotes behind the call operator `&` for PowerShell, the terminal OneWare Studio opens there. So a path with spaces, backslashes or parentheses, such as `C:\Program Files\Docker\Docker\resources\bin\docker.exe`, is accepted and handed to the shell as one quoted word. This quoting is checked by tests on macOS and follows from the code; it has not been run on Windows or in Windows PowerShell 5.1. A path that holds a character a shell would read, such as `;`, `$` or a quote, is refused. A changed path applies to the next command. Runs do not use it: they reach the daemon through its socket or pipe |
 | Custom Daemon Socket | Text (validated) | *(auto-detect)* | Override `DOCKER_HOST`. Accepts `unix://`, `tcp://`, `npipe://` |
 
 ### Image Management
