@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using ContainerExtension.Services.Docker;
 using Docker.DotNet.Models;
 using Xunit;
@@ -61,6 +62,31 @@ public sealed class RuntimePathTests
 
         Assert.StartsWith(DockerRunCommandFormatter.Quote(configured, CommandShell.Posix) + " run ", posix, StringComparison.Ordinal);
         Assert.StartsWith("& " + DockerRunCommandFormatter.Quote(configured, CommandShell.PowerShell) + " run ", powerShell, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateRuntimePath_SeesARuntimeInstalledOrRemovedAfterTheFirstCheck()
+    {
+        var validate = typeof(ContainerExtensionModule).GetMethod("ValidateRuntimePath",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(validate);
+        var folder = Path.Combine(Path.GetTempPath(), "runtime-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var runtime = Path.Combine(folder, "docker");
+        try
+        {
+            Assert.False((bool)validate.Invoke(null, [runtime])!);
+
+            File.WriteAllText(runtime, "");
+            Assert.True((bool)validate.Invoke(null, [runtime])!);
+
+            File.Delete(runtime);
+            Assert.False((bool)validate.Invoke(null, [runtime])!);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
     }
 
     [Theory]
