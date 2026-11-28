@@ -36,7 +36,6 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
 
     private static readonly SearchValues<char> DisallowedPathChars = SearchValues.Create(";&|<>*?[]{}()$\\'\"#~`!\t\n\r");
 
-    private string? _cachedRuntimePath;
     private Uri? _daemonUri;
 
     private readonly ReaderWriterLockSlim _strategyLock = new();
@@ -228,41 +227,20 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         conn.Client?.Dispose();
     }
 
+    // Read at every call, as every other setting is, so a changed Container Runtime Path applies to the next
+    // terminal command and the next copied command without a restart.
     public string GetRuntimePath()
     {
-        _strategyLock.EnterReadLock();
-        try
+        var p = _settingsService.SafeGetSetting(ContainerExtensionModule.DockerRuntimePathSetting, "");
+        if (string.IsNullOrWhiteSpace(p))
         {
-            if (_cachedRuntimePath != null) return _cachedRuntimePath;
+            return "docker";
         }
-        finally
+        if (p.StartsWith('-') || p.AsSpan().ContainsAny(DisallowedPathChars))
         {
-            _strategyLock.ExitReadLock();
+            throw new DockerExecutionException("Disallowed characters or format detected in container runtime path.");
         }
-
-        _strategyLock.EnterWriteLock();
-        try
-        {
-            if (_cachedRuntimePath != null) return _cachedRuntimePath;
-            var p = _settingsService.SafeGetSetting(ContainerExtensionModule.DockerRuntimePathSetting, "");
-            if (string.IsNullOrWhiteSpace(p))
-            {
-                _cachedRuntimePath = "docker";
-            }
-            else if (p.StartsWith('-') || p.AsSpan().ContainsAny(DisallowedPathChars))
-            {
-                throw new DockerExecutionException("Disallowed characters or format detected in container runtime path.");
-            }
-            else
-            {
-                _cachedRuntimePath = p.AsSpan().Contains(' ') && !p.StartsWith('"') ? $"\"{p}\"" : p;
-            }
-            return _cachedRuntimePath;
-        }
-        finally
-        {
-            _strategyLock.ExitWriteLock();
-        }
+        return p.AsSpan().Contains(' ') && !p.StartsWith('"') ? $"\"{p}\"" : p;
     }
 
     public Dictionary<string, string> GetActiveSettingsSummary()
