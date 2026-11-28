@@ -34,7 +34,9 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     [GeneratedRegex(@"(?<=://)[^/\s@]+:[^/\s@]+(?=@)", RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
     private static partial Regex UriCredentialsRegex();
 
-    private static readonly SearchValues<char> DisallowedPathChars = SearchValues.Create(";&|<>*?[]{}()$\\'\"#~`!\t\n\r");
+    // Characters a shell would read in a runtime path left unquoted. The backslash and the parentheses of a
+    // Windows path, such as C:\Program Files (x86)\..., are allowed, since every command quotes the path.
+    private static readonly SearchValues<char> DisallowedPathChars = SearchValues.Create(";&|<>*?[]{}$'\"#~`!\t\n\r");
 
     private Uri? _daemonUri;
 
@@ -228,7 +230,8 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
     }
 
     // Read at every call, as every other setting is, so a changed Container Runtime Path applies to the next
-    // terminal command and the next copied command without a restart.
+    // terminal command and the next copied command without a restart. The path is returned as configured:
+    // each command that uses it quotes it for its shell (DockerRunCommandFormatter).
     public string GetRuntimePath()
     {
         var p = _settingsService.SafeGetSetting(ContainerExtensionModule.DockerRuntimePathSetting, "");
@@ -240,7 +243,7 @@ public sealed partial class DockerExecutionStrategy : IToolExecutionStrategy, ID
         {
             throw new DockerExecutionException("Disallowed characters or format detected in container runtime path.");
         }
-        return p.AsSpan().Contains(' ') && !p.StartsWith('"') ? $"\"{p}\"" : p;
+        return p;
     }
 
     public Dictionary<string, string> GetActiveSettingsSummary()

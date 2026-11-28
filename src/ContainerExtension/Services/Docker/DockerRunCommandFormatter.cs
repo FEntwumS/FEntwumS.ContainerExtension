@@ -60,6 +60,23 @@ internal static class DockerRunCommandFormatter
         return shell == CommandShell.PowerShell ? QuotePowerShell(word) : QuotePosix(word);
     }
 
+    /// <summary>
+    /// Renders a command of the container runtime for <paramref name="shell"/>, as the dashboard runs it in
+    /// OneWare's terminal: the runtime path as the command word, called with the call operator on PowerShell
+    /// when it needs quoting, and every argument quoted, so the shell hands the runtime exactly these words.
+    /// </summary>
+    internal static string RuntimeCommand(string runtimePath, CommandShell shell, params string[] arguments)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        var sb = new StringBuilder();
+        AppendCommandWord(sb, runtimePath, shell);
+        foreach (var argument in arguments)
+        {
+            sb.Append(' ').Append(Quote(argument, shell));
+        }
+        return sb.ToString();
+    }
+
     private static string QuotePosix(string word)
     {
         if (word.Length > 0 && word[0] != '=' && !word.AsSpan().ContainsAnyExcept(PosixBareChars))
