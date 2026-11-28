@@ -18,9 +18,11 @@ Contributions are welcome. This document describes how to build, test, and submi
    API, and the new entry's `minStudioVersion` follows it (`1.0.45.0` today). Merge the commit into
    `dev` by pull request.
 2. Open a pull request from `dev` to `main` titled `Release x.y.z` and merge it with a merge commit.
-3. Publish a GitHub release tagged `x.y.z` on `main`. Publishing runs `.github/workflows/publish.yml`,
-   which builds the release archive and its SBOM, attests the archive's build provenance and attaches
-   the archive, `compatibility.txt` and the SBOM to the release.
+3. Publish a GitHub release tagged `x.y.z` on the merge commit on `main`, once its checks have passed.
+   Publishing runs `.github/workflows/publish.yml`, which builds the release archive and its SBOM, attests
+   the archive's build provenance and attaches the archive, `compatibility.txt` and the SBOM to the release.
+4. Move `dev` forward to the merge commit on `main`, so that both branches name the same commit and the
+   next release starts from it.
 
 ## Prerequisites
 

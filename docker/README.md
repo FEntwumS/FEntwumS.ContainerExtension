@@ -11,5 +11,6 @@ is not published to a registry.
 | `build_oss_cad_suite.sh` | Builds the image for `linux/amd64` on any host, since the upstream ARM64 release carries no GHDL, and runs a Trivy scan. `--no-cache` forces a clean rebuild. |
 | `pull_all_images.sh` | Pulls 26 images for offline use: 25 upstream `hdlc/*` toolchain images, of which the plugin names only its fallback `hdlc/ghdl:yosys`, and the digest-pinned Ubuntu base of the `Dockerfile`. |
 
-The release tag is single-sourced in the `Dockerfile` `ARG`s and `build_oss_cad_suite.sh`; the CI
-workflow (`.github/workflows/docker-build.yml`) builds and scans the same tag on a schedule.
+The release tag is single-sourced in the `Dockerfile` `ARG`s, which `build_oss_cad_suite.sh` reads; the CI
+workflow (`.github/workflows/docker-build.yml`) builds and scans the same tag for every push and pull
+request into `main` or `dev` that changes `docker/` or the workflow, and weekly on a schedule.
