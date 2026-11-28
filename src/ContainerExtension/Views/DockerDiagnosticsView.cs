@@ -55,6 +55,11 @@ public partial class DockerDiagnosticsView : UserControl
     // and would echo them literally, turning "docker ..." into "^E^Udocker ..." (command not found), so the
     // reset is suppressed on Windows.
     private static readonly string TerminalLineReset = OperatingSystem.IsWindows() ? string.Empty : "\u0005\u0015";
+
+    // A command of the container runtime for the terminal, quoted for the shell OneWare opens there.
+    private static string TerminalCommand(string runtimePath, params string[] arguments) =>
+        TerminalLineReset + Services.Docker.DockerRunCommandFormatter.RuntimeCommand(
+            runtimePath, Services.Docker.DockerRunCommandFormatter.HostShell, arguments);
     private readonly StackPanel _statusContent;
     private readonly StackPanel _configContent;
     private readonly StackPanel _containersContent;
@@ -1391,7 +1396,7 @@ public partial class DockerDiagnosticsView : UserControl
                 });
 
                 var runtimePath = _strategy.GetRuntimePath();
-                var pull = await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} pull \"{activeImg}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5), cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                var pull = await _terminalService.ExecuteInTerminalAsync(TerminalCommand(runtimePath, "pull", activeImg), ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5), cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
                 if (pull.TimedOut || pull.ExitCode != 0)
                 {
@@ -1934,7 +1939,7 @@ public partial class DockerDiagnosticsView : UserControl
                     return;
                 }
                 ShowTemporaryStatus($"Pulling default image '{img}' in terminal...");
-                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} pull \"{img}\"", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5), cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                await _terminalService.ExecuteInTerminalAsync(TerminalCommand(runtimePath, "pull", img), ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(5), cancellationToken: CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -1994,7 +1999,7 @@ public partial class DockerDiagnosticsView : UserControl
                 // Always build linux/amd64: the upstream arm64 releases omit GHDL, and the pinned
                 // checksum is for the amd64 tarball. This matches docker/build_oss_cad_suite.sh.
                 const string arch = "linux-x64";
-                var extraArgs = $"--platform=linux/amd64 --build-arg ARCH={arch} ";
+                var buildArgs = new List<string> { "build", "--platform=linux/amd64", "--build-arg", $"ARCH={arch}" };
 
                 if (selection != PinnedBuildSelection)
                 {
@@ -2010,10 +2015,10 @@ public partial class DockerDiagnosticsView : UserControl
                     }
 
                     var dateStr = releaseTag.Replace("-", "", StringComparison.Ordinal);
-                    // The digest is now charset-validated at the source (GitHubReleaseClient) and the tag is
-                    // grammar-gated; quote the values as defense in depth so no build-arg can ever break out
-                    // of its token in the terminal command.
-                    extraArgs += $"--build-arg RELEASE_TAG=\"{releaseTag}\" --build-arg RELEASE_DATE=\"{dateStr}\" --build-arg OSS_CAD_SUITE_SHA256=\"{sha256}\" ";
+                    // The digest is charset-validated at the source (GitHubReleaseClient) and the tag is
+                    // grammar-gated; the terminal command quotes every word as well, so no build-arg can
+                    // break out of its word.
+                    buildArgs.AddRange(["--build-arg", $"RELEASE_TAG={releaseTag}", "--build-arg", $"RELEASE_DATE={dateStr}", "--build-arg", $"OSS_CAD_SUITE_SHA256={sha256}"]);
                     ShowTemporaryStatus($"Building oss-cad-suite {releaseTag} (linux/amd64) in terminal...");
                 }
                 else
@@ -2021,8 +2026,8 @@ public partial class DockerDiagnosticsView : UserControl
                     ShowTemporaryStatus("Building the repository-pinned version (linux/amd64) in terminal...");
                 }
 
-                var commandLine = $"{runtimePath} build {extraArgs}-t {tag} -f \"{dockerfilePath}\" \"{buildContextDir}\"";
-                var build = await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + commandLine, ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(20), cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                buildArgs.AddRange(["-t", tag, "-f", dockerfilePath, buildContextDir]);
+                var build = await _terminalService.ExecuteInTerminalAsync(TerminalCommand(runtimePath, [.. buildArgs]), ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(20), cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
                 if (setAsDefault)
                 {
@@ -2096,7 +2101,7 @@ public partial class DockerDiagnosticsView : UserControl
                 }
                 var runtimePath = _strategy.GetRuntimePath();
                 ShowTemporaryStatus("Pruning unused images in terminal...");
-                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} image prune -a -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2), cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                await _terminalService.ExecuteInTerminalAsync(TerminalCommand(runtimePath, "image", "prune", "-a", "-f"), ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2), cancellationToken: CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -2120,7 +2125,7 @@ public partial class DockerDiagnosticsView : UserControl
             {
                 var runtimePath = _strategy.GetRuntimePath();
                 ShowTemporaryStatus("Running Hello-World test in terminal...");
-                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} run --rm hello-world", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2), cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                await _terminalService.ExecuteInTerminalAsync(TerminalCommand(runtimePath, "run", "--rm", "hello-world"), ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2), cancellationToken: CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -2135,7 +2140,7 @@ public partial class DockerDiagnosticsView : UserControl
             {
                 var runtimePath = _strategy.GetRuntimePath();
                 ShowTemporaryStatus("Querying Engine Info in terminal...");
-                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} info", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(1), cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                await _terminalService.ExecuteInTerminalAsync(TerminalCommand(runtimePath, "info"), ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(1), cancellationToken: CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -2155,7 +2160,7 @@ public partial class DockerDiagnosticsView : UserControl
                 }
                 var runtimePath = _strategy.GetRuntimePath();
                 ShowTemporaryStatus("Pruning system in terminal...");
-                await _terminalService.ExecuteInTerminalAsync(TerminalLineReset + $"{runtimePath} system prune -f", ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2), cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                await _terminalService.ExecuteInTerminalAsync(TerminalCommand(runtimePath, "system", "prune", "-f"), ContainerExtensionModule.DashboardTitle, showInUi: true, timeout: TimeSpan.FromMinutes(2), cancellationToken: CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
